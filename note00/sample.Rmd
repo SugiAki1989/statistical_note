@@ -1,0 +1,107 @@
+---
+title: "タイトル"
+subtitle: "サブタイトル"
+pagetitle: "ページタイトル"
+# date: "`r Sys.time()`"
+abstract: "このドキュメントのアブストラクトをここに入力します。"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: TRUE
+    number_sections: TRUE
+    code_folding: "show"
+    highlight: "default"
+    theme: "flatly"
+    css: ../style.css
+---
+
+
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+# Head1
+## a
+## b
+## c
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+```{r}
+library(prophet)
+library(tidyverse)
+library(knitr)
+
+base_url <- 'https://raw.githubusercontent.com/facebook/prophet/master/examples/'
+data_path <- paste0(base_url, 'example_wp_log_peyton_manning.csv')
+df <- readr::read_csv(data_path)
+
+m <- prophet(df %>% sample_n(100))
+future <- make_future_dataframe(m, periods = 365)
+forecast <- predict(m, future)
+```
+
+# head1
+## plotA
+
+```{r}
+plot(m, forecast)
+```
+
+## plotB
+
+```{r}
+# figA
+dyplot.prophet(m, forecast)
+```
+
+#### head4
+
+```{r}
+tibble(airquality)
+```
+
+
+```{r}
+knitr::kable(mtcars, 
+             digits = 4,
+             align = "llllccccrrrr",
+             caption = "An example table caption.")
+```
+##### head5
+
+これは$\alpha$です。
+
+$$
+\begin{eqnarray}
+|x|
+ =
+  \begin{cases}
+    x & ( x \geqq 0 ) \\
+    -x & ( x \lt 0 )
+  \end{cases}
+\end{eqnarray}
+$$
+
+$$
+\idotsint_D f(x_1, x_2, \ldots , x_n) dx_1 \cdots dx_n
+$$
+
+# head1
+
+| TH 左寄せ | TH 中央寄せ | TH 右寄せ |
+| :--- | :---: | ---: |
+| TD | TD | TD |
+| TD | TD | x |
+
+
+更新日：`r Sys.time()`
+
