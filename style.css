@@ -1,15 +1,31 @@
-/* Whole document: */
+/* Whole document */
 body{
-  font-size: 13pt;
+  font-size: 14pt;
   /* font-family: Helvetica; */
 }
 
+/* Container Size */
 .main-container {
   max-width: 1500px;
   margin-left: auto;
   margin-right: auto;
 }
 
+/* Box Design */
+.box{
+    padding: 0.5em 1em;
+    color: #5d627b;
+    margin: 2em 0;
+    background: white;
+    border-top: solid 5px #5d627b;
+    box-shadow: 0 3px 5px rgba(0, 0, 0, 0.22);
+}
+.box p {
+    margin: 0; 
+    padding: 0;
+}
+
+/* Two Col Design */
 .column-left{
   float: left;
   width: 49%;
@@ -19,6 +35,11 @@ body{
   float: right;
   width: 49%;
   text-align: left;
+}
+
+/* Opt */
+.update-right{
+  text-align: right;
 }
 
 

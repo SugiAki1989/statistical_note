@@ -1,0 +1,80 @@
+---
+title: "タイトル"
+pagetitle: "Rmarkdown設定テンプレート"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: "このドキュメントのアブストラクトをここに入力します。"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: TRUE
+    code_folding: "show"
+    highlight: "default"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+<div class="box">
+- comment here
+- comment here
+- comment here
+</div>
+
+```{r}
+library(prophet)
+library(tidyverse)
+library(knitr)
+```
+
+# Chapter
+comment here
+
+## Chapter2
+
+```{r}
+print("hello R")
+```
+
+## ktable
+`ktable()`はこんなかんじ。
+
+```{r}
+knitr::kable(mtcars[1:1,], 
+             digits = 4,
+             align = "llllccccrrrr",
+             caption = "An example table caption.")
+```
+
+これは$\alpha$です。
+
+$$
+\begin{eqnarray}
+|x|
+ =
+  \begin{cases}
+    x & ( x \geqq 0 ) \\
+    -x & ( x \lt 0 )
+  \end{cases}
+\end{eqnarray}
+$$
+
+![Sunset Image](/Users/aki/Documents/statistical_note/note00/sunset.jpg "Sunset Image")
+<img src="/Users/aki/Documents/statistical_note/note00/sunset.jpg" width="400">
+

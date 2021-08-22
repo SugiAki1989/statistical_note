@@ -1,21 +1,21 @@
 ---
 title: "タイトル"
-subtitle: "サブタイトル"
 pagetitle: "Rmarkdown設定テンプレート"
+# subtitle: "サブタイトル"
 # date: "`r Sys.time()`"
-abstract: "このドキュメントのアブストラクトをここに入力します。"
+# abstract: "このドキュメントのアブストラクトをここに入力します。"
 output:
   html_document:
     toc: TRUE
     toc_depth: 5
-    toc_float: TRUE
+    toc_float: FALSE
     number_sections: TRUE
     code_folding: "show"
     highlight: "default"
     theme: "flatly"
     css: ../style.css
+    md_extensions: -ascii_identifiers
 ---
-
 
 ```{r SETUP, include = FALSE}
 knitr::opts_chunk$set(echo       = TRUE,
@@ -27,10 +27,25 @@ knitr::opts_chunk$set(echo       = TRUE,
                       dev        = "ragg_png")
 ```
 
-# Head1
-## a
-## b
-## c
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+<div class="box">
+- このドキュメントのアブストラクトをここに入力します。
+- このドキュメントのアブストラクトをここに入力します。
+- このドキュメントのアブストラクトをここに入力します。
+</div>
+
+
+# Chapter
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+## Chapter2
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+## Chapter2
 
 This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
 
@@ -48,36 +63,41 @@ future <- make_future_dataframe(m, periods = 365)
 forecast <- predict(m, future)
 ```
 
-# head1
-## plotA
+# Chapter
+## Chapter -plot A-
 
 ```{r}
 plot(m, forecast)
 ```
 
-## plotB
+## Chapter -plot B-
 
 ```{r}
 # figA
 dyplot.prophet(m, forecast)
 ```
 
-#### head4
-
+# Chapter
+## データフレーム
 ```{r}
-tibble(airquality)
+tibble(airquality[1:10,])
 ```
 
+## ktable
+`ktable()`はこんなかんじ。
 
 ```{r}
-knitr::kable(mtcars, 
+knitr::kable(mtcars[1:10,], 
              digits = 4,
              align = "llllccccrrrr",
              caption = "An example table caption.")
 ```
-##### head5
 
+# 数式
+## インライン
 これは$\alpha$です。
+
+## ブロック
 
 $$
 \begin{eqnarray}
@@ -94,29 +114,52 @@ $$
 \idotsint_D f(x_1, x_2, \ldots , x_n) dx_1 \cdots dx_n
 $$
 
-# 2カラムデザイン
+# Two colmun design
 
 <div class="column-left">
 ## Left hand side
 ```{r}
 sample(iris$Sepal.Length, 10)
 ```
-```{r out.width = 400, out.height = 200}
+```{r out.width = 400, out.height = 300}
 hist(iris$Sepal.Length, main = "Left side")
 ```
 </div>
 
 <div class="column-right">
 ## Right hand side
-```{r }
+```{r}
+sample(iris$Sepal.Length, 10)
+```
+
+```{r out.width = 400, out.height = 300}
 hist(iris$Sepal.Length, main = "Right side")
 ```
 </div>
 
-## イメージ
+# Image Up
 
 ![Sunset Image](/Users/aki/Documents/statistical_note/note00/sunset.jpg "Sunset Image")
 
+画像を小さくしたい場合。
 
-更新日：`r Sys.time()`
+<img src="/Users/aki/Documents/statistical_note/note00/sunset.jpg" width="400">
+
+# Tab Settings {.tabset .tabset-fade}
+## Tab 1
+Histogram.
+```{r}
+ggplot(data=iris) +
+    geom_histogram(aes(x=Petal.Width)) +
+    facet_grid(Species~.)
+```
+
+## Tab 2
+Scatterplot2
+
+```{r}
+ggplot(data=iris) + geom_point(aes(x=Petal.Width, y=Petal.Length, color=Species))
+```
+
+
 
