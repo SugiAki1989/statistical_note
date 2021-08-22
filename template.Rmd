@@ -11,7 +11,7 @@ output:
     toc_float: FALSE
     number_sections: TRUE
     code_folding: "show"
-    highlight: "default"
+    highlight: "zenburn"
     theme: "flatly"
     css: ../style.css
     md_extensions: -ascii_identifiers
