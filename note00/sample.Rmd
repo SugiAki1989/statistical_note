@@ -102,6 +102,10 @@ $$
 | TD | TD | TD |
 | TD | TD | x |
 
+## イメージ
+
+![Sunset Image](/Users/aki/Documents/statistical_note/note00/sunset.jpg "Sunset Image")
+
 
 更新日：`r Sys.time()`
 
