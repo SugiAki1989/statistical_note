@@ -1,7 +1,7 @@
 ---
 title: "タイトル"
 subtitle: "サブタイトル"
-pagetitle: "ページタイトル"
+pagetitle: "Rmarkdown設定テンプレート"
 # date: "`r Sys.time()`"
 abstract: "このドキュメントのアブストラクトをここに入力します。"
 output:
@@ -15,7 +15,6 @@ output:
     theme: "flatly"
     css: ../style.css
 ---
-
 
 
 ```{r SETUP, include = FALSE}
@@ -95,12 +94,24 @@ $$
 \idotsint_D f(x_1, x_2, \ldots , x_n) dx_1 \cdots dx_n
 $$
 
-# head1
+# 2カラムデザイン
 
-| TH 左寄せ | TH 中央寄せ | TH 右寄せ |
-| :--- | :---: | ---: |
-| TD | TD | TD |
-| TD | TD | x |
+<div class="column-left">
+## Left hand side
+```{r}
+sample(iris$Sepal.Length, 10)
+```
+```{r out.width = 400, out.height = 200}
+hist(iris$Sepal.Length, main = "Left side")
+```
+</div>
+
+<div class="column-right">
+## Right hand side
+```{r }
+hist(iris$Sepal.Length, main = "Right side")
+```
+</div>
 
 ## イメージ
 
