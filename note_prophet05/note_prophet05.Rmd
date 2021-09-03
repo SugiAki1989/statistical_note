@@ -47,14 +47,23 @@ UPDATE: `r Sys.time()`
 ```{r}
 library(prophet)
 library(tidyverse)
+
+cumpaste <- function(x, sep = "+") {
+  Reduce(f = function(x1, x2){paste(x1, x2, sep = sep)},
+         x, 
+         accumulate = TRUE)
+}
 ```
 
 # Prophetの周期変動
-
+今回は周期変動の扱いについておさらいしていきます。周期変動とは、繰り返される変動のことで、例えば、週5日の勤務は「毎週」繰り返され時系列に影響を与えたり、季節による商品の売れ行きは「毎年」繰り返される時系列として影響を及ぼします。
+Prophetでは、これらの周期的に繰り返される影響を捉え、未来を予測するために、下記のフーリエ級数を使用して、周期的な影響をモデルに組みます。例えば、$2 \pi$単位で1周するので、1年周期の場合は$P=365.25$、1週間周期の場合は$P=7$、24時間周期の場合は$P=24$として、周期効果を表現します。
 
 $$
 s(t) = \sum_{n=1}^{N} \left(a_{n} \cos\left(\frac{2 \pi n t}{P} \right) + b_{n} \sin \left( \frac{2 \pi n t}{P}\right) \right)
 $$
+
+これらの係数を最適化するため、合計$2N$のパラメタをベクトルとして表現し、
 
 $$
 \boldsymbol{ \beta  } =\left[
@@ -69,18 +78,146 @@ $$
   \end{array}
 \right] =  [ a_1, b_1, a_2, b_2, \ldots, a_n, b_n ]^{ \mathrm{ T } }
 $$
+
+三角関数の部分も同じくベクトルとして抜き出します。
+
 $$
-X(t) = \left[ \cos \left(\frac{2 \pi (1) t}{365.25} \right), \ldots, \sin \left(\frac{2 \pi (1) t}{365.25} \right) \right]
+X(t) = \left[ \cos \left(\frac{2 \pi (1) t}{365.25} \right), \ldots, \sin \left(\frac{2 \pi (n) t}{365.25} \right) \right]
 $$
+
+これらを組み合わせ、周期要因を下記のとおりに表現してモデルに組み込みます。フーリエ級数の各係数には$\beta \sim Normal(0, \sigma^2)$として事前分布を設定しているそうです。
 
 $$
 s(t) = X(t) \boldsymbol{ \beta  }
 $$
 
+# フーリエ級数のおさらい
+
+Prophetで周期変動を組み込んだモデルを構築する前に、フーリエ級数で周期変動を捉える方法のおさらいをしておきます。フーリエ級数とは下記の三角関数の式のことで、
+
 
 $$
-\boldsymbol{ \beta  } \sim Normal(0, \sigma^{2})
+y(t) = \frac{a_{0}}{2}\sum \left(a_{n} \cos\left(n t \right) + b_{n} \sin \left( n t \right) \right)
 $$
+
+
+この$a_{0},a_{1},b_{1}, \ldots, a_{n},b_{n}$のフーリエ係数を決めることにより、様々なグラフを表現することができきます。例えば、区間$[a, b]$上で、データが$2m+1$個ある場合は、下記の式で近似できます。
+
+$$
+y(t) = \frac{a_{0}}{2}\sum_{n=1}^{N} \left(a_{n} \cos\left(\frac{2 \pi n t}{b - a} \right) + b_{n} \sin \left( \frac{2 \pi n t}{b - a}\right) \right)
+$$
+
+例えば、下記のように1周期が24時間のようなデータであれば、区間[0, 24]で25個のデータがあれば、$2 m + 1 = 25$より、$N = 12$で近似できます。
+
+```{r}
+max <- 24
+set.seed(1989)
+df <- tibble(
+  x = seq(0, max, 1),
+  y = sin((2*pi*x)/24) + rnorm(n=x,0,0.2),
+) 
+
+df %>% 
+  ggplot() + 
+  geom_point(aes(x, y)) + 
+  geom_vline(xintercept = c(0,6,12,18,24), col = "gray", linetype = "dashed") + 
+  scale_x_continuous(breaks = seq(0,max,1)) + 
+  theme_bw()
+```
+
+フーリエ係数を計算してみます。
+
+```{r}
+n <- 1/25
+fit <- lm(
+  y ~
+    cos(2 * pi * n * x)  + sin(2 * pi * n * x) +
+    cos(4 * pi * n * x)  + sin(4 * pi * n * x) +
+    cos(6 * pi * n * x)  + sin(6 * pi * n * x) +
+    cos(8 * pi * n * x)  + sin(8 * pi * n * x) +
+    cos(10 * pi * n * x) + sin(10 * pi * n * x) +
+    cos(12 * pi * n * x) + sin(12 * pi * n * x),
+  data = df
+)
+summary(fit)
+```
+
+さきほど計算したフーリエ係数を使って予測値を計算して、プロットしてみると、周期的な変動を上手く捉えられていそうです。
+
+```{r}
+# predictの中身はこんな感じ
+# pred <- function(x) {
+#   res <-
+#     fit$coefficients[[1]] +
+#     fit$coefficients[[2]] * cos(2 * pi * n * x)   + fit$coefficients[[3]] * sin(2 * pi * n * x) +
+#     fit$coefficients[[4]] * cos(4 * pi * n * x)   + fit$coefficients[[5]] * sin(4 * pi * n * x) +
+#     fit$coefficients[[6]] * cos(6 * pi * n * x)   + fit$coefficients[[7]] * sin(6 * pi * n * x) +
+#     fit$coefficients[[8]] * cos(8 * pi * n * x)   + fit$coefficients[[9]] * sin(8 * pi * n * x) +
+#     fit$coefficients[[10]] * cos(10 * pi * n * x) + fit$coefficients[[11]] * sin(10 * pi * n * x) +
+#     fit$coefficients[[12]] * cos(12 * pi * n * x) + fit$coefficients[[13]] * sin(12 * pi * n * x)
+#   return(res)
+# }
+
+df %>% 
+  dplyr::mutate(pred = predict(fit, newdata = .)) %>% 
+  ggplot() + 
+  geom_point(aes(x, y)) + 
+  geom_line(aes(x, pred), col = "#0072B2") +  
+  geom_vline(xintercept = c(0,6,12,18,24), col = "gray", linetype = "dashed") + 
+  scale_x_continuous(breaks = seq(0, max, 1)) +
+  theme_bw()
+```
+
+フーリエ係数を変化させてみるとわかりますが、大きくなればなるほど過学習していきます。このこともあって、Prophetの論文では、年次および週次の季節性については、年次は$N=10$、週次は$N=3$で機能すると書かれています。
+
+```{r}
+n <- 12
+
+# cos(*) + sin(*)のベースを作成
+res <- vector(mode = "character", length = n)
+for (i in 1:n){
+  res[[i]] <- paste0(
+    "cos(", i*2, "*pi*(1/25)*x)+sin(", i*2, "*pi*(1/25)*x)"
+    )
+}
+
+# 累積の要領で計算式を連結そて回帰式を作成
+# イメージ: f1, f1+f2, f1+f2+f3,... 
+fs <- paste("y ~", cumpaste(res, sep = "+"))
+df_plt <- df 
+for (i in 1:n){
+  fit <- lm(as.formula(fs[[i]]), data = df_plt)
+  pred <- predict(fit, newdata = df_plt)
+  df_plt <- cbind(df_plt, pred)
+}
+names(df_plt) <- c("x", "y", paste0("f=",2*1:n))
+
+df_plt %>% 
+  tidyr::pivot_longer(cols = starts_with("f"), names_to = 'patterns') %>% 
+  dplyr::mutate(patterns = fct_relevel(patterns, c("f=2","f=4","f=6","f=8","f=10","f=12"))) %>% 
+  ggplot(.) + 
+  geom_point(aes(x, y)) +  
+  geom_line(aes(x, value), col = "#0072B2") +  
+  geom_vline(xintercept = c(0,6,12,18,24), col = "gray", linetype = "dashed") + 
+  scale_x_continuous(breaks = seq(0, max, 3)) +
+  facet_wrap( ~ patterns) +
+  ggtitle("Fourier series for Periodic effects") + 
+  theme_bw()
+```
+
+# Prophetの周期変動
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
 
 # セッション情報
 
