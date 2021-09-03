@@ -21,8 +21,6 @@ output:
 knitr::opts_chunk$set(echo       = TRUE,
                       message    = FALSE,
                       warning    = FALSE,
-                      out.width  = 800,
-                      out.height = 600,
                       fig.align  = "center",
                       dev        = "ragg_png")
 ```
@@ -44,7 +42,7 @@ UPDATE: `r Sys.time()`
 - [Prophetのモデル式を1から理解する](https://devblog.thebase.in/entry/2019/12/20/110000_1)
 - [fb Prophetの解剖で学ぶベイズ時系列モデリング](https://ill-identified.hatenablog.com/entry/2018/05/28/020224)
 
-## ライブラリと関数の読み込み
+# ライブラリと関数の読み込み
 
 ```{r}
 library(prophet)
@@ -58,7 +56,7 @@ head_tail <- function(data, n = 5){
 }
 ```
 
-## 必要なデータ形式
+# 必要なデータ形式
 
 `prophet()`に適した形でデータフレームを渡せば、あとは関数の内部で`rstan`パッケージの関数が計算し、計算計算を結果を返してくれる。そのためか、ドキュメントではR APIと表記されている。
 
@@ -77,7 +75,7 @@ df <- readr::read_csv(data_path) %>%
 head_tail(df, n = 5)
 ```
 
-## 予測モデルの作成
+# 予測モデルの作成
 モデル作成のために`prophet()`に先程用意しているデータフレームを渡すことで作成できます。モデルを発展させていくためには、用意されている引数や`add_*()`を利用することができます。`m`にはモデルを構築するための様々な要素が計算されていることがわかります。
 
 ```{r}
@@ -86,7 +84,7 @@ m <- prophet::prophet(df = df)
 names(m)
 ```
 
-## モデルで予測値を計算
+# モデルで予測値を計算
 
 構築したモデルで予測を行うための準備として、データフレームを拡張します。このデータは`r df$ds[nrow(df)]`までしかないので、ここでは`make_future_dataframe()`を利用して、予測期間を含むデータフレームに拡張します。
 
@@ -126,7 +124,7 @@ forecast_df %>%
   head_tail(., n = 5)
 ```
 
-## 予測結果を可視化
+# 予測結果を可視化
 
 データフレームとモデルを`plot()`に渡すことで、`prophet`クラスに対する`plot` メソッドが呼び出され、30日分の予測が加えられた、可視化が行われます。
 
@@ -142,7 +140,7 @@ plot(x = m, fcst = forecast_df) +
 prophet::dyplot.prophet(x = m, fcst = forecast_df)
 ```
 
-## モデルの要素を分解して可視化
+# モデルの要素を分解して可視化
 
 `prophet_plot_components()`を使うことで、トレンド、周期、祝日、外部予測変数など、各要素の効果を分解して可視化することもできます。
 
@@ -159,7 +157,7 @@ plts[[2]] + labs(title = "Weekly Seasonality Components")
 plts[[3]] + labs(title = "Yearly Seasonality Components")
 ```
 
-## モデルの保存と読み込み
+# モデルの保存と読み込み
 
 Pythonでよく行われるような`pickle`でモデルを保存することも可能です。Rでは、学習済みのモデルを`saveRDS()`で保存し、`readRDS()`で読み込むことで、予測に使用できます。
 
@@ -182,7 +180,7 @@ plot(x = m2, fcst = forecast_df2) +
   labs(title = "Forecasting Wikipedia Page View From Saved Model", y = "PageView", x = "Date")
 ```
 
-## SessionInfo
+# セッション情報
 
 ```{r}
 sessionInfo()

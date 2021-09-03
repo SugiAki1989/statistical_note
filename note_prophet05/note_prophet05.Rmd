@@ -1,0 +1,92 @@
+---
+title: "prophetの周期変動"
+pagetitle: "prophet05"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: TRUE
+    code_folding: "show"
+    highlight: "zenburn"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、下記のドキュメントを参考に、`prophet`パッケージの基本的な使い方をおさらいすることを目的としています。ゆくゆくは外部予測変数を追加したモデルやクロスバリデーション、パラメタチューニングなどなど、モデルを発展させながら使用方法をまとめていきます。
+
+- [Prophet | Forecasting at scale](https://facebook.github.io/prophet/docs/quick_start.html#r-api)
+
+モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。ここでは説明しません。
+
+- [Forecasting at scale](https://peerj.com/preprints/3190/)
+- [Prophet入門【理論編】Facebookの時系列予測ツール](https://www.slideshare.net/hoxo_m/prophetfacebook)
+- [Prophetのモデル式を1から理解する](https://devblog.thebase.in/entry/2019/12/20/110000_1)
+- [fb Prophetの解剖で学ぶベイズ時系列モデリング](https://ill-identified.hatenablog.com/entry/2018/05/28/020224)
+
+# ライブラリと関数の読み込み
+
+```{r}
+library(prophet)
+library(tidyverse)
+```
+
+# Prophetの周期変動
+
+
+$$
+s(t) = \sum_{n=1}^{N} \left(a_{n} \cos\left(\frac{2 \pi n t}{P} \right) + b_{n} \sin \left( \frac{2 \pi n t}{P}\right) \right)
+$$
+
+$$
+\boldsymbol{ \beta  } =\left[
+  \begin{array}{c}
+    a_1 \\
+    b_1 \\
+    a_2 \\
+    b_2 \\
+    \vdots \\
+    a_n \\
+    b_n
+  \end{array}
+\right] =  [ a_1, b_1, a_2, b_2, \ldots, a_n, b_n ]^{ \mathrm{ T } }
+$$
+$$
+X(t) = \left[ \cos \left(\frac{2 \pi (1) t}{365.25} \right), \ldots, \sin \left(\frac{2 \pi (1) t}{365.25} \right) \right]
+$$
+
+$$
+s(t) = X(t) \boldsymbol{ \beta  }
+$$
+
+
+$$
+\boldsymbol{ \beta  } \sim Normal(0, \sigma^{2})
+$$
+
+# セッション情報
+
+```{r}
+sessionInfo()
+```
+
+
+
