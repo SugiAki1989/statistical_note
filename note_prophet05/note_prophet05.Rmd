@@ -48,6 +48,13 @@ UPDATE: `r Sys.time()`
 library(prophet)
 library(tidyverse)
 
+head_tail <- function(data, n = 5){
+  stopifnot(is.data.frame(data))
+  head(data, n = n) %>% print()
+  cat(paste(rep("-", 100), collapse = ""))
+  tail(data, n = n) %>% print()
+}
+
 cumpaste <- function(x, sep = "+") {
   Reduce(f = function(x1, x2){paste(x1, x2, sep = sep)},
          x, 
@@ -205,19 +212,131 @@ df_plt %>%
   theme_bw()
 ```
 
-# Prophetの周期変動
+# Prophetのadd_seasonality関数
+
+Prophetのadd_seasonality関数の説明をするために、ドキュメントで使用されているWikipediaのページビューデータの期間を2年分に絞って動かしていきます。
 
 ```{r}
+# Githubのprophetのリポジトリからサンプルデータをインポート
+base_url <- 'https://raw.githubusercontent.com/facebook/prophet/master/examples/'
+data_path <- paste0(base_url, 'example_wp_log_peyton_manning.csv')
+df <- readr::read_csv(data_path) %>%
+  dplyr::filter(ds >= "2011-01-01" & ds <= "2012-12-31")
+
+# 先頭と末尾のデータを表示
+head_tail(df, n = 5)
+```
+
+
+`prophet()`のデフォルト設定では、`yearly.seasonality="auto"`、`weekly.seasonality="auto"`、`daily.seasonality="auto"`となっており、周期性を自動でモデルに組み込んでくれます。周期を自分で設定したい場合は、`yearly.seasonality=365`のように引数にフーリエ級数を設定するか、`add_seasonality()`を利用できます。四半期(`period=91.3125`)や日次(`period=24`)なども追加可能です。
+
+`add_seasonality()`を使用するためには、`prophet()`にデータ渡さず、インスタンス化だけ行います。そのあとに`add_seasonality()`を使用して、1周期の日数である`period`と、フーリエ級数である`fourier.order`、あとはラベルである`name`を渡します。`name="monthly"`と設定したからといって、月次の周期の設定ができるわけではなく、これはただのラベルです。
+
+`add_seasonality()`の設定方法を見ればわかりますが、ビジネスの要件で発生する特別な周期性であっても、簡単にモデルに追加し、周期をモデルに組み込むことが可能です。
+
+```{r}
+# カスタムで周期を追加する場合、prophet()でデータを持たないインスタンスを作成
+# dfのデフォルト引数はNULLなので、記述する必要はない
+m <- prophet(df = NULL,
+             yearly.seasonality	= FALSE,
+             weekly.seasonality = FALSE,
+             daily.seasonality = FALSE)
+
+# 周期はperiodで設定するため、nameはただのラベル
+m <- add_seasonality(m = m, name = "yearly", period = 365.25, fourier.order = 10)
+m <- add_seasonality(m = m, name = "monthly", period = 30.5, fourier.order = 5)
+m <- add_seasonality(m = m, name = "weekly", period = 7, fourier.order = 3)
+# ここでモデルの計算を行う
+m <- fit.prophet(m = m, df = df)
+```
+
+設定した周期成分は、`prophet_plot_components()`で簡単に可視化することも可能性です。可視化された周期を見ると、「週次では月曜日に」「年次では1月、9月に」「月次では10日前後」に数字が高くなることがわかります。
+
+```{r}
+future_df <- prophet::make_future_dataframe(m = m, periods = 30)
+forecast_df <- predict(object = m, fcst = future_df)
+prophet_plot_components(m = m, fcst = forecast_df)
+```
+## 増加していく周期性(Multiplicative Seasonality)
+
+Prophetは、周期ごとに大きくなっていくような乗法的な周期性もモデルに組み込むことができます。下記のような乗法的な季節周期をもつ時系列データに対して、デフォルトの設定でモデリングしても、うまく予測ができません。
+
+サンプルデータとして航空旅客数のこの時系列データ`AirPassengers`を利用して確認していきます。
+
+```{r}
+n <- length(AirPassengers)
+df <- tibble(y = AirPassengers)
+df$ds <- seq(from = as.Date("1949-01-01"), by = "1 month", length.out = n)
+
+df %>% 
+  ggplot(aes(ds, y)) +
+  geom_line(size = 1, col = "#749FC6") + 
+  scale_y_continuous(labels = scales::comma) + 
+  scale_x_date(date_breaks = '12 month', date_labels = "%Y-%m") + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+  ggtitle("Multiplicative Seasonality")
 
 ```
 
+まずはデフォルト設定でモデルを学習させてみると上にスパイクする箇所において、少し予測が小さくなっているようです。
+
 ```{r}
+m1 <- prophet(df)
+future_df1 <- make_future_dataframe(m1, 12, freq = "month")
+fore_df1 <- predict(m1, future_df1)
+plot(m1, fore_df1) + ggtitle('seasonality.mode = "additive"')
+```
+
+あとで利用するので、`prophet_plot_components()`で各要素の影響を可視化しておきます。
+
+```{r}
+prophet_plot_components(m1, fore_df1)
+```
+
+
+次は、乗法的な周期性を設定してモデルを学習させてみます。先程のモデルとの違いは、上にスパイクする箇所も、予測が上手く行っています。このように、トレンドとともに大きくなるような周期性を持つデータには、乗法的周期性を考慮したモデルで対応することでうまくいきます。
+
+
+```{r}
+m2 <- prophet(df, seasonality.mode = "multiplicative")
+future_df2 <- make_future_dataframe(m2, 12, freq = "month")
+fore_df2 <- predict(m2, future_df2)
+plot(m2, fore_df2) + ggtitle('seasonality.mode = "multiplicative"')
+```
+
+先程と同じく、`prophet_plot_components()`で各要素の影響を可視化しておきます。デフォルト設定のモデルと比べると、年周期の部分はパーセント表記になっています。
+
+```{r}
+prophet_plot_components(m2, fore_df2)
+```
+
+その答えはモデル式が関わっていることは確かです。乗法的な周期性を表すには、トレンドに何らかの係数をかけていくことで表現できます。例えば、下記のような感じです。
+
+```{r}
+n <- 12 * 10
+w <- 1:n
+x <- seq(1, 100, length.out = n)
+tibble(
+  ds = seq(from = as.Date("2010-01-01"), by = "1 month", length.out = n),
+  y = w * sin(x) + 2 * x + rnorm(n = n, 0, 10)) %>%
+  ggplot(aes(ds, y)) +
+  geom_line(size = 1, col = "#749FC6") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_date(date_breaks = '12 month', date_labels = "%Y-%m") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+  ggtitle("Multiplicative Seasonality")
 
 ```
 
-```{r}
+Prophetでは実際、下記のようなモデルを組んで乗法的な周期性を表現してます。
 
-```
+$$
+y_{t} = g(t) * (1 + s(t) + h(t) + \beta x(t) )+ \epsilon_{t}
+$$
+
+そうすると、各要素にトレンドが掛け合わされているため、パーセント表記にしているようです。かといって、何に対するパーセントなのかよくわかってない。調査中…。
 
 # セッション情報
 
