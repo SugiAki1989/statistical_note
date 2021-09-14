@@ -51,7 +51,7 @@ library(tidyverse)
 head_tail <- function(data, n = 5){
   stopifnot(is.data.frame(data))
   head(data, n = n) %>% print()
-  cat(paste(rep("-", 100), collapse = ""))
+  cat(paste(rep("-", 100), collapse = ""), "\n")
   tail(data, n = n) %>% print()
 }
 ```

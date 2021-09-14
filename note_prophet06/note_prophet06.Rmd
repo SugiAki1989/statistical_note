@@ -1,6 +1,6 @@
 ---
-title: "prophetの周期変動"
-pagetitle: "prophet05"
+title: "prophetの外部予測変数"
+pagetitle: "prophet06"
 # subtitle: "サブタイトル"
 # date: "`r Sys.time()`"
 # abstract: ""
@@ -46,33 +46,33 @@ UPDATE: `r Sys.time()`
 
 ```{r}
 library(prophet)
+library(forecast)
 library(tidyverse)
 
 head_tail <- function(data, n = 5){
   stopifnot(is.data.frame(data))
   head(data, n = n) %>% print()
-  cat(paste(rep("-", 100), collapse = ""))
+  cat(paste(rep("-", 100), collapse = ""), "\n")
   tail(data, n = n) %>% print()
 }
 ```
 
 # 外部予測変数
 
-Prophetは一般化加法モデルをベースにしているため、季節性の周期をモデルに組みやすいことを前回の記事で説明しました。これは周期性に限った話ではなく、目的変数に影響を及ぼす外部予測変数(Additional Regressor)をモデルに組みこむことが可能です。
+Prophetは一般化加法モデルをベースにしているため、季節性の周期をモデルに組みやすいことを前回の記事で説明しました。これは周期性に限った話ではなく、目的変数に影響を及ぼす外部予測変数(Additional Regressor)もモデルに組みこむことが可能です。
 
-注意としては、その変数の未来の時点での値が分かっている場合に限られます。考えればわかりますが、過去時点のモデルには外部変数が組み込まれていて、その値をもとに予測値を計算しているのであれば、未来の時点でもその変数の値が予測値の計算には必要になる方ですね。
+注意としては、外部予測変数を組み込んだモデルで予測を行う場合、その変数の未来の時点での値が分かっている必要があります。
 
-また、外部予測変数の数は1つだけに限られるということもなく、必要に応じて変数を追加してモデルを構築していくことが可能です。`g`がトレンド、`s`が季節周期、`h`が祝日効果です。
+また、外部予測変数の数は1つだけに限られるということもなく、必要に応じて変数を追加してモデルを構築していくことが可能です。下記のようなイメージでモデルを拡張できます。`g`がトレンド、`s`が季節周期、`h`が祝日効果です。
 
 $$
 y_{t} = g(t) + s(t) + h(t) + \beta_{1}x_{1}(t) + \beta_{2}x_{2}(t) + \ldots + \beta_{n}x_{n}(t) + \epsilon_{t}
 $$
 　
-実際にProphetでモデルを作って、外部予測変数をモデルに組み込んでいきます。また、冒頭の参考文献・サイト以外に、ここでは下記の記事も参考にしています。Prophetの外部予測変数を利用してモデルを改良していく過程がまとめられているので非常に参考になりました。
+ここからは、実際にProphetでモデルを作って、外部予測変数をモデルに組み込んでいきます。また、冒頭の参考文献・サイト以外に、ここでは下記の記事も参考にしています。Prophetの外部予測変数を利用してモデルを改良していく過程がまとめられているので非常に参考になりました。
 
 - [The impact of weather conditions on cycling counts in Auckland, New Zealand](https://cdn.rawgit.com/nicolasfauchereau/Auckland_Cycling/master/notebooks/Auckland_cycling_and_weather.html)
 - [Prophet の新機能 Extra Regressors を使ってみる](https://qiita.com/hoxo_m/items/dae5283ea045687ad2ed)
-
 
 ## サンプルデータ
 
@@ -81,7 +81,7 @@ $$
 
 ```{r}
 df <- Seatbelts %>% 
-  as_tibble() %>% 
+  tibble::as_tibble() %>% 
   dplyr::mutate(dt = seq(from = as.Date("1969-01-01"), by = "1 month", length.out = n())) %>% 
   dplyr::select(ds = dt, y = drivers, PetrolPrice, law) 
 
@@ -98,10 +98,10 @@ df %>%
 
 ## Prophetのadd_regressor関数
 
-外部予測変数を利用するためには`add_regressor()`を使用します。
+外部予測変数を利用するためには`add_regressor()`を使用します。`add_regressor()`を使用する場合は、`prophet()`でインスタンスのみを作成しておきます。ここでは、後ほどの外部予測変数の効果の説明のため周期性はないもとしておきます。
 
 ```{r}
-# 外部予測変数を追加する場合、prophet()でデータを持たないインスタンスを作成
+# 外部予測変数を追加する場合、prophet()でインスタンスのみを作成
 m <- prophet(fit = FALSE,
              yearly.seasonality = FALSE,
              weekly.seasonality = FALSE,
@@ -115,22 +115,24 @@ m <- fit.prophet(m, df)
 fore_df <- predict(m, df)
 
 res_df <- df %>%
-  left_join(fore_df %>%
-      mutate(ds = as.Date(ds)) %>%
-      select(ds, law_ef = law, PetrolPrice_ef = PetrolPrice),
+  dplyr::left_join(fore_df %>%
+      dplyr::mutate(ds = as.Date(ds)) %>%
+      dplyr::select(ds, law_ef = law, PetrolPrice_ef = PetrolPrice),
     by = "ds") %>%
-  mutate(
+  dplyr::mutate(
     beta_law = if_else(is.nan(law_ef / law), 0, law_ef / law),
     beta_PetrolPrice = PetrolPrice_ef / PetrolPrice
   )
-
-head_tail(res_df)
 
 ```
 
 `PetrolPrice_ef`、`law_ef`は、予測値に足し込まれる値なので、回帰係数を計算するために、変数の観測値で割り戻します。`law`に1が立つということは、シートベルト法が施行されている時期なので、この時期では、死亡者が`r unique(res_df$beta_law)`人減ることになります。
 
-どのような形で外部予測変数が効いているかを確認するために可視化しておきます。この図を見るとわかりますが、今回のモデルでは、周期性を考慮していないので、信用区間が太い帯の様になっています。これを解消したければ、周期性を追加するだけで解消できます。
+```{r}
+head_tail(res_df)
+```
+
+どのような形で外部予測変数が効いているかを確認するために可視化しておきます。この図を見るとわかりますが、今回のモデルでは、周期性を考慮していないので、信用区間が太い帯の様になっています。これを解消したければ、周期性を追加することで解消できます。
 
 ```{r}
 plot(m, fore_df)
@@ -139,13 +141,10 @@ plot(m, fore_df)
 外部予測変数の影響を可視化する場合は、周期性の影響を可視化するために利用した`prophet_plot_components()`を利用します。
 
 ```{r}
-plt <- prophet_plot_components(m = m, fcst = fore_df)
-plt[[2]]
+prophet_plot_components(m = m, fcst = fore_df)
 ```
 
-
-`prophet_plot_components()`では複数の外部予測変数を足し合わせてトータルとして外部予測変数の影響を可視化することになるため、分離して各変数ごとに影響を可視化しておきます。この図をみると、`PetrolPrice`は死亡者の数とあまり関係がないようですね。
-
+`prophet_plot_components()`では複数の外部予測変数を足し合わせ、トータルとしての外部予測変数の影響を可視化することになるため、分離して各変数ごとに影響を可視化しておきます。この図をみると、`PetrolPrice`は死亡者の数とあまり関係がないようですね。
 
 ```{r}
 fore_df %>% 
@@ -163,10 +162,17 @@ fore_df %>%
 
 ```
 
+詳しくは取り上げませんが、ARIMAXでも同じ様に外部予測変数を取り込んだモデルを作成することは可能です。
 
-
-
-
+```{r}
+auto.arima(
+    y = df$y,
+    # 複数変数を組み込む場合 
+    xreg = as.matrix(df[,c("law", "PetrolPrice")]),
+    # xreg = df$law,
+    ic = "aic",
+    max.order = 20)
+```
 
 # セッション情報
 
