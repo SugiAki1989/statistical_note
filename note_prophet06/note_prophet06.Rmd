@@ -35,7 +35,7 @@ UPDATE: `r Sys.time()`
 
 - [Prophet | Forecasting at scale](https://facebook.github.io/prophet/docs/quick_start.html#r-api)
 
-モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。ここでは説明しません。
+モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。非常にわかりやすいです。
 
 - [Forecasting at scale](https://peerj.com/preprints/3190/)
 - [Prophet入門【理論編】Facebookの時系列予測ツール](https://www.slideshare.net/hoxo_m/prophetfacebook)
@@ -148,9 +148,9 @@ prophet_plot_components(m = m, fcst = fore_df)
 
 ```{r}
 fore_df %>% 
-  mutate(ds = as.Date(ds)) %>% 
-  select(ds, PetrolPrice, law) %>% 
-  pivot_longer(cols = -ds, names_to = "vals", values_to = "value") %>% 
+  dplyr::mutate(ds = as.Date(ds)) %>% 
+  dplyr::select(ds, PetrolPrice, law) %>% 
+  tidyr::pivot_longer(cols = -ds, names_to = "vals", values_to = "value") %>% 
   ggplot(aes(ds, value, col = vals)) + 
   geom_line(size = 1) + 
   scale_y_continuous(labels = scales::comma, breaks = seq(0, -250, -20)) + 
@@ -173,6 +173,10 @@ auto.arima(
     ic = "aic",
     max.order = 20)
 ```
+
+私の勉強不足もあって、ARIMAXなど時系列モデルに外部予測変数として「連続変数」を組み込んだ場合、回帰係数の解釈がよくわかっていません。通常の回帰分析のように解釈するものではなく、より良い予測をするための誤差を捉えるための手段であって、解釈するためのものではないのかもしれません(そんなはずはないだろうけども…)。下記のブログでも回帰係数の解釈の方法がわかりにくいという指摘がされています。
+
+- [The ARIMAX model muddle](https://robjhyndman.com/hyndsight/arimax/)
 
 # セッション情報
 

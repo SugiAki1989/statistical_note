@@ -300,7 +300,7 @@ summary {
 </div>
 
 <div class="update-right">
-<p>UPDATE: 2021-09-03 00:57:21</p>
+<p>UPDATE: 2021-09-15 00:09:29</p>
 </div>
 <div id="はじめに" class="section level1" number="1">
 <h1 number="1"><span class="header-section-number">1</span> はじめに</h1>
@@ -308,7 +308,7 @@ summary {
 <ul>
 <li><a href="https://facebook.github.io/prophet/docs/quick_start.html#r-api">Prophet | Forecasting at scale</a></li>
 </ul>
-<p>モデルの数理部分は下記の<code>prophet</code>に関する論文やブログ記事を参照願います。ここでは説明しません。</p>
+<p>モデルの数理部分は下記の<code>prophet</code>に関する論文やブログ記事を参照願います。非常にわかりやすいです。</p>
 <ul>
 <li><a href="https://peerj.com/preprints/3190/">Forecasting at scale</a></li>
 <li><a href="https://www.slideshare.net/hoxo_m/prophetfacebook">Prophet入門【理論編】Facebookの時系列予測ツール</a></li>
@@ -472,7 +472,7 @@ g(t) = \frac{C_{t}}{ 1 + exp(-(k + \boldsymbol{a}(t) \cdot \boldsymbol{\delta^{ 
 <div id="sample_predictive_trend関数" class="section level1" number="5">
 <h1 number="5"><span class="header-section-number">5</span> sample_predictive_trend関数</h1>
 <p>この関数が呼び出される前にMCMC、MAP推定のいずれかを行うか、加えてシュミレーション回数などが決定されており、その<code>iteration</code>を受け取りながら計算が行われます。関数を分割して、どのような計算が行われていくのかたどっていきます。</p>
-<p>まずは、モデルからパラメタの抽出が行われています。<code>#&gt;</code>の部分は、変数に格納されている値を意味します。計算のイメージをしやすくするために、表示しています。</p>
+<p>まずは、モデルからパラメタの抽出が行われています。<code>#&gt;</code>の部分は、変数に格納されている値を意味します。計算のイメージをしやすくするために、表示しているだけなので、乱数シードの固定も行っていません。</p>
 <pre><code>#&#39; @keywords internal
 sample_predictive_trend &lt;- function(model, df, iteration) {
   k &lt;- model$params$k[iteration]

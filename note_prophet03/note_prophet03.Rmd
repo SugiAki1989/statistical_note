@@ -35,7 +35,7 @@ UPDATE: `r Sys.time()`
 
 - [Prophet | Forecasting at scale](https://facebook.github.io/prophet/docs/quick_start.html#r-api)
 
-モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。ここでは説明しません。
+モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。非常にわかりやすいです。
 
 - [Forecasting at scale](https://peerj.com/preprints/3190/)
 - [Prophet入門【理論編】Facebookの時系列予測ツール](https://www.slideshare.net/hoxo_m/prophetfacebook)
@@ -134,8 +134,8 @@ n_vec <- length(scale_vec)
 plt_list <- vector(mode = "list", length = n_vec)
 
 for (i in 1:n_vec) {
-  m <- prophet::prophet(df = df, changepoint.prior.scale = scale_vec[[i]])
-  future_df <- prophet::make_future_dataframe(m, periods = 30)
+  m <- prophet(df = df, changepoint.prior.scale = scale_vec[[i]])
+  future_df <- make_future_dataframe(m, periods = 30)
   forecast_df <- predict(m, future_df)
   plt_title <- paste0("changepoint.prior.scale = ", scale_vec[[i]])
   plt_list[[i]] <- plot(m, forecast_df) + add_changepoints_to_plot(m) + 

@@ -35,7 +35,7 @@ UPDATE: `r Sys.time()`
 
 - [Prophet | Forecasting at scale](https://facebook.github.io/prophet/docs/quick_start.html#r-api)
 
-モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。ここでは説明しません。
+モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。非常にわかりやすいです。
 
 - [Forecasting at scale](https://peerj.com/preprints/3190/)
 - [Prophet入門【理論編】Facebookの時系列予測ツール](https://www.slideshare.net/hoxo_m/prophetfacebook)
@@ -80,7 +80,7 @@ head_tail(df, n = 5)
 
 ```{r}
 # デフォルト設定でモデルを作成
-m <- prophet::prophet(df = df)
+m <- prophet(df = df)
 names(m)
 ```
 
@@ -89,7 +89,7 @@ names(m)
 構築したモデルで予測を行うための準備として、データフレームを拡張します。このデータは`r df$ds[nrow(df)]`までしかないので、ここでは`make_future_dataframe()`を利用して、予測期間を含むデータフレームに拡張します。
 
 ```{r}
-prophet::make_future_dataframe
+make_future_dataframe
 ```
 
 関数の中身を見るとわかりますが、この関数は、モデルに渡されたデータフレームの最大日付(`m$history.dates`)を取得し、指定した期間の日付型のベクトルを生成し、最大日付の末尾にアペンドして、期間を拡張してくれる便利な関数です。
@@ -105,7 +105,7 @@ dates[2:(30 + 1)]
 実際に`make_future_dataframe()`を利用して、予測期間を含むデータフレームに拡張します。
 
 ```{r}
-future_df <- prophet::make_future_dataframe(m, periods = 30)
+future_df <- make_future_dataframe(m, periods = 30)
 head_tail(future_df, n = 5)
 ```
 
@@ -137,7 +137,7 @@ plot(x = m, fcst = forecast_df) +
 `dyplot.prophet()`を利用すれば、`dygraph`を使ったインタラクティブな可視化を行うことも可能です。
 
 ```{r}
-prophet::dyplot.prophet(x = m, fcst = forecast_df)
+dyplot.prophet(x = m, fcst = forecast_df)
 ```
 
 # モデルの要素を分解して可視化
@@ -147,7 +147,7 @@ prophet::dyplot.prophet(x = m, fcst = forecast_df)
 ```{r}
 # weekly_start=1で月曜日始まりに設定
 # render_plot=FALSEでグラフをリストに格納し、ばらして可視化
-plts <- prophet::prophet_plot_components(m = m,
+plts <- prophet_plot_components(m = m,
                                          fcst = forecast_df, 
                                          weekly_start = 1,
                                          yearly_start = 0,
@@ -166,7 +166,7 @@ saveRDS(m, file = "model.RDS")  # Save model
 m2 <- readRDS(file = "model.RDS")  # Load mode
 # 学習済みのモデルを呼び出して予測
 # 60日分の予測を行う
-future_df2 <- prophet::make_future_dataframe(m2, periods = 60)
+future_df2 <- make_future_dataframe(m2, periods = 60)
 forecast_df2 <- predict(object = m2, df = future_df2)
 forecast_df2 %>% 
   dplyr::select(ds, trend, ends_with("terms"), yhat) %>% 

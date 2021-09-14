@@ -35,7 +35,7 @@ UPDATE: `r Sys.time()`
 
 - [Prophet | Forecasting at scale](https://facebook.github.io/prophet/docs/quick_start.html#r-api)
 
-モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。ここでは説明しません。
+モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。非常にわかりやすいです。
 
 - [Forecasting at scale](https://peerj.com/preprints/3190/)
 - [Prophet入門【理論編】Facebookの時系列予測ツール](https://www.slideshare.net/hoxo_m/prophetfacebook)
@@ -91,10 +91,10 @@ names(m_logistic)
 予測で利用するデータフレームにも`cap`を格納する必要があります。その他は前回の記事の内容と同じです。
 
 ```{r}
-future_df_logistic <- prophet::make_future_dataframe(m_logistic, periods = 900) %>% 
+future_df_logistic <- make_future_dataframe(m_logistic, periods = 900) %>% 
   dplyr::mutate(cap = 8)
 forecast_df_logistic <- predict(object = m_logistic, df = future_df_logistic)
-prophet::dyplot.prophet(x = m_logistic, fcst = forecast_df_logistic)
+dyplot.prophet(x = m_logistic, fcst = forecast_df_logistic)
 ```
 予測された結果をみるとわかりますが、`cap`で指定した数値を超えないように調整されています。このモデルでは、`growth=logistic`を指定して予測モデルを構築しましたが、`growth=linear`を指定して予測モデルを構築すると、下記の通り、似たような予測が行われます。`cap`を指定していませんが、8を超えないように予測されています。`cap`を指定していないため、予測値の信用区間が発散していく傾向が見て取れます。
 
@@ -102,18 +102,18 @@ prophet::dyplot.prophet(x = m_logistic, fcst = forecast_df_logistic)
 
 ```{r}
 m_linear <- prophet(df = df, growth = "linear")
-future_df_linear <- prophet::make_future_dataframe(m_linear, periods = 900)
+future_df_linear <- make_future_dataframe(m_linear, periods = 900)
 forecast_df_linear <- predict(object = m_linear, df = future_df_linear)
-prophet::dyplot.prophet(x = m_linear, fcst = forecast_df_linear)
+dyplot.prophet(x = m_linear, fcst = forecast_df_linear)
 ```
 
 サンプルデータを右肩上がりの傾向が学習できそうな2013年までに限定すると、8を超えて、9にも届きそうな予測になっています。
 
 ```{r}
 m_linear2013 <- prophet(df = df %>% dplyr::filter(ds < "2013-01-01"), growth = "linear")
-future_df_linear2013 <- prophet::make_future_dataframe(m_linear2013, periods = 900)
+future_df_linear2013 <- make_future_dataframe(m_linear2013, periods = 900)
 forecast_df_linear2013 <- predict(object = m_linear2013, df = future_df_linear2013)
-prophet::dyplot.prophet(x = m_linear2013, fcst = forecast_df_linear2013)
+dyplot.prophet(x = m_linear2013, fcst = forecast_df_linear2013)
 ```
 
 2013年までにデータを絞り、`cap`と`growth=logistic`を指定して予測モデルを構築すると、このようになります。
@@ -122,10 +122,10 @@ prophet::dyplot.prophet(x = m_linear2013, fcst = forecast_df_linear2013)
 
 ```{r}
 m_logistic2013 <- prophet(df = df_cap %>% dplyr::filter(ds < "2013-01-01"), growth = "logistic")
-future_df_logistic2013 <- prophet::make_future_dataframe(m_logistic2013, periods = 900) %>% 
+future_df_logistic2013 <- make_future_dataframe(m_logistic2013, periods = 900) %>% 
   dplyr::mutate(cap = 8.0)
 forecast_df_logistic2013 <- predict(object = m_logistic2013, df = future_df_logistic2013)
-prophet::dyplot.prophet(x = m_logistic2013, fcst = forecast_df_logistic2013)
+dyplot.prophet(x = m_logistic2013, fcst = forecast_df_logistic2013)
 ```
 
 # フラットトレンド
@@ -133,7 +133,7 @@ prophet::dyplot.prophet(x = m_logistic2013, fcst = forecast_df_logistic2013)
 トレンドの変化があまりなく、強い季節性周期がある時系列データの場合、トレンドをフラット(`growth="flat"`)にすることが役立つ場合があります。
 
 ```{r}
-prophet::prophet(df = df, growth = "flat")$growth
+prophet(df = df, growth = "flat")$growth
 ```
 
 # prophetのトレンドを深ぼる

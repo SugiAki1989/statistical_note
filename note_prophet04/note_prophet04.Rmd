@@ -35,7 +35,7 @@ UPDATE: `r Sys.time()`
 
 - [Prophet | Forecasting at scale](https://facebook.github.io/prophet/docs/quick_start.html#r-api)
 
-モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。ここでは説明しません。
+モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。非常にわかりやすいです。
 
 - [Forecasting at scale](https://peerj.com/preprints/3190/)
 - [Prophet入門【理論編】Facebookの時系列予測ツール](https://www.slideshare.net/hoxo_m/prophetfacebook)
