@@ -12,3 +12,6 @@
 - [Prophetの周期変動](https://sugiaki1989.github.io/statistical_note/note_prophet05/note_prophet05.html)
 - [Prophetの外部予測変数](https://sugiaki1989.github.io/statistical_note/note_prophet06/note_prophet06.html)
 - [Prophetのモデル診断](https://sugiaki1989.github.io/statistical_note/note_prophet07/note_prophet07.html)
+- [prophetのモデル検証](https://sugiaki1989.github.io/statistical_note/note_prophet08/note_prophet08.html)
+
+

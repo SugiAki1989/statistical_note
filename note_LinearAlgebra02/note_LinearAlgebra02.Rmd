@@ -1,0 +1,96 @@
+---
+title: "データ分析と線形代数02"
+pagetitle: "LinearAlgebra02"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: TRUE
+    code_folding: "show"
+    highlight: "zenburn"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+::: {.update-right}
+UPDATE: `r Sys.time()`
+:::
+
+# はじめに
+
+ここではデータ分析に必要な線形代数の基本的な事柄についてまとめていきます。主な範囲はベクトル、1次独立と基底、様々な行列、行列式、固有値、固有ベクトル、行列とベクトルの微分、重回帰分析、主成分分析あたりをまとめる予定です。下記の書籍を参考にして、Rで再現しながら線形代数をおさらいしていきます。
+
+- [データ分析のための線形代数](https://www.kyoritsu-pub.co.jp/bookdetail/9784320018594)
+- [Basics of Matrix Algebra for Statistics with R](https://www.routledge.com/Basics-of-Matrix-Algebra-for-Statistics-with-R/Fieller/p/book/9780367783457)
+- [The Matrix Cookbook](https://www.cs.toronto.edu/~bonner/courses/2018s/csc338/matrix_cookbook.pdf)
+
+# ベクトルとは
+ベクトルの厳密な定義はさておき、数値を順番をつけてまとめて並べたものです。$n$次元列ベクトルは、
+
+$$
+{\begin{align}
+\boldsymbol{x} & =
+\left(
+\begin{matrix}
+x_1 \\\
+x_2 \\\
+\vdots \\\
+x_n
+\end{matrix}
+\right) \\\
+\end{align}
+}
+$$
+
+と表現されます。基本的に、何らかの指示がない限り、ベクトルは列ベクトルとして扱われ、アルファベットの小文字の太字で表現されることが多いです。$x_1, x_2, \cdots, x_n$はベクトルの要素と呼びます。ベクトルを横に並べたものは、行ベクトルと呼ばれます。
+
+2次元ベクトル、3次元ベクトルであれば、2次元平面や3次元空間の中で表現することができます。下記のベクトルの場合、$\boldsymbol{a}$の第1要素をx軸、第2要素をy軸として表現できます。$\boldsymbol{b}$の第1要素をx軸、第2要素をy軸、第3要素をz軸として表現できます。
+
+$$
+{\begin{align}
+\boldsymbol{a} =
+\left(
+\begin{matrix}
+2 \\\
+1
+\end{matrix}
+\right),
+
+\boldsymbol{b} =
+\left(\begin{matrix}
+3 \\\
+4 \\\
+5
+\end{matrix}\right)
+\end{align}}
+$$
+
+4次元以上になると幾何的には表現できません。
+
+# ベクトルの演算
+
+ベクトルは次元の数が同じであれば、演算が可能です。また、対応する要素が同じであれば、そのベクトルは等しいベクトルとなります。
+
+
+# ベクトルの内積
+
+# ベクトルと相関
+
+# セッション情報
+
+```{r}
+sessionInfo()
+```
