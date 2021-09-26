@@ -1,0 +1,362 @@
+---
+title: "データ分析と線形代数06"
+pagetitle: "LinearAlgebra06"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: FALSE
+    code_folding: "show"
+    highlight: "zenburn"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+::: {.update-right}
+UPDATE: `r Sys.time()`
+:::
+
+# はじめに
+
+ここでは[データ分析のための線形代数](https://www.kyoritsu-pub.co.jp/bookdetail/9784320018594)の章末問題をRで回答していきます。
+
+- [データ分析のための線形代数](https://www.kyoritsu-pub.co.jp/bookdetail/9784320018594)
+
+# 表1.1が表すアンケートデータ
+
+```{r}
+D <- matrix(c(1,3,1,1,4,5,26,
+              1,2,1,3,1,3,22,
+              2,3,1,1,1,5,27,
+              1,2,2,1,1,5,34,
+              1,2,2,2,3,2,28,
+              3,4,1,1,3,5,20,
+              4,1,2,3,4,4,18,
+              4,4,1,2,4,4,30,
+              2,3,2,4,2,4,23,
+              1,2,2,1,4,1,32),
+            nrow = 10, ncol = 7, byrow = TRUE)
+colnames(D) <- paste0("Q", 1:7)
+rownames(D) <- paste0("ID", 1:10)
+
+# 1.1のアンケートデータ
+D
+```
+
+# 6章の章末問題
+## 6.1 次の1から6の行列の固有値と固有ベクトルを求めよ。重根の場合には、固有ベクトルは直交していても、直交していなくてもよい。
+$$
+(1)
+\begin{bmatrix}
+-1 & 2 \\
+2 & -1
+\end{bmatrix},
+(2)
+\begin{bmatrix}
+3 & -1 \\
+-1 & 3
+\end{bmatrix},
+(3)
+\begin{bmatrix}
+-1 & \sqrt{2} \\
+\sqrt{2} & 0
+\end{bmatrix}, \\
+(4)
+\begin{bmatrix}
+0 & 2 & -1 \\
+2 & 0 & 0 \\
+-1 & 0 & 0 
+\end{bmatrix},
+(5)
+\begin{bmatrix}
+2 & \sqrt{2} & 0 \\
+\sqrt{2} & 1 & 0 \\
+0 & 0 & 1 
+\end{bmatrix},
+(6)
+\begin{bmatrix}
+2 & 0 \\
+0 & 2
+\end{bmatrix}
+$$
+```{r}
+m1 <- matrix(
+  c(-1, 2,
+    2,-1),
+   nrow = 2, ncol = 2, byrow = TRUE)
+
+m2 <- matrix(
+  c(3,-1,
+    -1, 3), 
+  nrow = 2, ncol = 2, byrow = TRUE)
+
+m3 <- matrix(
+  c(-1, sqrt(2),
+   sqrt(2), 0),
+   nrow = 2, ncol = 2, byrow = TRUE)
+
+m4 <- matrix(
+  c(0, 2,-1,
+    2, 0, 0,
+    -1, 0, 0),
+  nrow = 3, ncol = 3, byrow = TRUE)
+
+m5 <- matrix(
+  c(2, sqrt(2), 0,
+    sqrt(2), 1, 0,
+    0, 0, 1),
+  nrow = 3, ncol = 3, byrow = TRUE)
+
+m6 <- matrix(
+  c(2, 0,
+    0, 2),
+    nrow = 2, ncol = 2, byrow = TRUE)
+```
+
+### 6.1.1
+```{r}
+# 固有ベクトルは1/sqrt(2)であり、基準化されている
+eigen_m1 <- eigen(m1)
+eigen_m1_val <- eigen_m1$values
+eigen_m1_vec <- eigen_m1$vectors
+eigen_m1_val;eigen_m1_vec
+```
+
+### 6.1.2 
+```{r}
+# 固有ベクトルは1/sqrt(2)であり、基準化されている
+eigen_m2 <- eigen(m2)
+eigen_m2_val <- eigen_m2$values
+eigen_m2_vec <- eigen_m2$vectors
+eigen_m2_val;eigen_m2_vec
+```
+
+### 6.1.3 
+```{r}
+# 固有ベクトルは基準化されている
+eigen_m3 <- eigen(m3)
+eigen_m3_val <- eigen_m3$values
+eigen_m3_vec <- eigen_m3$vectors
+eigen_m3_val;eigen_m3_vec
+```
+### 6.1.4 
+```{r}
+# 固有ベクトルは基準化されている
+eigen_m4 <- eigen(m4)
+eigen_m4_val <- eigen_m4$values
+eigen_m4_vec <- eigen_m4$vectors
+eigen_m4_val;eigen_m4_vec
+```
+### 6.1.5 
+```{r}
+# 固有ベクトルは基準化されている
+eigen_m5 <- eigen(m5)
+eigen_m5_val <- eigen_m5$values
+eigen_m5_vec <- eigen_m5$vectors
+eigen_m5_val;eigen_m5_vec
+```
+### 6.1.6 
+```{r}
+# 固有値は重根
+# ベクトルは基準化されていない
+eigen_m6 <- eigen(m6)
+eigen_m6_val <- eigen_m6$values
+eigen_m6_vec <- eigen_m6$vectors
+eigen_m6_val;eigen_m6_vec
+
+```
+
+## 6.2 問題6.1の1から6の行列の固有値について、トレースと固有値の和が等しいことを示せ。
+### 6.2.1
+```{r}
+all.equal(sum(diag(m1)), sum(eigen_m1_val))
+```
+
+### 6.2.2
+```{r}
+all.equal(sum(diag(m2)), sum(eigen_m2_val))
+```
+### 6.2.3
+```{r}
+all.equal(sum(diag(m3)), sum(eigen_m3_val))
+```
+### 6.2.4
+```{r}
+all.equal(sum(diag(m4)), sum(eigen_m4_val))
+```
+### 6.2.5
+```{r}
+all.equal(sum(diag(m5)), sum(eigen_m5_val))
+```
+### 6.2.6
+```{r}
+all.equal(sum(diag(m6)), sum(eigen_m6_val))
+```
+
+## 6.3 問題6.1の1から6の行列の固有値について、行列式と固有値の積が等しいことを示せ。
+### 6.3.1
+```{r}
+all.equal(det(m1), prod(eigen_m1_val))
+```
+
+### 6.3.2
+```{r}
+all.equal(det(m2), prod(eigen_m2_val))
+```
+### 6.3.3
+```{r}
+all.equal(det(m3), prod(eigen_m3_val))
+```
+### 6.3.4
+```{r}
+all.equal(det(m4), prod(eigen_m4_val))
+```
+### 6.3.5
+```{r}
+all.equal(det(m5), prod(eigen_m5_val))
+```
+### 6.3.6
+```{r}
+all.equal(det(m6), prod(eigen_m6_val))
+```
+
+## 6.4 問題6.1の1から6の行列を固有ベクトルを用いて対角化せよ。重根をもつ行列の固有ベクトルについて、重複度と同じ個数の固有ベクトルを互いに直行するように求めること。
+
+### 6.4.1
+```{r}
+t(eigen_m1_vec) %*% m1  %*% eigen_m1_vec
+```
+
+### 6.4.2
+```{r}
+t(eigen_m2_vec) %*% m2 %*% eigen_m2_vec
+```
+
+### 6.4.3
+```{r}
+t(eigen_m3_vec) %*% m3 %*% eigen_m3_vec
+```
+
+### 6.4.4
+```{r}
+t(eigen_m4_vec) %*% m4 %*% eigen_m4_vec
+```
+
+### 6.4.5
+```{r}
+t(eigen_m5_vec) %*% m5 %*% eigen_m5_vec
+```
+
+### 6.4.6
+```{r}
+t(eigen_m6_vec) %*% m6 %*% eigen_m6_vec
+```
+
+
+## 6.5 次の4次行列の固有値と固有ベクトルを求めよ。重根の場合には、等しい固有値に対応する固有ベクトルが互いに直交するように求め、すべての固有ベクトルが直行することを示せ。
+
+$$
+\begin{bmatrix}
+0 & 2 & 0 & 0 \\
+2 & 0 & 0 & 0 \\
+0 & 0 & 0 & 1 \\
+0 & 0 & 1 & 0 
+\end{bmatrix}
+$$
+```{r}
+m <- matrix(
+  c(0, 2, 0, 0,
+    2, 0, 0, 0,
+    0, 0, 0, 1,
+    0, 0, 1, 0),
+  nrow = 4, ncol = 4, byrow = TRUE)
+m
+```
+
+```{r}
+m_eigen_vec <- eigen(m)$vectors
+conbination <- t(combn(4,2))
+
+for (i in 1:nrow(conbination)){
+  tmp <- conbination[i,]
+  m1 <- m_eigen_vec[, tmp[1]]
+  m2 <- m_eigen_vec[, tmp[2]]
+  print(sprintf("vec%.0f・vec%.0f: %.0f", tmp[1], tmp[2], t(m1) %*% m2))
+}
+```
+
+## 6.6 表1.1の回答者1から5の設問5と6に対する回答を用いて、1から5に答えよ。
+```{r}
+D56 <- D[1:5, 5:6]
+n <- nrow(D56)
+D56_Q5_mean <- mean(D56[,1])
+D56_Q6_mean <- mean(D56[,2])
+D56_hensa <- cbind(D56[,1] - D56_Q5_mean, D56[,2] - D56_Q6_mean)
+D56_hensa
+```
+
+## 6.6.1 偏差行列を$\sqrt(5)(\sqrt(n))$で割った行列を求めよ。
+```{r}
+c <- (1/sqrt(n)) * D56_hensa
+c
+```
+
+## 6.6.2 「偏差行列を$\sqrt(5)$で割った行列の転置行列」と「偏差行列を$\sqrt(5)$で割った行列」の積を求めよ。
+```{r}
+# 1/n * t(D56_hensa) %*% D56_hensa
+cov <- t(c) %*% c
+cov
+```
+
+## 6.6.3 上記の2で得られた行列の固有値と固有ベクトルを求めよ。固有ベクトルは基準化すること。
+```{r}
+eigen_cov <- eigen(cov)
+eigen_cov
+```
+
+## 6.6.4 上記の3で得られた固有ベクトルを列に持つ直交行列を求めよ。
+
+```{r}
+eigen_cov_vec <- eigen_cov$vectors
+eigen_cov_vec
+```
+
+## 6.6.5 上記4で得られた直交行列の転置行列を「偏差行列を$\sqrt(5)$で割った行列」の転置行列に左から乗じ、得られた行列から5人の回答者の散布図を描け。
+
+```{r}
+# 対角化
+# 1. eigen_cov$values
+# 2. (1/sqrt(n) * t(eigen_cov_vec) %*% t(D56_hensa)) %*% (1/sqrt(n) * D56_hensa %*% eigen_cov_vec)
+# 1と2は同じ
+
+# (1/sqrt(n) * eigen_cov_vec %*% t(D56_hensa))
+rotate <- c %*% eigen_cov$vectors
+rotate
+```
+
+```{r}
+plot(rotate, xlim = c(-1, 1), ylim = c(-1, 1), asp = TRUE)
+text(rotate, row.names(rotate), cex=0.6, pos=4, col="red")
+arrows(0, 0, eigen_cov_vec[1,1], eigen_cov_vec[2,1])
+arrows(0, 0, eigen_cov_vec[1,2], eigen_cov_vec[2,2])
+text(t(eigen_cov_vec), c("Q5","Q6"), cex=0.6, pos=4, col="blue")
+abline(h = 0, v = 0)
+```
+# セッション情報
+
+```{r}
+sessionInfo()
+```

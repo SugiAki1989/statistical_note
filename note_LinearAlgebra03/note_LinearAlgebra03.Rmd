@@ -1,0 +1,524 @@
+---
+title: "データ分析と線形代数03"
+pagetitle: "LinearAlgebra03"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: FALSE
+    code_folding: "show"
+    highlight: "zenburn"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+::: {.update-right}
+UPDATE: `r Sys.time()`
+:::
+
+# はじめに
+
+ここでは[データ分析のための線形代数](https://www.kyoritsu-pub.co.jp/bookdetail/9784320018594)の章末問題をRで回答していきます。
+
+- [データ分析のための線形代数](https://www.kyoritsu-pub.co.jp/bookdetail/9784320018594)
+
+# 表1.1が表すアンケートデータ
+
+```{r}
+D <- matrix(c(1,3,1,1,4,5,26,
+              1,2,1,3,1,3,22,
+              2,3,1,1,1,5,27,
+              1,2,2,1,1,5,34,
+              1,2,2,2,3,2,28,
+              3,4,1,1,3,5,20,
+              4,1,2,3,4,4,18,
+              4,4,1,2,4,4,30,
+              2,3,2,4,2,4,23,
+              1,2,2,1,4,1,32),
+            nrow = 10, ncol = 7, byrow = TRUE)
+colnames(D) <- paste0("Q", 1:7)
+rownames(D) <- paste0("ID", 1:10)
+
+# 1.1のアンケートデータ
+D
+```
+
+# 3章の章末問題
+## 3.1 以下のベクトルがあるとき、1から10の2つのベクトルが直交するかどうかを答えよ。ただし、2つのベクトルの間で、直交性が定義されていない場合は「定義されていない」と答えること。
+
+$$
+\begin{eqnarray}
+\boldsymbol{ s }
+=\left(\begin{array}{c}
+   2 \\
+   1.5
+   \end{array}\right),
+\boldsymbol{ t }
+=\left(\begin{array}{c}
+   5 \\
+   2
+   \end{array}\right),
+  \boldsymbol{ v }
+=\left(\begin{array}{c}
+   -3 \\
+   4
+   \end{array}\right),
+\boldsymbol{ w }
+=\left(\begin{array}{c}
+   0 \\
+   0
+   \end{array}\right),
+\boldsymbol{ a }
+=\left(\begin{array}{c}
+   2 \\
+   -5 \\
+   0
+   \end{array}\right),
+\boldsymbol{ b }
+=\left(\begin{array}{c}
+   3 \\
+   5 \\
+   -1
+   \end{array}\right),
+\boldsymbol{ c }
+=\left(\begin{array}{c}
+   -5 \\
+   3 \\
+   0
+   \end{array}\right),
+\boldsymbol{ d }
+=\left(\begin{array}{c}
+   0 \\
+   0 \\
+   7
+   \end{array}\right)
+\end{eqnarray}
+$$
+
+```{r}
+s <- c(2, 1.5)
+t <- c(5, 2)
+v <- c(-3, 4)
+w <- c(0, 0)
+a <- c(2, -5, 0)
+b <- c(3, 5, -1)
+c <- c(-5, 3, 0)
+d <- c(0, 0, 7)
+```
+
+
+### 3.1.1 sとt
+```{r}
+# 直交しない
+s %*% t
+```
+
+```{r}
+library(matlib)
+xlim <- c(0, 5)
+ylim <- c(0, 5)
+plot(xlim, ylim, type = "n", xlab = "Dim1", ylab = "Dim2", asp = 1)
+abline(v = 0, h = 0, col = "gray")
+grid()
+vectors(rbind(s, t), col = c("red", "blue"))
+```
+
+### 3.1.2 vとs
+```{r}
+# 直交する
+v %*% s
+```
+
+```{r}
+xlim <- c(-5, 5)
+ylim <- c(0, 5)
+plot(xlim, ylim, type = "n", xlab = "X", ylab = "Y", asp = 1)
+abline(v = 0, h = 0, col = "gray")
+grid()
+vectors(rbind(v, s), col = c("red", "blue"))
+```
+
+### 3.1.3 tとw
+```{r}
+# 直交する
+t %*% w
+```
+
+```{r}
+xlim <- c(0, 5)
+ylim <- c(0, 5)
+plot(xlim, ylim, type = "n", xlab = "Dim1", ylab = "Dim2", asp = 1)
+abline(v = 0, h = 0, col = "gray")
+grid()
+vectors(rbind(t, w), col = c("red", "blue"))
+```
+
+### 3.1.4 vとt
+```{r}
+# 直交しない
+v %*% t
+```
+
+```{r}
+xlim <- c(-5, 5)
+ylim <- c(0, 5)
+plot(xlim, ylim, type = "n", xlab = "Dim1", ylab = "Dim2", asp = 1)
+abline(v = 0, h = 0, col = "gray")
+grid()
+vectors(rbind(v, t), col = c("red", "blue"))
+```
+
+### 3.1.5 tとa
+```{r}
+# 定義されない
+```
+
+### 3.1.6 cとd
+```{r}
+# 直交する
+c %*% d
+```
+
+### 3.1.7 bとc
+```{r}
+# 直交する
+b %*% c
+```
+### 3.1.8 bとa
+```{r}
+# 直交しない
+b %*% a
+```
+### 3.1.9 wとd
+```{r}
+# 定義されない
+```
+### 3.1.10 dとa
+```{r}
+# 直交する
+d %*% a
+```
+
+## 3.2 1から12のベクトルの組が各々一次独立か一次従属かを答えよ。一次独立が定義されていない場合は「定義されていない」と答えること。
+
+$$
+\begin{eqnarray}
+(1)
+\left(\begin{array}{c}
+   0 \\
+   0
+   \end{array}\right),
+(2)
+\left(\begin{array}{c}
+   -4 \\
+   -3
+   \end{array}\right),
+(3)
+\left(\begin{array}{c}
+   1 \\
+   4
+   \end{array}\right),
+\left(\begin{array}{c}
+   -4 \\
+   1
+   \end{array}\right),
+(4)
+\left(\begin{array}{c}
+   1 \\
+   4
+   \end{array}\right),
+\left(\begin{array}{c}
+   -2 \\
+   -8
+   \end{array}\right),
+(5)
+\left(\begin{array}{c}
+   1 \\
+   4
+   \end{array}\right),
+\left(\begin{array}{c}
+   -4 \\
+   1
+   \end{array}\right),
+\left(\begin{array}{c}
+   3 \\
+   -3
+   \end{array}\right),
+(6)
+\left(\begin{array}{c}
+   -3 \\
+   2 \\
+   -2
+   \end{array}\right),
+\left(\begin{array}{c}
+   2 \\
+   0 \\
+   1
+   \end{array}\right)
+(7)
+\left(\begin{array}{c}
+   -3 \\
+   2 \\
+   -2
+   \end{array}\right),
+\left(\begin{array}{c}
+   2 \\
+   0 \\
+   1
+   \end{array}\right),
+\left(\begin{array}{c}
+   1 \\
+   -2 \\
+   1
+   \end{array}\right), \\ 
+(8)
+\left(\begin{array}{c}
+   -3 \\
+   2 \\
+   -2
+   \end{array}\right),
+\left(\begin{array}{c}
+   2 \\
+   0 \\
+   1
+   \end{array}\right),
+\left(\begin{array}{c}
+   0 \\
+   0 \\
+   0
+   \end{array}\right),
+(9)
+\left(\begin{array}{c}
+   1 \\
+   4
+   \end{array}\right),
+\left(\begin{array}{c}
+   1 \\
+   0 \\
+   0
+   \end{array}\right),
+(10)
+\left(\begin{array}{c}
+   4 \\
+   5 \\
+   0
+   \end{array}\right),
+\left(\begin{array}{c}
+   2 \\
+   1 \\
+   2
+   \end{array}\right),
+\left(\begin{array}{c}
+   3 \\
+   -2 \\
+   1
+   \end{array}\right),
+(11)
+\left(\begin{array}{c}
+   4 \\
+   5 \\
+   0
+   \end{array}\right),
+\left(\begin{array}{c}
+   2 \\
+   1 \\
+   2
+   \end{array}\right),
+\left(\begin{array}{c}
+   3 \\
+   -2 \\
+   1
+   \end{array}\right),
+\left(\begin{array}{c}
+   1 \\
+   -1 \\
+   1
+   \end{array}\right),
+(12)
+\left(\begin{array}{c}
+   1.5 \\
+   -1 \\
+   1
+   \end{array}\right),
+\left(\begin{array}{c}
+   -3 \\
+   2 \\
+   -2
+   \end{array}\right),
+\left(\begin{array}{c}
+   6 \\
+   -4 \\
+   4
+   \end{array}\right)
+\end{eqnarray}
+$$
+### 3.2.1
+ゼロベクトル1つの組であり一次従属
+
+### 3.2.2
+非ゼロベクトル1つの組であり一次独立
+
+### 3.2.3
+一方が他方のスカラ倍ではなく一次独立
+
+### 3.2.4
+$$
+-2 
+\left(\begin{array}{c}
+   1 \\
+   4
+   \end{array}\right)
+   =
+\left(\begin{array}{c}
+   -2 \\
+   -8
+   \end{array}\right)
+$$
+であり一次従属。
+
+### 3.2.5
+2次ベクトル3つからなる組であり、一次従属
+
+### 3.2.6
+一方が他方のスカラ倍ではなく一次独立
+
+### 3.2.7
+$$
+\left(\begin{array}{c}
+   −3 \\
+   2 \\
+   -2
+   \end{array}\right)
+= -
+\left(\begin{array}{c}
+   2 \\
+   0 \\
+   1
+\end{array}\right) -
+\left(\begin{array}{c}
+   1 \\
+   -2 \\
+   1
+\end{array}\right)
+$$
+であり一次従属。
+
+### 3.2.8
+ゼロベクトルを含む組であり一次従属
+
+### 3.2.9
+定義されない
+
+### 3.2.10
+ランクが3であるため、一次独立。
+
+```{r}
+m <- matrix(
+  c(4, 2, 3,
+    5, 1,-2,
+    0, 2, 1),
+  nrow = 3,
+  ncol = 3,
+  byrow = TRUE
+)
+
+R(m)
+
+```
+
+### 3.2.11
+3次ベクトル4つからなる組であり一次従属。
+
+### 3.2.12
+ランクが1であるため、一次従属。
+
+```{r}
+m <- matrix(
+  c(1.5,-3, 6,-1, 2,-4,
+    1,-2, 4),
+  nrow = 3,
+  ncol = 3,
+  byrow = TRUE
+)
+
+R(m)
+```
+
+## 3.3 問題3.2の1から12について一次独立なベクトルの最大個数を求めよ。
+
+この問題の回答は行なわない。
+
+## 3.4 以下のベクトルについて、1から5に答えよ。
+$$
+\begin{eqnarray}
+\boldsymbol{ a }
+=\left(\begin{array}{c}
+   2 \\
+   2
+   \end{array}\right),
+\boldsymbol{ b }
+=\left(\begin{array}{c}
+   -1 \\
+   -1
+   \end{array}\right),
+  \boldsymbol{ c }
+=\left(\begin{array}{c}
+   -3 \\
+   4
+   \end{array}\right),
+\boldsymbol{ d }
+=\left(\begin{array}{c}
+   -1 \\
+   6
+   \end{array}\right),
+\boldsymbol{ f }
+=\left(\begin{array}{c}
+   3 \\
+   -4
+   \end{array}\right),
+\boldsymbol{ g }
+=\left(\begin{array}{c}
+   0 \\
+   0
+   \end{array}\right)
+\end{eqnarray}
+$$
+
+### 3.4.1 E1を張る3つのベクトルからなる組を6つのベクトルから選べ。
+
+$\boldsymbol{a},\boldsymbol{b},\boldsymbol{g}$または$\boldsymbol{c},\boldsymbol{f},\boldsymbol{g}$。
+
+### 3.4.2 E1を張る2つのベクトルからなる組を6つのベクトルから選べ。ただしゼロベクトルを含まないものとする。
+
+$\boldsymbol{a},\boldsymbol{b}$または$\boldsymbol{c},\boldsymbol{f}$。
+
+### 3.4.3 fを含むE2の基底を6つのベクトルから選べ。
+
+$\boldsymbol{f},\boldsymbol{a}$、$\boldsymbol{f},\boldsymbol{b}$、$\boldsymbol{f},\boldsymbol{d}$。
+
+### 3.4.4 E2の規定となる2つのベクトルからなる組を、6つのベクトルから選べ。ただし、bを含まないこと。
+
+$\boldsymbol{a},\boldsymbol{c},\boldsymbol{d},\boldsymbol{f}$から選んだ2つのベクトルの組み合わせ、ただし、$\boldsymbol{c},\boldsymbol{f}$の組み合わせは除く。
+
+### 3.4.5 ベクトルあを含む2つのベクトルからなるベクトルの組で、一次従属な組を2組選べ。
+
+$\boldsymbol{a},\boldsymbol{b}$および$\boldsymbol{a},\boldsymbol{g}$。
+
+# セッション情報
+
+```{r}
+sessionInfo()
+```

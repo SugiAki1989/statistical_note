@@ -1,0 +1,519 @@
+---
+title: "データ分析と線形代数02"
+pagetitle: "LinearAlgebra02"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: FALSE
+    code_folding: "show"
+    highlight: "zenburn"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+::: {.update-right}
+UPDATE: `r Sys.time()`
+:::
+
+# はじめに
+
+ここでは[データ分析のための線形代数](https://www.kyoritsu-pub.co.jp/bookdetail/9784320018594)の章末問題をRで回答していきます。
+
+- [データ分析のための線形代数](https://www.kyoritsu-pub.co.jp/bookdetail/9784320018594)
+
+# 表1.1が表すアンケートデータ
+
+```{r}
+D <- matrix(c(1,3,1,1,4,5,26,
+              1,2,1,3,1,3,22,
+              2,3,1,1,1,5,27,
+              1,2,2,1,1,5,34,
+              1,2,2,2,3,2,28,
+              3,4,1,1,3,5,20,
+              4,1,2,3,4,4,18,
+              4,4,1,2,4,4,30,
+              2,3,2,4,2,4,23,
+              1,2,2,1,4,1,32),
+            nrow = 10, ncol = 7, byrow = TRUE)
+colnames(D) <- paste0("Q", 1:7)
+rownames(D) <- paste0("ID", 1:10)
+
+# 1.1のアンケートデータ
+D
+```
+
+
+# 2章の章末問題
+## 2.1 表1.1の回答者1の設問1と2への回答、回答者2の設問1と2への回答、および回答者3の設問1と2への回答を行ベクトルで表わせ。設問1への回答者1から3の回答、および設問2への回答者1から3の回答を列ベクトルで表せ。
+
+```{r}
+# 回答者1
+D[1, 1:2]
+
+# 回答者2
+D[2, 1:2]
+
+# 回答者3
+D[3, 1:2]
+```
+
+```{r}
+# 設問1
+D[1:3, 1]
+
+# 設問2
+D[1:3, 2]
+```
+
+## 2.2 以下のベクトルがあるとき、1から16の計算をせよ(または質問に答えよ)。演算が定義されていない場合は「定義されていない」と答えること。
+
+$$
+\begin{eqnarray}
+\boldsymbol{ a }
+=\left(\begin{array}{c}
+   3 \\
+   4
+   \end{array}\right),
+\boldsymbol{ b }
+=\left(\begin{array}{c}
+   -1 \\
+   -5
+   \end{array}\right),
+  \boldsymbol{ c }
+=\left(\begin{array}{c}
+   -3 \\
+   2
+   \end{array}\right),
+\boldsymbol{ d }
+=\left(\begin{array}{c}
+   4 \\
+   3
+   \end{array}\right),
+\boldsymbol{ g }
+=\left(\begin{array}{c}
+   -3 \\
+   2 \\
+   0
+   \end{array}\right),
+\boldsymbol{ h }
+=\left(\begin{array}{c}
+   3 \\
+   5 \\
+   -1
+   \end{array}\right),
+\boldsymbol{ p }
+=\left(\begin{array}{c}
+   -3 \\
+   2 \\
+   0
+   \end{array}\right)
+\end{eqnarray}
+$$
+
+```{r}
+a <- c(3,4)
+b <- c(-1,-5)
+c <- c(-3,2)
+d <- c(4,3)
+g <- c(-3,2,0)
+h <- c(3,5,-1)
+p <- c(-3,2,0)
+```
+
+
+### 2.2.1 ベクトルgとpは等しいか
+```{r}
+# 等しい
+```
+
+### 2.2.2 ベクトルgとcは等しいか
+```{r}
+# 等しくない
+```
+### 2.2.3 ||b||
+```{r}
+norm <- function(x) sqrt(sum(x^2))
+# sqrt(26)
+norm(b)
+```
+### 2.2.4 ||h||
+```{r}
+# sqrt(35)
+norm(h)
+```
+### 2.2.5 -5d
+```{r}
+-5 * d
+```
+```{r}
+library(matlib)
+xlim <- c(-10,10)
+ylim <- c(-20,10)
+plot(xlim, ylim, type = "n", xlab = "X", ylab = "Y", asp = 1)
+abline(v = 0, h = 0, col = "gray")
+grid()
+vectors(rbind(d, -5*d), col = c("red", "blue"))
+```
+
+### 2.2.6 a+b
+```{r}
+a + b
+```
+```{r}
+xlim <- c(-10,10)
+ylim <- c(-10,10)
+plot(xlim, ylim, type = "n", xlab = "X", ylab = "Y", asp = 1)
+abline(v = 0, h = 0, col = "gray")
+grid()
+vectors(rbind(a, b, "a+b" = a + b), col = c("red", "blue", "darkgreen"))
+```
+
+### 2.2.7 c-b
+```{r}
+c - b
+```
+
+```{r}
+xlim <- c(-10,10)
+ylim <- c(-10,10)
+plot(xlim, ylim, type = "n", xlab = "X", ylab = "Y", asp = 1)
+abline(v = 0, h = 0, col = "gray")
+grid()
+vectors(rbind(c, b, "c-b" = c + (-1)*b), col = c("red", "blue", "darkgreen"))
+```
+
+### 2.2.8 g+p
+```{r}
+g + p
+```
+
+```{r}
+xlim <- c(-10,10)
+ylim <- c(-10,10)
+plot(xlim, ylim, type = "n", xlab = "X", ylab = "Y", asp = 1)
+abline(v = 0, h = 0, col = "gray")
+grid()
+vectors(rbind(g, p, "g+p" = g + p), col = c("red", "blue", "darkgreen"))
+```
+
+### 2.2.9 h+c
+```{r}
+# 定義されない
+```
+
+### 2.2.10 ||d-c||
+```{r}
+# sqrt(50)
+norm(d - c)
+```
+### 2.2.11 ||2d+b||
+```{r}
+# sqrt(50)
+norm(2*d + b)
+```
+### 2.2.12 ||g||-||a|
+```{r}
+norm_g <- norm(g)
+norm_a <- norm(a)
+# sqrt(13) - sqrt(25)
+norm_g - norm_a
+```
+### 2.2.13 a/||a||
+```{r}
+a / norm(a)
+```
+### 2.2.14 -3d-b+2a
+```{r}
+-3*d - b + 2*a
+```
+### 2.2.15 p-2g+5h
+```{r}
+p - 2*g + 5*h
+```
+
+### 2.2.16 2p+5a-g-4b
+```{r}
+# 定義されない
+```
+
+## 2.3 下記のベクトルhを単位ベクトルの1次結合で表わせ。
+$$
+\begin{eqnarray}
+\boldsymbol{ h }
+=\left(\begin{array}{c}
+   3 \\
+   5 \\
+   -1
+   \end{array}\right)
+\end{eqnarray}
+$$
+
+```{r}
+h <- c(3,5,-1)
+e1 <- c(1,0,0)
+e2 <- c(0,1,0)
+e3 <- c(0,0,1)
+
+# 3*e1 + 5*e2 + (-1)*e3
+h[1]*e1 + h[2]*e2 + h[3]*e3
+```
+
+## 2.4 問題2.2のベクトルを用いて、1から5の計算をせよ。演算が定義されていない場合は「定義されていない」と答えること。
+
+$$
+\begin{eqnarray}
+\boldsymbol{ a }
+=\left(\begin{array}{c}
+   3 \\
+   4
+   \end{array}\right),
+\boldsymbol{ b }
+=\left(\begin{array}{c}
+   -1 \\
+   -5
+   \end{array}\right),
+  \boldsymbol{ c }
+=\left(\begin{array}{c}
+   -3 \\
+   2
+   \end{array}\right),
+\boldsymbol{ d }
+=\left(\begin{array}{c}
+   4 \\
+   3
+   \end{array}\right),
+\boldsymbol{ g }
+=\left(\begin{array}{c}
+   -3 \\
+   2 \\
+   0
+   \end{array}\right),
+\boldsymbol{ h }
+=\left(\begin{array}{c}
+   3 \\
+   5 \\
+   -1
+   \end{array}\right),
+\boldsymbol{ p }
+=\left(\begin{array}{c}
+   -3 \\
+   2 \\
+   0
+   \end{array}\right)
+\end{eqnarray}
+$$
+### 2.4.1 (c,b)
+```{r}
+# c %*% b
+t(matrix(c)) %*% matrix(b)
+```
+
+### 2.4.2 (g,d)
+```{r}
+# 定義されない
+```
+### 2.4.3 (2p,h)
+```{r}
+t(matrix(2*p)) %*% matrix(h)
+```
+### 2.4.4 ベクトルcとbのなす角の余弦(cos)
+```{r}
+# cos = (c・d) / ||c||*||b||
+norm_c <- norm(c)
+norm_b <- norm(b)
+innerdot_cb <- as.vector(t(matrix(c)) %*% matrix(b))
+
+# -7/(sqrt(13)*sqrt(26))
+innerdot_cb / (norm_c * norm_b)
+```
+
+```{r}
+xlim <- c(-5,5)
+ylim <- c(-5,5)
+plot(xlim, ylim, type = "n", xlab = "X", ylab = "Y", asp = 1)
+abline(v = 0, h = 0, col = "gray")
+grid()
+vectors(rbind(c, b), col = c("red", "blue"))
+```
+
+### 2.4.5 ベクトルpとgのなす角の余弦(cos)
+```{r}
+norm_p <- norm(p)
+norm_g <- norm(g)
+innerdot_pg <- as.vector(t(matrix(p)) %*% matrix(g))
+
+# 13/(sqrt(13)*sqrt(13))
+innerdot_pg / (norm_p * norm_g)
+```
+
+```{r}
+xlim <- c(-5,5)
+ylim <- c(-5,5)
+plot(xlim, ylim, type = "n", xlab = "X", ylab = "Y", asp = 1)
+abline(v = 0, h = 0, col = "gray")
+grid()
+vectors(rbind(p, g), col = c("red", "blue"))
+```
+
+## 2.5 表1.1の回答者6から10の設問2と6への回答について、1から5の計算をせよ。
+### 2.5.1 設問2と6について、偏差を要素するベクトル
+```{r}
+D2 <- D[6:10, 2]
+D6 <- D[6:10, 6]
+
+m2 <- mean(D2)
+m6 <- mean(D6)
+
+D2_hensa <- D2 - m2
+D6_hensa <- D6 - m6
+D2_hensa;D6_hensa
+```
+### 2.5.2 2つのベクトル各々の長さ
+```{r}
+# sqrt(6.8)
+norm(D2_hensa)
+
+# sqrt(9.2)
+norm(D6_hensa)
+```
+
+### 2.5.3 2つのベクトルの内積
+```{r}
+innerdot_hensa26 <- as.vector(t(matrix(D2 - m2)) %*% matrix(D6 - m6))
+innerdot_hensa26
+```
+
+### 2.5.4 設問2と6の相関係数
+
+変数$\boldsymbol{x}$と変数$\boldsymbol{y}$の相関係数は下記の通り定義されます。
+
+
+$$
+r_{xy} = \frac{\sum(x_{i} - \bar{x})\sum(y_{i} - \bar{y})} { \sqrt{\sum(x_{i} - \bar{x})^{2} \sum(y_{i} - \bar{y})^{2}}  }
+$$
+
+そして、分母の標準偏差は下記のように書き換えられます。
+
+$$
+\sqrt{\sum(x_{i} - \bar{x})^{2}}=\sqrt{n}s_{x}\\
+\sqrt{\sum(y_{i} - \bar{y})^{2}}=\sqrt{n}s_{y}
+$$
+
+標準偏差を使って標準化を行えることを考えると、
+
+$$
+\frac{(x_{i} - \bar{x})}{s_{x}} = z_{x} \\ 
+\frac{(y_{i} - \bar{y})}{s_{y}} = z_{y}
+$$
+
+相関係数は下記のようにも書くことができます。標準化した変数の積和をベクトルの数で割ったものです。
+
+$$
+\begin{eqnarray}
+r_{xy} &=& \frac{\sum(x_{i} - \bar{x}) (y_{i} - \bar{y})} { \sqrt{\sum(x_{i} - \bar{x})^{2} \sum(y_{i} - \bar{y})^{2}}  } \\
+&=& \sum \left( \frac{(x_{i} - \bar{x})}{ \sqrt{\sum(x_{i} - \bar{x})^2} } \frac{(y_{i} - \bar{y})}{ \sqrt{\sum(y_{i} - \bar{y})^2} } \right) \\
+&=& \sum \frac{(x_{i} - \bar{x})}{\sqrt{n}s_{x}} \frac{(y_{i} - \bar{y})}{\sqrt{n}s_{y}} \\
+&=& \sum \frac{z_{x}}{\sqrt{n}}\frac{z_{y}}{\sqrt{n}} \\
+&=& \sum \frac{z_{x} z_{y}}{n}
+\end{eqnarray}
+$$
+
+相関係数の分子は偏差ベクトルの内積であり、偏差ベクトルを$\boldsymbol{x}_{(m)}$と$\boldsymbol{y}_{(m)}$として表すと、
+
+$$
+(\boldsymbol{x}_{(m)}, \boldsymbol{y}_{(m)}) = \sum(x_{i}-\bar{x})(y_{i}-\bar{y})
+$$
+
+相関係数の分母は各偏差ベクトルの「長さ」の積である。
+
+$$
+||\boldsymbol{x}_{(m)}|| = \sqrt{\sum(x_{i} - \bar{x})^{2}} = \sqrt{n} s_{x} \\
+||\boldsymbol{y}_{(m)}|| = \sqrt{\sum(y_{i} - \bar{y})^{2}} = \sqrt{n} s_{y}
+$$
+
+つまり、相関係数は下記のように内積とベクトルの長さを使っても表現できる。
+
+$$
+r_{xy} = \frac{(\boldsymbol{x}_{(m)}, \boldsymbol{y}_{(m)})}{||\boldsymbol{x}_{(m)}|| ||\boldsymbol{y}_{(m)}||}
+$$
+```{r}
+cor(D2, D6)
+innerdot_hensa26 / (norm(D2_hensa) * norm(D6_hensa))
+```
+
+### 2.5.5 設問2と6の共分散
+
+共分散は下記のように定義される。
+
+$$
+cov_{xy} = \frac{1}{n} \sum (x_{i} - \bar{x})(y_{i} - \bar{y}) = \frac{(\boldsymbol{x}_{(m)}, \boldsymbol{y}_{(m)})}{n}
+$$
+
+```{r}
+innerdot_hensa26 / length(D2)
+
+```
+
+
+## 2.6 表1.1のデータについて、1から6の計算をせよ。
+### 2.6.1 設問1への回答者1から3の回答を表すベクトルの長さ
+
+```{r}
+D1 <- D[1:3, 1]
+
+# sqrt(6)
+norm(D1)
+```
+
+### 2.6.2 設問2への回答者1から3の回答を表すベクトルの長さ
+```{r}
+D2 <- D[1:3, 2]
+
+# sqrt(22)
+norm(D2)
+```
+
+### 2.6.3上記1の設問1を表すベクトルから2の設問2を表すベクトルを引いたベクトル
+```{r}
+D1 - D2
+```
+
+### 2.6.4 上記3の設問1と2を表すベクトルの先端の間の距離
+
+```{r}
+# sqrt(6)
+norm(D1 - D2)
+```
+
+### 2.6.5 回答者2の設問1と2への回答を表すベクトルから回答者3の設問1と2への回答を表すベクトルを引いたベクトル
+
+```{r}
+D[2, 1:2] - D[3, 1:2]
+```
+
+### 2.6.6 上記5の回答者2と3を表すベクトルの先端の間の距離
+
+```{r}
+# sqrt(2)
+norm(D[2, 1:2] - D[3, 1:2])
+```
+
+# セッション情報
+
+```{r}
+sessionInfo()
+```

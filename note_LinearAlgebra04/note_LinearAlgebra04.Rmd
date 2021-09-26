@@ -1,0 +1,399 @@
+---
+title: "データ分析と線形代数04"
+pagetitle: "LinearAlgebra04"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: FALSE
+    code_folding: "show"
+    highlight: "zenburn"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+::: {.update-right}
+UPDATE: `r Sys.time()`
+:::
+
+# はじめに
+
+ここでは[データ分析のための線形代数](https://www.kyoritsu-pub.co.jp/bookdetail/9784320018594)の章末問題をRで回答していきます。
+
+- [データ分析のための線形代数](https://www.kyoritsu-pub.co.jp/bookdetail/9784320018594)
+
+# 表1.1が表すアンケートデータ
+
+```{r}
+D <- matrix(c(1,3,1,1,4,5,26,
+              1,2,1,3,1,3,22,
+              2,3,1,1,1,5,27,
+              1,2,2,1,1,5,34,
+              1,2,2,2,3,2,28,
+              3,4,1,1,3,5,20,
+              4,1,2,3,4,4,18,
+              4,4,1,2,4,4,30,
+              2,3,2,4,2,4,23,
+              1,2,2,1,4,1,32),
+            nrow = 10, ncol = 7, byrow = TRUE)
+colnames(D) <- paste0("Q", 1:7)
+rownames(D) <- paste0("ID", 1:10)
+
+# 1.1のアンケートデータ
+D
+```
+
+# 4章の章末問題
+## 4.1 表1.1の回答者7から10の設問5から7への回答を要素とする4×3行列を書け。この行列を転置した行列を求めよ。
+```{r}
+D43 <- D[7:10, 5:7]
+D43
+
+t(D43)
+```
+
+## 4.2 表1.1の回答者1から5の設問1から5への回答を要素とする5次正方行列のトレースを求めよ。
+```{r}
+D55 <- D[1:5, 1:5]
+D55
+
+sum(diag(D55))
+```
+
+## 4.3 以下の行列の中で1から8に当てはまる行列を挙げよ。
+
+$$
+\boldsymbol{U} =
+\begin{bmatrix}
+1 & 0 & 0 \\
+0 & 1 & 0 \\
+0 & 0 & 1
+\end{bmatrix},
+\boldsymbol{V} =
+\begin{bmatrix}
+1 & 2 & 0 & 2 & 4 \\
+0 & 0 & 2 & 3 & -6 \\
+0 & 0 & 5 & -7 & 1 \\
+0 & 0 & 0 & 7 & 5 \\
+0 & 0 & 0 & 0 & 3 \\
+\end{bmatrix},
+\boldsymbol{W} =
+\begin{bmatrix}
+-5 & 1 \\
+0 & 2 \\
+0 & 0
+\end{bmatrix}, \\
+\boldsymbol{X} =
+\begin{bmatrix}
+\frac{1}{\sqrt{2}} & \frac{1}{\sqrt{2}} \\
+\frac{1}{\sqrt{2}} & -\frac{1}{\sqrt{2}}
+\end{bmatrix},
+\boldsymbol{Y} =
+\begin{bmatrix}
+0 & 1 & 2 \\
+1 & -3 & 8 \\
+2 & 8 & 5
+\end{bmatrix},
+\boldsymbol{Z} =
+\begin{bmatrix}
+0 & 0 & 0 \\
+0 & 0 & 0
+\end{bmatrix}, \\
+\boldsymbol{A} =
+\begin{bmatrix}
+-4 & 0 & 0 & 0 \\
+5 & 8 & 0 & 0 \\
+0 & -9 & 3 & 0 \\
+11 & 0 & 6 & 1 
+\end{bmatrix},
+\boldsymbol{B} =
+\begin{bmatrix}
+1 & 0 & 0 \\
+0 & 0 & 0 \\
+0 & 0 & 1
+\end{bmatrix},
+\boldsymbol{C} =
+\begin{bmatrix}
+7 & -3 & 4 \\
+0 & 5 & 1 \\
+0 & 0 & -2 \\
+0 & 0 & 0 
+\end{bmatrix}
+$$
+### 4.3.1 正方行列
+$\boldsymbol{U},\boldsymbol{V},\boldsymbol{X},\boldsymbol{Y},\boldsymbol{A},\boldsymbol{B}$。
+
+### 4.3.2 矩形行列
+$\boldsymbol{W},\boldsymbol{Z},\boldsymbol{C}$。
+
+### 4.3.3 対角行列
+$\boldsymbol{U},\boldsymbol{B}$。
+
+### 4.3.4 単位行列
+$\boldsymbol{U}$。
+
+### 4.3.5 対称行列
+$\boldsymbol{U},\boldsymbol{X},\boldsymbol{Y},\boldsymbol{B}$。
+
+### 4.3.6 ゼロ行列
+$\boldsymbol{Z}$。
+
+### 4.3.7 上三角行列
+$\boldsymbol{U},\boldsymbol{V},\boldsymbol{B}$。
+
+### 4.3.8 下三角行列
+$\boldsymbol{U},\boldsymbol{A},\boldsymbol{B}$。
+
+## 4.4 ベクトルaからfと行列PからTについて、1から18の計算をせよ。演算が定義されていない場合は、「定義されていない」と答えること。
+
+$$
+\boldsymbol{a} =
+\begin{bmatrix}
+3 \\
+4
+\end{bmatrix},
+\boldsymbol{b} =
+\begin{bmatrix}
+-1 \\
+5
+\end{bmatrix},
+\boldsymbol{c} =
+\begin{bmatrix}
+-3 \\
+2
+\end{bmatrix},
+\boldsymbol{d} =
+\begin{bmatrix}
+-3 \\
+2 \\
+0
+\end{bmatrix},
+\boldsymbol{f} =
+\begin{bmatrix}
+3 \\
+5 \\
+-1
+\end{bmatrix}, \\
+\boldsymbol{P} =
+\begin{bmatrix}
+2 & 1 \\
+-1 & 2 \\
+\end{bmatrix},
+\boldsymbol{Q} =
+\begin{bmatrix}
+1 & 2 \\
+2 & 4 \\
+\end{bmatrix},
+\boldsymbol{R} =
+\begin{bmatrix}
+1 & 2 & 2\\
+2 & 4 & -1
+\end{bmatrix}, \\
+\boldsymbol{S} =
+\begin{bmatrix}
+1 & 0 & 0 \\
+0 & 0 & 0 \\
+0 & 0 & 1
+\end{bmatrix},
+\boldsymbol{T} =
+\begin{bmatrix}
+-2 & 0 \\
+1 & 2 \\
+4 & -3
+\end{bmatrix}
+$$
+```{r}
+a <- matrix(
+    c(3,
+      4),
+      nrow = 2, ncol = 1, byrow = TRUE)
+
+b <- matrix(
+    c(-1,
+      5),
+      nrow = 2, ncol = 1, byrow = TRUE)
+
+c <- matrix(
+    c(-3,
+      2),
+      nrow = 2, ncol = 1, byrow = TRUE)
+
+d <- matrix(
+    c(-3,
+      2,
+      0),
+      nrow = 3, ncol = 1, byrow = TRUE)
+
+f <- matrix(
+    c(3,
+      5,
+      -1),
+      nrow = 3, ncol = 1, byrow = TRUE)
+ 
+P <- matrix(
+    c(2, 1,
+      -1, 2),
+      nrow = 2, ncol = 2, byrow = TRUE)
+
+
+Q <- matrix(
+    c(1, 2,
+      2, 4),
+      nrow = 2, ncol = 2, byrow = TRUE)
+
+R <- matrix(
+    c(1, 2, 2,
+      2, 4, -1),
+      nrow = 2, ncol = 3, byrow = TRUE)
+
+S <- matrix(
+    c(1, 0, 0,
+      0, 0, 0,
+      0, 0, 1),
+      nrow = 3, ncol = 3, byrow = TRUE)
+
+T <- matrix(
+    c(-2, 0,
+      1, 2,
+      4, -3),
+      nrow = 3, ncol = 2, byrow = TRUE)
+```
+
+### 4.4.1 $-3R$
+```{r}
+-3 * R
+```
+### 4.4.2 $Q+P$
+```{r}
+Q + P
+```
+### 4.4.3 $R'$
+```{r}
+t(R)
+```
+### 4.4.4 $P+R$
+```{r}
+# 定義されない
+```
+### 4.4.5 $R-T'$
+```{r}
+R - t(T)
+```
+### 4.4.6 $5R-5T'$
+```{r}
+5*R - 5*t(T)
+```
+### 4.4.7 $QP$
+```{r}
+Q %*% P
+```
+### 4.4.8 $2a'b(Q+P)$
+```{r}
+as.vector(2 * t(a) %*% b) * (Q + P)
+```
+### 4.4.9 $Sf$
+```{r}
+S %*% f
+```
+### 4.4.10 $c'R$
+```{r}
+t(c) %*% R
+```
+### 4.4.11 $dT$
+```{r}
+# 定義されない
+```
+### 4.4.12 $PQ$
+```{r}
+P %*% Q
+```
+### 4.4.13 $RT$
+```{r}
+R %*% T
+```
+### 4.4.14 $T'Q$
+```{r}
+# 定義されない
+```
+### 4.4.15 $ST$
+```{r}
+S %*% T
+```
+### 4.4.16 $(P+Q)a$
+```{r}
+(P + Q) %*% a
+```
+### 4.4.17 $S(d+f)$
+```{r}
+S %*% (d + f)
+```
+### 4.4.18 $f'd+c'a$
+```{r}
+t(f) %*% d + t(c) %*% a
+```
+
+## 4.5 問題4.4の行列$T$について、1から3に答えよ。
+$$
+\boldsymbol{T} =
+\begin{bmatrix}
+-2 & 0 \\
+1 & 2 \\
+4 & -3
+\end{bmatrix}
+$$
+
+### 4.5.1 $T$を2つの3次元ベクトルに分割して$T=[t1 t2]$と考えたとき、2つのベクトルの長さの2乗、および内積を求めよ。
+
+```{r}
+t1 <- T[,1]
+t2 <- T[,2]
+
+# ベクトルの長さの2乗
+t(t1) %*% t1
+
+# ベクトルの長さの2乗
+t(t2) %*% t2
+
+# 内積
+t(t1) %*% t2
+```
+
+### 4.5.2 $T'T$を求めよ。
+
+```{r}
+t(T) %*% T
+```
+
+
+### 4.5.3 $T'T$の第(i,j)要素がベクトル$t_i$と$t_j$の内積に等しいことを示せ。
+
+```{r}
+TT <- t(T) %*% T
+
+# 要素が一致する
+TT[1,1] == (t(t1) %*% t1)
+TT[2,2] == (t(t2) %*% t2)
+TT[1,2] == (t(t1) %*% t2)
+TT[2,1] == (t(t1) %*% t2)
+```
+
+
+
+# セッション情報
+
+```{r}
+sessionInfo()
+```
