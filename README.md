@@ -1,8 +1,11 @@
-# statistical_note
+# LinearAlgebra
 
-- []()
-- []()
-- []()
+- [LinearAlgebra01](https://sugiaki1989.github.io/statistical_note/note_LinearAlgebra01/note_LinearAlgebra01.html)
+- [LinearAlgebra02](https://sugiaki1989.github.io/statistical_note/note_LinearAlgebra02/note_LinearAlgebra02.html)
+- [LinearAlgebra03](https://sugiaki1989.github.io/statistical_note/note_LinearAlgebra03/note_LinearAlgebra03.html)
+- [LinearAlgebra04](https://sugiaki1989.github.io/statistical_note/note_LinearAlgebra04/note_LinearAlgebra04.html)
+- [LinearAlgebra05](https://sugiaki1989.github.io/statistical_note/note_LinearAlgebra05/note_LinearAlgebra05.html)
+- [LinearAlgebra06](https://sugiaki1989.github.io/statistical_note/note_LinearAlgebra06/note_LinearAlgebra06.html)
 
 ## Prophetパッケージ関連
 - [Prophetの基本的な使い方](https://sugiaki1989.github.io/statistical_note/note_prophet01/note_prophet01.html)
