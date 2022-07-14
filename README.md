@@ -20,3 +20,4 @@
 ## 統計学
 
 - [p-value の計算方法と可視化](https://sugiaki1989.github.io/statistical_note/note_pvalue01/note_pvalue01.html)
+- [p 値関数の基礎的な理解](https://sugiaki1989.github.io/statistical_note/note_pvalue02/note_pvalue02.html)

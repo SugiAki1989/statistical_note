@@ -1,12 +1,43 @@
 /* Whole document */
 body{
   font-size: 13pt;
+  color: 424242;
   /* font-family: Helvetica; */
+}
+
+h1 {
+  text-align: center;
+  padding: 1rem 2rem;
+  color: 424242;
+}
+
+h2 {
+  padding: 1rem 2rem;
+  border-left: 4px solid #000;
+  color: 424242;
+}
+
+h3 {
+  padding: 1rem 2rem;
+  border-left: 4px solid #000;
+  color: 424242;
+}
+
+h4 {
+  padding: 1rem 2rem;
+  border-left: 4px solid #000;
+  color: 424242;
+}
+
+ul li {
+  padding-top:5px;
+  padding-bottom:5px;
+  color: 424242;
 }
 
 /* Container Size */
 .main-container {
-  max-width: 1500px;
+  max-width: 1800px;
   margin-left: auto;
   margin-right: auto;
 }
