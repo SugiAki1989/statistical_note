@@ -9,10 +9,10 @@ output:
     toc: TRUE
     toc_depth: 5
     toc_float: FALSE
-    number_sections: TRUE
+    # number_sections: TRUE
     code_folding: "show"
     highlight: "zenburn"
-    theme: "flatly"
+    # theme: "flatly"
     css: ../style.css
     md_extensions: -ascii_identifiers
 ---
