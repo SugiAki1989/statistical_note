@@ -42,6 +42,10 @@ ul li {
   margin-right: auto;
 }
 
+code.r{
+  font-size: 15px;
+}
+
 /* Box Design */
 .box{
     padding: 0.5em 1em;
