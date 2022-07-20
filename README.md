@@ -21,3 +21,5 @@
 
 - [p-value の計算方法と可視化](https://sugiaki1989.github.io/statistical_note/note_pvalue01/note_pvalue01.html)
 - [p 値関数の基礎的な理解](https://sugiaki1989.github.io/statistical_note/note_pvalue02/note_pvalue02.html)
+- [α と β と n の話](https://sugiaki1989.github.io/statistical_note/note_pvalue03/note_pvalue03.html)
+- [カウントデータと区間推定](https://sugiaki1989.github.io/statistical_note/note_pvalue04/note_pvalue04.html)

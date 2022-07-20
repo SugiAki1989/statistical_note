@@ -228,6 +228,8 @@ window.initializeCodeFolding = function(show) {
   // select all R code blocks
   var rCodeBlocks = $('pre.r, pre.python, pre.bash, pre.sql, pre.cpp, pre.stan, pre.julia, pre.foldable');
   rCodeBlocks.each(function() {
+    // skip if the block has fold-none class
+    if ($(this).hasClass('fold-none')) return;
 
     // create a collapsable div to wrap the code in
     var div = $('<div class="collapse r-code-collapse"></div>');
@@ -438,6 +440,9 @@ max-width: 1800px;
 margin-left: auto;
 margin-right: auto;
 }
+code.r{
+font-size: 15px;
+}
 
 .box{
 padding: 0.5em 1em;
@@ -623,7 +628,7 @@ APPROACHES TO CALCULATING CONFIDENCE INTERVALS(p160)</a></li>
 </div>
 
 <div class="update-right">
-<p>UPDATE: 2022-07-14 18:09:35</p>
+<p>UPDATE: 2022-07-16 02:06:18</p>
 </div>
 <div id="はじめに" class="section level2">
 <h2>はじめに</h2>
@@ -1064,25 +1069,25 @@ Random Error and the Role of Statistics</a></li>
 <span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a><span class="co"># library(Epi)</span></span>
 <span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a><span class="co"># a &lt;- 8 ; b &lt;- 70</span></span>
 <span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a><span class="co"># c &lt;- 41; d &lt;- 181</span></span>
-<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a><span class="co"># data &lt;- matrix(c(a, b, c, d), nrow = 2, byrow = TRUE)</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a><span class="co"># TAB1 &lt;- matrix(c(a, b, c, d), nrow = 2, byrow = TRUE)</span></span>
 <span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Epi::twoby2(TAB1, alpha = 0.05)</span></span>
 <span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a><span class="co"># 2 by 2 table analysis:</span></span>
-<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a><span class="co"># ------------------------------------------------------</span></span>
-<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Outcome   : Col 1</span></span>
-<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a><span class="co"># Comparing : Row 1 vs. Row 2</span></span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a><span class="co"># ------------------------------------------------------ </span></span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Outcome   : Col 1 </span></span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a><span class="co"># Comparing : Row 1 vs. Row 2 </span></span>
 <span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a><span class="co"># </span></span>
 <span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a><span class="co">#       Col 1 Col 2    P(Col 1) 95% conf. interval</span></span>
-<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Row 1     4   386      0.0103    0.0039   0.0270</span></span>
-<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a><span class="co"># Row 2     4  1250      0.0032    0.0012   0.0085</span></span>
+<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Row 1     8    70      0.1026    0.0521   0.1919</span></span>
+<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a><span class="co"># Row 2    41   181      0.1847    0.1390   0.2412</span></span>
 <span id="cb10-17"><a href="#cb10-17" aria-hidden="true" tabindex="-1"></a><span class="co"># </span></span>
-<span id="cb10-18"><a href="#cb10-18" aria-hidden="true" tabindex="-1"></a><span class="co">#                                    95% conf. interval</span></span>
-<span id="cb10-19"><a href="#cb10-19" aria-hidden="true" tabindex="-1"></a><span class="co">#              Relative Risk: 3.2154    0.8079  12.7967</span></span>
-<span id="cb10-20"><a href="#cb10-20" aria-hidden="true" tabindex="-1"></a><span class="co">#          Sample Odds Ratio: 3.2383    0.8061  13.0092</span></span>
-<span id="cb10-21"><a href="#cb10-21" aria-hidden="true" tabindex="-1"></a><span class="co"># Conditional MLE Odds Ratio: 3.2354    0.5997  17.4538</span></span>
-<span id="cb10-22"><a href="#cb10-22" aria-hidden="true" tabindex="-1"></a><span class="co">#     Probability difference: 0.0071   -0.0009   0.0230</span></span>
+<span id="cb10-18"><a href="#cb10-18" aria-hidden="true" tabindex="-1"></a><span class="co"># 95% conf. interval</span></span>
+<span id="cb10-19"><a href="#cb10-19" aria-hidden="true" tabindex="-1"></a><span class="co">#              Relative Risk:  0.5553    0.2724   1.1321</span></span>
+<span id="cb10-20"><a href="#cb10-20" aria-hidden="true" tabindex="-1"></a><span class="co">#          Sample Odds Ratio:  0.5045    0.2253   1.1298</span></span>
+<span id="cb10-21"><a href="#cb10-21" aria-hidden="true" tabindex="-1"></a><span class="co"># Conditional MLE Odds Ratio:  0.5056    0.1948   1.1639</span></span>
+<span id="cb10-22"><a href="#cb10-22" aria-hidden="true" tabindex="-1"></a><span class="co">#     Probability difference: -0.0821   -0.1572   0.0161</span></span>
 <span id="cb10-23"><a href="#cb10-23" aria-hidden="true" tabindex="-1"></a><span class="co"># </span></span>
-<span id="cb10-24"><a href="#cb10-24" aria-hidden="true" tabindex="-1"></a><span class="co">#              Exact P-value: 0.0964</span></span>
-<span id="cb10-25"><a href="#cb10-25" aria-hidden="true" tabindex="-1"></a><span class="co">#         Asymptotic P-value: 0.0977</span></span>
+<span id="cb10-24"><a href="#cb10-24" aria-hidden="true" tabindex="-1"></a><span class="co">#              Exact P-value: 0.1095 </span></span>
+<span id="cb10-25"><a href="#cb10-25" aria-hidden="true" tabindex="-1"></a><span class="co">#         Asymptotic P-value: 0.0963 </span></span>
 <span id="cb10-26"><a href="#cb10-26" aria-hidden="true" tabindex="-1"></a><span class="co"># ------------------------------------------------------</span></span>
 <span id="cb10-27"><a href="#cb10-27" aria-hidden="true" tabindex="-1"></a><span class="co"># # fmsb::pvalueplot()のリスク比の計算内容を確認する用の自作関数</span></span>
 <span id="cb10-28"><a href="#cb10-28" aria-hidden="true" tabindex="-1"></a><span class="co"># RiskRatio_PvaluePlotFunction &lt;- function(XTAB) {</span></span>
@@ -1114,8 +1119,8 @@ Random Error and the Role of Statistics</a></li>
 <span id="cb10-54"><a href="#cb10-54" aria-hidden="true" tabindex="-1"></a><span class="co"># plot(a$x_ci, a$y_pval, type = &quot;l&quot;)</span></span>
 <span id="cb10-55"><a href="#cb10-55" aria-hidden="true" tabindex="-1"></a><span class="co"># ------------------------------------------------------------------------</span></span></code></pre></div>
 </div>
-<div id="参考文献" class="section level1">
-<h1>参考文献</h1>
+<div id="参考文献" class="section level2">
+<h2>参考文献</h2>
 <ul>
 <li><a href>Kenneth J. Rothman: Epidemiology: An Introduction(2nd
 Ed). Oxford University Press, 2002.</a></li>
