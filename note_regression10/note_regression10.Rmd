@@ -1,0 +1,333 @@
+---
+title: "不均一分散とロバスト標準誤差"
+pagetitle: "不均一分散とロバスト標準誤差"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは回帰分析の不均一分散とロバスト標準誤差についてまとめておく。ビジネスで扱うようなデータは基本的には均一分散を仮定できる場合は少ない。このようなケースで利用されるのがロバスト標準誤差で、信頼区間、仮説検定を行うことができる。不均一分散に対処するケースとして、一般化最小二乗法や加重最小二乗法があるが、ここではロバスト標準誤差を扱う。
+
+## 回帰モデルについて
+
+回帰モデルは誤差項$u_{i}$を確率変数として考え、確率的モデルとして扱う。
+
+$$
+Y_{i} = \alpha + \beta X_{i} + u_{i}
+$$
+
+そのため、回帰モデルを実行するときは、下記の過程が満たされていることを前提としている。前提なので、満たされなくても計算は可能である。ただ、最小2乗推定量の望ましい性質が成り立たないため、様々な回帰モデルの結果に関する解釈ができなくなる。
+
+- 仮定1:$X_{i}$は非確率変数
+- 仮定2:$E[u_{i}] = 0$
+- 仮定3:$V[u_{i}] = E[u_{i}^{2}] = \sigma^{2}$
+- 仮定4:$Cov[u_{i},u_{j}] = E[u_{i}u_{j}] = 0$
+- 仮定5:$u_{i} \sim N(0, \sigma^{2})$
+
+ここでは仮定3の均一分散が満たされず、不均一分散となるケースを扱う。回帰モデルの仮定に関する詳細は以前、下記のノートにまとめているので詳細は任せるとして、
+
+- [回帰モデルの仮定のおさらい](https://sugiaki1989.github.io/statistical_note/note_MultiLevelRegression00/note_MultiLevelRegression00.html)
+
+最小2乗推定量を導出した部分からはじめる。
+
+## 最小2乗推定量
+
+最小2乗推定量は下記の式により推定が可能となる。
+
+$$
+\begin{eqnarray}
+\hat{\alpha} &=&  \bar{Y} - \hat{\beta}\bar{X} \\
+\hat{\beta} &=& \frac{S_{xy}}{S_{xx}} = \frac{\sum(X_{i}-\bar{X})(Y_{i}-\bar{Y})}{\sum(X_{i}-\bar{X})^{2}} \\
+\end{eqnarray}
+$$
+
+また別の表現として、下記としても表すことができる。見て分かる通り、確率変数$u$の関数なので、最小2乗推定量$\hat{\alpha}, \hat{\beta}$も確率変数となる。
+
+$$
+\begin{eqnarray}
+\hat{\alpha} &=& \alpha - (\hat{\beta} - \beta)\bar{X} + \bar{u} \\
+\hat{\beta} &=& \beta + \frac{\sum(X_{i}-\bar{X})u_{i}}{\sum(X_{i}-\bar{X})^{2}} \\
+\end{eqnarray}
+$$
+
+$\hat{\alpha}$は下記のように変形できる。
+
+$$
+\begin{eqnarray}
+\hat{\alpha} &=& \bar{Y} - \hat{\beta} \bar{X} \\
+&=& (\alpha + \beta \bar{X} + \bar{u}) - \hat{\beta} \bar{X} \\
+&=& \alpha - (\hat{\beta} - \beta)\bar{X} + \bar{u} 
+\end{eqnarray}
+$$
+
+上記の変形において、$\bar{Y}$について、下記の通り変形している。
+
+$$
+\begin{eqnarray}
+\bar{Y} &=& \frac{\sum Y_{i}}{n} \\
+&=& \frac{\sum (\alpha + \beta X_{i} + u_{i})}{n} \\
+&=& \frac{n \alpha + \beta \sum X_{i} + \sum u_{i})}{n} \\
+&=& \alpha + \beta \bar{X} + \bar{u}  
+\end{eqnarray}
+$$
+
+次に$\hat{\beta}$に関して、
+
+$$
+\begin{eqnarray}
+\hat{\beta} &=& \frac{\sum (X_{i} - \bar{X})\sum (Y_{i} - \bar{Y})}{\sum (X_{i} - \bar{X})^{2}} \\
+&=& \frac{\sum (X_{i} - \bar{X}) Y_{i} -  \bar{Y} \overbrace{\sum (X_{i} - \bar{X})}^{=0}}{\sum (X_{i} - \bar{X})^{2}} \\
+&=& \frac{\sum (X_{i} - \bar{X}) Y_{i}}{\sum (X_{i} - \bar{X})^{2}} \\
+&=& \frac{\sum (X_{i} - \bar{X}) (\alpha + \beta X_{i} + u_{i})}{\sum (X_{i} - \bar{X})^{2}} \\
+&=& \alpha\frac{\overbrace{\sum (X_{i} - \bar{X})}^{=0}}{\sum (X_{i} - \bar{X})^{2}} + \beta \frac{\overbrace{\sum (X_{i} - \bar{X})\bar{X}}^{=\sum(X_{i}-\bar{X})^{2}}}{\sum (X_{i} - \bar{X})^{2}} + \frac{\sum (X_{i} - \bar{X}) u_{i}}{\sum (X_{i} - \bar{X})^{2}} \\
+&=& \beta + \frac{\sum (X_{i} - \bar{X}) u_{i}}{\sum (X_{i} - \bar{X})^{2}}
+\end{eqnarray}
+$$
+
+となる。$\hat{\alpha}, \hat{\beta}$いずれも期待値を計算するとわかるが、普遍性をもつ。
+
+$$
+\begin{eqnarray}
+E[\hat{\alpha}] &=& E[\alpha + \beta \bar{X} + \bar{u}] \\
+&=& \alpha - (E[\hat{\beta}] - \beta) \bar{X} + \overbrace{E[\bar{u}]}^{E[\frac{\sum u_{i}}{n}] = \frac{\sum E[u_{i}]}{n}=0} \\
+&=& \alpha \\
+E[\hat{\beta}] &=& \beta + \frac{\sum (X_{i} - \bar{X}) \overbrace{E[u_{i}]}^{=0}}{\sum (X_{i} - \bar{X})^{2}} = \beta
+\end{eqnarray}
+$$
+
+## $\hat{\beta}$の分散
+
+$\hat{\beta}$の分散は
+
+$$
+V(\hat{\beta}) = \frac{\sigma^{2}}{\sum (X_{i} - \bar{X})^{2}}
+$$
+
+として表される。これを導出するために、まず推定量の式を変形し、
+
+$$
+\begin{eqnarray}
+\hat{\beta} = \beta + \frac{\sum (X_{i} - \bar{X}) u_{i}}{\sum (X_{i} - \bar{X})^{2}} \\
+\Leftrightarrow \hat{\beta} - \beta = \frac{\sum (X_{i} - \bar{X}) u_{i}}{\sum (X_{i} - \bar{X})^{2}} \\
+\Leftrightarrow (\hat{\beta} - \beta)^{2} = \left(\frac{\sum (X_{i} - \bar{X}) u_{i}}{\sum (X_{i} - \bar{X})^{2}} \right)^{2} \\
+\end{eqnarray}
+$$
+
+期待値をとる。
+
+$$
+\begin{eqnarray}
+E[(\hat{\beta} - \beta)^{2}] &=& E \left[ \left(\frac{\sum (X_{i} - \bar{X}) u_{i}}{\sum (X_{i} - \bar{X})^{2}} \right)^{2} \right] \\
+&=& \frac{E \left[\left(\sum (X_{i} - \bar{X}) u_{i}\right)^{2} \right]}{\left( \sum (X_{i} - \bar{X})^{2} \right)^{2}} \\
+&=& \frac{\sum (X_{i} - \bar{X})^{2} E \left[u_{i}^{2} \right]}{\left( \sum (X_{i} - \bar{X})^{2} \right)^{2}} \\
+&=& \frac{\sum (X_{i} - \bar{X})^{2} \sigma^{2}}{\left( \sum (X_{i} - \bar{X})^{2} \right)^{2}} \\
+&=& \frac{\sigma^{2}}{ \sum (X_{i} - \bar{X})^{2}}\\
+&=& V(\hat{\beta})\\
+\end{eqnarray}
+$$
+
+上記の変形において、下記の変形を利用している。
+
+$$
+E \left[\left(\sum (X_{i} - \bar{X}) u_{i}\right)^{2} \right] = \sum \sum  (X_{i} - \bar{X}) (X_{j} - \bar{X}) E[ u_{i} u_{j}] = \sum  (X_{i} - \bar{X})^{2} E[ u_{i}^{2}]
+$$
+
+これはパッと見るとよくわからないが$n=2$など小さなケースで展開してみるとわかり良い。
+
+$$
+\begin{eqnarray}
+E \left[\left(\sum_{i}^{2} (X_{i} - \bar{X}) u_{i}\right)^{2} \right] &=& E[((X_{1} - \bar{X}) u_{1} + (X_{2} - \bar{X}) u_{2})^{2} ] \\
+&=& (X_{1} - \bar{X})^{2} E[u_{1}^{2}] + (X_{2} - \bar{X})^{2} E[u_{2}^{2}]+ 2(X_{1} - \bar{X})(X_{2} - \bar{X}) \overbrace{E[u_{1}u_{2}]}^{=0} \\
+&=& (X_{1} - \bar{X})^{2} E[u_{1}^{2}] + (X_{2} - \bar{X})^{2} E[u_{2}^{2}]
+\end{eqnarray}
+$$
+
+$V(\hat{\beta}) = \frac{\sigma^{2}}{ \sum (X_{i} - \bar{X})^{2}}$の$\sigma^{2}$は観察されないあくまでも理論的なものなので、どのように推定すればよいのかが問題となるが、残差$\hat{u_{i}}^{2}$で代用して計算する。残差$\hat{u_{i}}^{2}$から計算する$s^{2}$は不偏性$E[s^{2}]=\sigma^2$を持ち、不偏性を計算する過程で、$\chi^{2}$分布の性質を利用する。
+
+$$
+s^{2} = \frac{\sum \hat{u_{i}}^{2}}{n-2}
+$$
+
+$u_{i} \sim N(0, \sigma^{2})$を標準化すると$\frac{u_{i}}{\sigma} \sim N(0,1)$となり、これは標準正規分布に従うので、この2乗和は$\sum (\frac{u_{i}}{\sigma}) \sim \chi^{2}_{n}$分布に従う。$u_{i}$は観測できないので、残差を利用する。また、自由度は正規方程式の関係から2つ分減らす必要があるため、$\sum (\frac{\hat{u_{i}}}{\sigma})\sim \chi^{2}_{n-2}$分布に従う
+
+$$
+\begin{eqnarray}
+E[s^{2}] &=& E \left[ \frac{\sum \hat{u_{i}}^{2}}{n-2} \right] \\
+&=& E \left[ \frac{\sum \hat{u_{i}}^{2}}{n-2} \right]\frac{\sigma^{2}}{\sigma^{2}} \\
+&=& E \left[ \frac{\sigma^{2}}{n-2}\sum \left( \frac{\hat{u_{i}}}{\sigma}\right)^{2} \right] \\
+&=& \frac{\sigma^{2}}{n-2} E \left[ \sum \left( \frac{\hat{u_{i}}}{\sigma}\right)^{2} \right] \\
+&=& \frac{\sigma^{2}}{n-2}(n-2) \\
+&=& \sigma^{2}
+\end{eqnarray}
+$$
+
+以上より、分散の推定量は
+
+$$
+s^{2}_{\hat{\beta}} = \frac{s^{2}}{ \sum (X_{i} - \bar{X})^{2}}
+$$
+
+となる。
+
+## 不均一分散の問題
+
+ここで問題となるのが、
+
+$$
+V(u_{i}) = E[u^{2}_{i}] = \sigma^2
+$$
+
+を仮定できず、
+
+$$
+V(u_{i}) = E[u^{2}_{i}] = \sigma^{2}_{i}
+$$
+
+となってしまうケース。均一分散であれば$\hat{\beta}$は、下記の式で推定可能であり、
+
+$$
+\begin{eqnarray}
+\hat{\beta} &=& \beta + \frac{\sum (X_{i} - \bar{X}) u_{i}}{\sum (X_{i} - \bar{X})^{2}}
+\end{eqnarray}
+$$
+
+不偏性をもち、
+
+$$
+\begin{eqnarray}
+E[\hat{\beta}] &=& \beta + \frac{\sum (X_{i} - \bar{X}) E[u_{i}]}{\sum (X_{i} - \bar{X})^{2}} = \beta
+\end{eqnarray}
+$$
+分散は下記のとおりとなる。
+
+$$
+\sigma^{2}_{\hat{\beta}} = \frac{\sigma^{2}}{ \sum (X_{i} - \bar{X})^{2}}
+$$
+
+
+一方で、不均一分散の場合、$\sigma^{2}_{i}$となるため、先程のように簡潔に書き表せない。$\sigma^{2}_{i}$に${i}$がついている通り、分散は一定ではないことを意味している。この影響により、不均一分散のパターンに応じて、回帰係数の標準誤差は過大、過小評価されることになる。
+
+$$
+\sigma^{2}_{\hat{\beta}} = \frac{\sum (X_{i} - \bar{X})^{2} \sigma^{2}_{i}}{\left( \sum (X_{i} - \bar{X})^{2} \right)^{2}}
+$$
+
+この推定方法として$\sigma^{2}_{i}$のかわりに残差$u^{2}_{i}$を利用し、誤差項を2乗した$u^2_{i}$のかわりとする。そうすることで観測データから計算可能になる。
+
+$$
+\sigma^{2}_{\hat{\beta}} = \frac{\sum (X_{i} - \bar{X})^{2} \hat{u}^{2}_{i}}{\left( \sum (X_{i} - \bar{X})^{2} \right)^{2}}
+$$
+
+不均一分散は、$X_{i}$の値に応じて分散が変化するという問題なので、分子の$\sum(X_{i} - \bar{X})^{2} \hat{u}^{2}_{i}$の部分で変動を反映させるようなイメージとなっている。
+
+この分散の平方根を取ったものをロバスト標準誤差、ホワイトの標準誤差とよぶ。
+
+$$
+\sqrt{\sigma^{2}_{\hat{\beta}}} = \sqrt{\frac{\sum (X_{i} - \bar{X})^{2} \hat{u}^{2}_{i}}{\left( \sum (X_{i} - \bar{X})^{2} \right)^{2}}}
+$$
+
+## Rでの実装
+
+ロバスト標準誤差を利用した回帰分析を行いたいのであれば、`estimatr`パッケージを利用すればよい。
+
+まずは不均一分散をもつサンプルデータを作成する。可視化している通り、$x$が大きくなるに連れて、分散も大きくなっている。
+
+```{r}
+library(tidyverse)
+library(sandwich)
+library(estimatr)
+library(car)
+
+set.seed(1989)
+n <- 100
+x <- runif(n, 0, 10)
+y <- rnorm(n, mean = x, sd = x)
+df <- tibble(x, y)
+ggplot(df, aes(x, y)) + 
+  geom_point() + 
+  theme_classic() + 
+  ggtitle('Heteroskedasticity')
+```
+
+このデータに通常の回帰モデルを実行すると、回帰係数の標準誤差が誤って計算されてしまい、信頼区間や検定結果の信頼性がなくなってしまう。
+
+```{r}
+fit <- lm(y ~ x, df)
+summary(fit)
+```
+
+ここまでまとめていたように、$x$の回帰係数の標準誤差は下記の通り計算できる。
+
+```{r}
+# se_fit <- summary(fit)$sigma
+# var_fit <- (nrow(df)-1) * var(df$x)
+# sqrt(se_fit^2/var_fit)
+# Sum of Squares of Residuals
+ssr <- sum(fit$residuals^2)
+# degrees of freedom
+dof <- (nrow(df) - length(fit$coefficients))
+# Mean Squared Residual
+msr <- ssr / dof
+sig <- sqrt(msr)
+
+# Sum of Squares of x
+ssx <- sum((df$x - mean(df$x))^2)
+sqrt(sig^2 / ssx)
+```
+
+ただこのデータは不均一分散なので、上記の計算の仮定が成り立たない。実際は下記のロバスト標準誤差が適切であるため、さきほどのモデルでは過小評価されている。ロバスト標準誤差にもいくつか種類があるが、ここでは上記でまとめたものを使用するため、`HC0`を利用する。
+
+```{r}
+sqrt(diag(vcovHC(fit, type = "HC0")))
+```
+
+手計算する場合は下記の通り計算できる。
+
+```{r}
+# これでも同じ
+# p1 <- sum((df$x - mean(df$x))^2 * fit$residuals^2)/nrow(df)
+# p2 <- (sum((df$x - mean(df$x))^2/nrow(df)))^2
+# sqrt(1/nrow(df) * (p1/p2))
+
+p1 <- sum((df$x - mean(df$x))^2 * fit$residuals^2)
+p2 <- (sum((df$x - mean(df$x))^2)^2)
+sqrt(p1/p2)
+```
+
+不均一分散の問題に対処するには、ロバスト標準誤差を利用した回帰モデルを実行すればよい。
+
+```{r}
+fit_robust <- lm_robust(y ~ x, df, se_type = "HC0")
+summary(fit_robust)
+```
+
+
+## 参考文献
+
+- [9章：不均一分散](chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://www.fbc.keio.ac.jp/~tyabu/econometrics/econome1_9.pdf)
+- [回帰分析ではlm()ではなくestimatr::lm_robust()を使おう](https://speakerdeck.com/dropout009/tokyor100)
+- [Getting started using estimatr](https://declaredesign.org/r/estimatr/articles/getting-started.html)

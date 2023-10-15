@@ -1,0 +1,156 @@
+---
+title: "TidyModels: parsnipパッケージ"
+pagetitle: "TidyModels: parsnipパッケージ"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+`tidymodels`パッケージの使い方をいくつかのノートに分けてまとめている。`tidymodels`パッケージは、統計モデルや機械学習モデルを構築するために必要なパッケージをコレクションしているパッケージで、非常に色んなパッケージがある。ここでは、今回は`parsnip`というパッケージの使い方をまとめていく。モデルの数理的な側面や機械学習の用語などは、このノートでは扱わない。
+
+下記の公式ドキュメントや`tidymodels`パッケージに関する書籍を参考にしている。
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+## `parsnip`パッケージの目的
+
+`parsnip`パッケージは、数多あるパッケージに含まれるモデリングのための関数の構文や引数を統一されたインターフェースを提供すること。
+
+## `parsnip`パッケージの実行例
+
+[公式サイト](https://parsnip.tidymodels.org/)にある例をお借りすると、ランダムフォレストを異なるパッケージを利用して実行する場合、下記の通り統一感がない。引数名が異なっていたり、モデル構文が異なっている可能性もあるため、複数のモデルを作成する際には、注意が必要になる。
+
+```{r}
+# # From randomForest
+# rf_1 <- randomForest(
+#   y ~ ., 
+#   data = dat, 
+#   mtry = 10, 
+#   ntree = 2000, 
+#   importance = TRUE
+# )
+# 
+# # From ranger
+# rf_2 <- ranger(
+#   y ~ ., 
+#   data = dat, 
+#   mtry = 10, 
+#   num.trees = 2000, 
+#   importance = "impurity"
+# )
+# 
+# 
+# # From sparklyr
+# rf_3 <- ml_random_forest(
+#   dat, 
+#   intercept = FALSE, 
+#   response = "y", 
+#   features = names(dat)[names(dat) != "y"], 
+#   col.sample.rate = 10,
+#   num.trees = 2000
+# )
+```
+
+こののランダムフォレストの例では、モデルはランダムフォレストではあるが、計算エンジンであるパッケージは`randomforest`、`ranger`、`sparklyr`と異なっており、`mtry`引数名についても`col.sample.rate`と異なっている。
+
+この問題を`parsnip`パッケージは解決してくれる。`parsnip`パッケージでは、モデルのタイプ、計算エンジン、モデルのモードを選択することで、パッケージ間での違いを吸収し、スムーズに行き来できるようになっている。
+
+下記の例では、ランダムフォレストをモデル(`rand_forest`)として選択し、`set_engine`関数で`ranger`パッケージを利用することを決めている。また、モデルのモード(`set_mode`)は回帰を指定している。
+
+```{r}
+library(parsnip)
+
+rand_forest(mtry = 10, trees = 2000) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("regression")
+```
+
+ランダムフォレストはそのままで、計算エンジンを`sparklyr`パッケージに変更したいときは、`set_engine`関数で`spark`と指定すれば変更ができる。また、モデルのモードを回帰から分類に変更したければ、`set_mode`関数で`classification`を指定すれば良い。
+
+```{r}
+rand_forest(mtry = 10, trees = 2000) %>%
+  set_engine("spark") %>%
+  set_mode("regression")
+```
+
+この学習ルールを決定した後は、`fit`関数でそのままモデルを学習できたりもする。
+
+```{r}
+rand_forest(mtry = 10, trees = 2000) %>%
+  set_engine("randomForest") %>%
+  set_mode("regression") %>%
+  fit(mpg ~ ., data = mtcars)
+```
+
+`%>%`演算子を使わない指定方法もあるので、その場合、パイプでつなげている部分をまとめて記述すればOK。
+
+```{r}
+rand_forest(
+  mode = "regression",
+  engine = "ranger",
+  mtry = 10,
+  trees = 2000,
+  min_n = 10
+)
+```
+
+モデルタイプに関する実装例は下記の公式サイトに沢山記述されているので、そちらを参照。
+
+- [Fitting and predicting with parsnip](https://parsnip.tidymodels.org/articles/Examples.html)
+
+一般的なモデルタイプであれば、下記の通り、豊富に用意されている。
+
+- `linear_reg()` models
+  - `lm` engine
+  - `glm` engine
+  - `glmnet` engine
+  - `keras` engine
+  - `stan` engine
+  
+- `logistic_reg()` models
+  - `glm` engine
+  - `glmnet` engine
+  - `keras` engine
+  - `LiblineaR` engine
+  - `stan` engine
+  
+- `rand_forest()` models
+  - `ranger` engine
+  - `randomForest` engine 
+  
+- `boost_tree()` models
+  - `xgboost` engine
+  - `C5.0` engine
+
+## 参考文献
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+

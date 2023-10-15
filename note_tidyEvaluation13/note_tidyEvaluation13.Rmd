@@ -1,0 +1,453 @@
+---
+title: "RのTidy evaluation_13"
+pagetitle: "RのTidy evaluation_13"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+# はじめに
+Tidy evaluationとは直接関係ないですが、Tidy evaluationのもとに関数を作ってパッケージ化する際にいつも忘れるので、Rのパッケージ作成方法の基本的な手順をまとめておきます。以前、Qiitaの"[Rでパッケージを作ってみる〜きその「き」〜](https://qiita.com/A_KI/items/2412462bbc3ee6bb6a30)"でUPしていた記事通りにやるとエラーが出たりするので、こちらで書き直した。[チートシート](https://rstudio.com/wp-content/uploads/2015/03/devtools-cheatsheet.pdf)はこちら。
+
+作るパッケージはNewton-Raphson法で関数の根(または0)を求めることができる関数を含むサンプルパッケージです。無論作る関数に意味はないし、`uniroot()`を使えばよろしい。
+
+**sugiaki1989**という単語を使って実際のパスなどを書き換えているので、この単語を含むパスを使用してもエラーが返ります。
+
+## プロジェクトを作成
+まずはパッケージの関連ファイルを保存するフォルダを作成します。ここでは`~/Documents/Github/R_package`で管理することにします。お好きなようにしてください。
+
+```R:R
+$ cd ~/Documents/Github
+$ mkdir R_package
+```
+
+Rstudioのタブから`File >> New Project`をクリックし、ポップアップの`New Directory >> R Package`をクリック。下記の通り設定します。
+
+- `Type : Package`
+- `Package name : パッケージ名を入力`
+- `Create project as subdirectory of : 先ほど作ったフォルダ`
+
+Gitのリポジトリをつくるのであれば、下記の項目をチェックし、`Create Project`をクリック。
+
+- `Create a git repository : チェック`
+
+![](/Users/aki/Documents/statistical_note/note_tidyEvaluation13/plt1.png)
+
+
+そうすると、Rパッケージに必要な関連ファイルをパッケージ名(`NewtonRaphson`)を名前にしたフォルダ内に生成してくれます。
+
+```R:R
+$ cd R_package/NewtonRaphson
+$ ls -a
+./                   .Rproj.user/         DESCRIPTION          R/
+../                  .git/                NAMESPACE            man/
+.Rbuildignore        .gitignore           NewtonRaphson.Rproj
+```
+
+![](/Users/aki/Documents/statistical_note/note_tidyEvaluation13/plt2.png)
+
+そして、下記は不要なので削除しておく。`NAMESPACE`も作り直したほうがいいんだけど、上書き保存できるようになっているっぽい？。
+
+- R/hello.R
+- man/hello.Rd
+
+生成されるファイルの簡易説明は下記の通りです。
+
+- `.gitignore` : Gitで変更履歴を記録しないファイル
+- `.Rbuildignore` : パッケージをビルドするときに無視するファイルで、とくに変更しない。
+- `DESCRIPTION`  : パッケージの説明書
+- `man` : パッケージのヘルプのもととなるファイルで、roxgen2パッケージで自動生成されるのでとくに変更しない。
+- `NAMESPACE` : パッケージの依存関係などが書かれるファイルで、roxgen2パッケージで自動生成されるのでとくに変更しない。
+- `R`フォルダ : ここに.Rファイルを保存する。
+
+## ディスクリプションを作成する
+先ほど自動生成されたファイルに`DESCRIPTION`があります。これを開いて中身を更新します。`DESCRIPTION`には、関数が何をするのか、そのインプットとアウトプットは何かを説明するコメントを書きます。`roxygen2`は、これらのコメントをドキュメントに変換するパッケージです。
+`DESCRIPTION`で基本的に変更するべき点は下記の通りです。
+
+- Title
+- Author
+- Maintainer
+- Description
+- Depends: Rのバージョン
+- Imports
+- Suggests
+
+```R:R
+Package: NewtonRaphson
+Type: Package
+Title: Function To Compute One Dimensional Root(or Zero)
+Version: 0.1.0
+Author: Sugiaki
+Maintainer: Sugiaki <Sugiaki-Sugiaki@mail.com>
+Description: This function computes the roots or zero of a real-valued function using Newton Raphson method.
+License: MIT
+Encoding: UTF-8
+LazyData: true
+```
+
+依存関係の強さに応じて、`Imports`や`Suggests`に記載がはいります。`Imports`や`Suggests`はここではありませんが、`Imports`にはパッケージの動作に必要なものが記載され、`Suggests`には、必ずしも動作に必要ではないパッケージが記載されます。そのため、`Imports`に記載されているパッケージがまだインストールされていなければ、コンピュータにインストールされます。[`{dplyr}`](https://github.com/tidyverse/dplyr/blob/master/DESCRIPTION)には下記のように記載されています。
+
+```R:R
+License: MIT + file LICENSE
+URL: https://dplyr.tidyverse.org, https://github.com/tidyverse/dplyr
+BugReports: https://github.com/tidyverse/dplyr/issues
+Depends: 
+    R (>= 3.2.0)
+Imports: 
+    assertthat (>= 0.2.0),
+    glue (>= 1.3.0),
+    magrittr (>= 1.5),
+【略】
+    tibble (>= 2.0.0),
+    tidyselect (>= 0.2.5),
+    utils
+Suggests: 
+    bit64,
+    callr,
+    covr,
+【略】
+```
+
+## 関数を作成し保存する
+次は、関数を作成し、`R`フォルダに保存します。名前は`Newton_Raphson`とします。いつもの関数作成とは異なる記載で関数を記述します。`#`で始まるroxgenコメントと呼ばれるコメントを一緒に記述していくことで、`.R`ファイルを構築します。roxgenコメントの各項目は下記の役割を持ちます。
+
+- @param [パラメタ名] [説明] : 引数の説明
+- @importFrom [パッケージ名] [関数名] : 外部パッケージを読み込む。`usethis::use_package("name")`を実行すると`DESCRIPTION`に依存パッケージが記述されます。
+- @examples : 関数の使用例
+- @export : ユーザーが使う関数。パッケージの内部でのみの処理で使用する関数なら記載する必要なし。
+- @import : 関数内部で必要なパッケージ名を記載します。例えば、`{dplyr}`が必要なら、`#` @import dplyr`です。ここでは特に必要ありませんが、サンプルなので記述しておきます。
+
+```R:R
+#' Function To Compute One Dimensional Root(or Zero)
+#' @param func the function for which the root is computed.
+#' @param x0 *optional* an initial value
+#' @param eps *optional* the precision. Default value: 1/10000000
+#' @param n *optional* the number of iteration. Default value: 300
+#' @description This function computes the roots or zero of a real-valued function using Newton Raphson method.
+#' @examples
+#' target_func1 <- function(x) {x^3 + 3*x^2 + 8*x - 10}
+#' Newton_Raphson(func = target_func1, x0 = 10)
+#' @export
+#' @import dplyr
+
+Newton_Raphson <- function(func, x0 = 1, epsilon = 1e-7, n = 300){
+
+  stopifnot(is.function(func))
+
+  delta <- 1e-7
+  counter <- 1
+
+  while(n >= counter){
+    df_dx <- (func(x0 + delta) - func(x0)) / delta
+    x1 <- (x0 - (func(x0) / df_dx))
+    counter <- counter + 1
+
+    if(epsilon > abs(x1 - x0)) break
+    x0 <- x1
+  }
+  return(list(root = x1, iter = counter))
+}
+```
+
+下記の通り、フォルダ内に`Newton_Raphson.R`が保存されています。
+
+```R:R
+$ cd R
+$ ls
+Newton_Raphson.R
+```
+
+関数の保存が完了すれば、`devtools::document()`をコンソールで実行します。このとき`pkg`にはパッケージのパスを渡します。
+
+```R:R
+devtools::document(pkg = "~/Documents/Github/R_package/NewtonRaphson")
+
+Updating NewtonRaphson documentation
+Writing NAMESPACE
+Loading NewtonRaphson
+Writing NAMESPACE
+Writing Newton_Raphson.Rd
+```
+
+`devtools::document()`をコンソールで実行することで`man`フォルダ内に`.Rd`が生成されます。
+
+```R:R
+$ cd man
+$ ls
+Newton_Raphson.Rd
+
+$ cat Newton_Raphson.Rd
+
+% Generated by roxygen2: do not edit by hand
+% Please edit documentation in R/Newton_Raphson.R
+\name{Newton_Raphson}
+\alias{Newton_Raphson}
+\title{Function To Compute One Dimensional Root(or Zero)}
+\usage{
+Newton_Raphson(func, x0 = 1, epsilon = 1e-07, n = 300)
+}
+\arguments{
+\item{func}{the function for which the root is computed.}
+
+\item{x0}{*optional* an initial value}
+
+\item{n}{*optional* the number of iteration. Default value: 300}
+
+\item{eps}{*optional* the precision. Default value: 1/10000000}
+}
+\description{
+This function computes the roots or zero of a real-valued function using Newton Raphson method.
+}
+\examples{
+target_func1 <- function(x) {x^3 + 3*x^2 + 8*x - 10}
+Newton_Raphson(func = target_func1, x0 = 10)
+}
+
+```
+
+## パッケージのテストを書く。
+パッケージのテストを書いていきます。まずコンソールで`usethis::use_test(name = "Newton_Raphson")`で実行し、テストに必要なものを生成します。`name`を指定することで、その名前のテストファイルを作ってくれます。テストの書き方は"[RのTidy evaluation_12](https://rlang.hatenablog.jp/)"を参照。別に手動で作ってもよい。
+
+```R:R
+usethis::use_test(name = "Newton_Raphson")
+
+✔ Creating 'tests/testthat/'
+✔ Writing 'tests/testthat.R'
+● Call `use_test()` to initialize a basic test file and open it for editing.
+✔ Writing 'tests/testthat/test-Newton_Raphson.R'
+● Modify 'tests/testthat/test-Newton_Raphson.R'
+```
+
+ここではテストを2つ用意しました。無論サンプルパッケージなので、テストに意味はない。
+
+```R:R
+## Test Name : test-Newton_Raphson.R
+
+context("test to two dim")
+
+test_that("work two dim function", {
+  target_func1 <- function(x) {x^3 + 3*x^2 + 8*x - 10}
+  res <- Newton_Raphson(func = target_func1, x0 = 10)
+  expect_equal(res$root, 0.877134, tolerance = 1e-3)
+})
+
+#----------
+
+## Test Name : test-uniroot.R
+
+context("test to existing function `uniroot`")
+
+test_that("same result", {
+  target_func2 <- function(x) {x^4 + 3*x^3 - 6*x^2 + 8*x - 10}
+  res <- Newton_Raphson(func = target_func2, x0 = 10)
+  res_uniroot <- uniroot(target_func2, c(0, 10))
+  expect_equal(res$root, res_uniroot$root, tolerance = 1e-3)
+})
+
+```
+
+`devtools::test()`を実行すると、下記のように用意したテストを実行してくれます。
+
+```R:R
+devtools::test()
+
+Loading NewtonRaphson
+Testing NewtonRaphson
+✔ |  OK F W S | Context
+✔ |   1       | test to two dim
+✔ |   1       | test to existing function `uniroot`
+
+══ Results ══════════════════════════════════════════════════════════
+OK:       2
+Failed:   0
+Warnings: 0
+Skipped:  0
+```
+
+## ドキュメントを整備する
+`usethis::use_readme_rmd()`をコンソールで実行します。そうすると、`README.Rmd`が自動で生成されるので、下記のようなパッケージの説明を書いていきます。
+
+```R:R
+
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+\```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/README-",
+  out.width = "100%"
+)
+\```
+
+# NewtonRaphson
+
+<!-- badges: start -->
+<!-- badges: end -->
+
+The idea is to start with an initial guess which is reasonably close to the true root, then to approximate the function by its tangent line using calculus, and finally to compute the x-intercept of this tangent line by elementary algebra. This x-intercept will typically be a better approximation to the original function's root than the first guess, and the method can be iterated.
+
+## Installation
+
+You can install it from Github!
+
+\``` r
+# install.packages("devtools")
+devtools::install_github("sugiaki1989/NewtonRaphson")
+\```
+
+## Example
+
+This is a basic example which shows you how to compute root or zero of real-valued function:
+
+\```{r example}
+library(NewtonRaphson)
+
+
+target_func1 <- function(x) {x^3 + 3*x^2 + 8*x - 10}
+Newton_Raphson(func = target_func1,
+               x0 = 10)
+
+target_func2 <- function(x) {x^4 + 3*x^3 - 6*x^2 + 8*x - 10}
+Newton_Raphson(func = target_func2,
+               x0 = 10)
+
+func_list <- list(target_func1, target_func2)
+
+# lapply(func_list, Newton_Raphson) is same
+func_list %>% 
+  purrr::map(.x = ., function(x){Newton_Raphson(x)})
+\```
+hogehoge
+
+```
+
+## チェックする
+`devtools::check()`をコンソールで実行します。自動でファイル構成、`DESCRIPTION`などもろもろに問題がないかチェックしてくれます。error、warning、noteが出力されるので、内容に応じて修正して再度チェックします。
+
+```R:R
+devtools::check()
+
+Updating NewtonRaphson documentation
+Writing NAMESPACE
+Loading NewtonRaphson
+Writing NAMESPACE
+─ Building ─────────────────────────────── NewtonRaphson ─
+Setting env vars:
+● CFLAGS    : -Wall -pedantic -fdiagnostics-color=always
+● CXXFLAGS  : -Wall -pedantic -fdiagnostics-color=always
+● CXX11FLAGS: -Wall -pedantic -fdiagnostics-color=always
+─────────────────────────────────────────────
+✔  checking for file ‘/Users/aki/Documents/Github/R_package/NewtonRaphson/DESCRIPTION’ (431ms)
+─  preparing ‘NewtonRaphson’:
+✔  checking DESCRIPTION meta-information ... 
+─  checking for LF line-endings in source and make files and shell scripts
+─  checking for empty or unneeded directories
+─  building ‘NewtonRaphson_0.1.0.tar.gz’
+   
+─ Checking ─────────────────────────────── NewtonRaphson ─
+Setting env vars:
+● _R_CHECK_CRAN_INCOMING_REMOTE_: FALSE
+● _R_CHECK_CRAN_INCOMING_       : FALSE
+● _R_CHECK_FORCE_SUGGESTS_      : FALSE
+   
+── R CMD check results ────────────────────────────────────────── NewtonRaphson 0.1.0 ────
+Duration: 2.3s
+
+0 errors ✔ | 0 warnings ✔ | 0 notes ✔
+```
+
+## Githubにプッシュ
+それでは、Githubにプッシュして、パッケージをインストールできるようにしておきましょう。`$ git init`は、最初の段階で、`Create a git repository`にチェック入れると、`.git`が作られるので、これは不要なはず…間違っててたらごめんなさい。
+
+```R:R
+$ ~/Documents/Github/R_package/NewtonRaphson
+$ git remote add origin https://github.com/sugiaki1989/NewtonRaphson.git
+$ git add .
+$ git commit -m "first commit"
+$ git push origin master
+
+Counting objects: 18, done.
+Delta compression using up to 4 threads.
+Compressing objects: 100% (14/14), done.
+Writing objects: 100% (18/18), 3.62 KiB | 0 bytes/s, done.
+Total 18 (delta 0), reused 0 (delta 0)
+To https://github.com/sugiaki1989/NewtonRaphson.git
+ * [new branch]      master -> master
+```
+
+## パッケージのインストール
+`devtools::install_github()`でパッケージをインストールする。遊んでみる。
+
+```R:R
+devtools::install_github("sugiaki1989/NewtonRaphson")
+library(NewtonRaphson)
+
+target_func1 <- function(x) {x^3 + 3*x^2 + 8*x - 10}
+Newton_Raphson(func = target_func1, x0 = 10)
+$root
+[1] 0.877134
+
+$iter
+[1] 10
+
+target_func2 <- function(x) {x^4 + 3*x^3 - 6*x^2 + 8*x - 10}
+Newton_Raphson(func = target_func2, x0 = 10)
+$root
+[1] 1.317561
+
+$iter
+[1] 12
+
+func_list <- list(target_func1, target_func2)
+
+# lapply(func_list, Newton_Raphson) is same
+func_list %>% 
+  purrr::map(.x = ., function(x){Newton_Raphson(x)})
+[[1]]
+[[1]]$root
+[1] 0.877134
+
+[[1]]$iter
+[1] 5
+
+
+[[2]]
+[[2]]$root
+[1] 1.317561
+
+[[2]]$iter
+[1] 6
+
+```
+
+試しに色んな関数で計算してみるが問題なく動いているので、これでパッケージの作成は終了です。ちゃんちゃん♪♪
+

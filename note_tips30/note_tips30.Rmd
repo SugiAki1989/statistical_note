@@ -1,0 +1,958 @@
+---
+title: "いまさらXGBoostについてまとめる"
+pagetitle: "いまさらXGBoostについてまとめる"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+お断り。昔運営していたブログ、勉強会の資料、メモなどわわまとめた物をコピーしただけ。
+
+# はじめに
+Rの`{xgboost}`についてまとめる。`{xgboost}`の使い方から、変数重要度(`{vip}`)、部分従属プロット(`{pdp}`)まで。
+
+きっかけは[kaggleで勝つデータ分析の技術](https://gihyo.jp/book/2019/978-4-297-10843-4)を読んで、XGboostの特徴について、色々と勉強になったので、それも含めメモしておく。[kaggleで勝つデータ分析の技術](https://gihyo.jp/book/2019/978-4-297-10843-4)はすごくオススメです。
+
+普段、意思決定系のデータ分析しかしてないとしても、ガチガチに予測できるモデルを作れる技術は、意思決定の予測モデリングでも存分に役立つと思う。
+
+特に特徴量エンジニアリングの章は、意思決定のモデリングでも使える話が盛り沢山だと思う。
+
+## XGboostとは
+XGboostの理論的な側面については下記のサイトを参照。
+
+- [XGBoost論文を丁寧に解説する(1)](https://qiita.com/triwave33/items/aad60f25485a4595b5c8)
+- [XGBoost論文を丁寧に解説する(2): ShrinkageとSubsampling](https://qiita.com/triwave33/items/9adb883de185e14db919#_reference-83897cd430b8d7dd4e25)
+- [XGBoostのお気持ちを一部理解する](https://qiita.com/kenmatsu4/items/226f926d87de86c28089)
+- [XGBoostの概要](http://kefism.hatenablog.com/entry/2017/06/11/182959)
+
+[kaggleで勝つデータ分析の技術](https://gihyo.jp/book/2019/978-4-297-10843-4)に記載されていたGBDTの特徴を引用させていただく。本当、実際の経験をもとに書かれているので価値がある一冊だと思います。
+
+まずは、p114の「3.2.1 モデルと特徴量」の部分。
+
+> - 数値の大きさ自体に意味がなく、大小関係のみが影響する
+> - 欠損値があっても、そのまま取り扱うことができる
+> - 決定木の分岐の繰り返しによって変数間の相互作用が反映する  
+>   
+> 数値の大小関係が変わらない変換をかけても結果はかわりませんし、欠損値を必ずしも埋める必要もありません。また、変数間の相互作用を明示的に与えなくてもある程度反映してくれます。カテゴリ変数については、one-hot encodingでなくlabel encodingによる変換としても、分岐の繰り返しによって各カテゴリの影響をある程度反映してくれます。
+
+p140の「3.5.2 label encoding」の部分。
+
+> 決定木をベースとした手法以外では、label encodingによる特徴量を直接学習に用いるのはあまり適切ではありません。一方で、決定木であれば、カテゴリ変数の特定の水準のみが目的変数に影響がある場合でも、分岐を繰り返すことで予測値に反映できるため、学習に用いることが出来ます。
+
+p234の「4.3.2 GDBTの特徴」の部分。
+
+> - カテゴリ変数をone-hot encodingしなくても良い  
+> 数値にする必要があるためlabel encodingは行う必要がありますが、多くの場合、one-hot encodingを行う必要がありません。これは、例えばあるカテゴリ変数cが1から10まであるときに、cが5のときのみ効く特徴だった場合に、決定木の分岐を(c < 5, 5 <= c)と(c <= 5, 5 < c)と重ねることで、cが5であるという特徴が抽出されるためです。
+
+## `{xgboost}`と`{vip}`と`{pdp}`
+
+XGBoostのドキュメントのRのページにある[XGBoost R Feature Walkthrough](https://github.com/dmlc/xgboost/tree/master/R-package/demo)をベースにしています。
+
+- [Basic walkthrough of wrappers](https://github.com/dmlc/xgboost/blob/master/R-package/demo/basic_walkthrough.R)
+- [Train a xgboost model from caret library](https://github.com/dmlc/xgboost/blob/master/R-package/demo/caret_wrapper.R)
+- [Cutomize loss function, and evaluation metric](https://github.com/dmlc/xgboost/blob/master/R-package/demo/custom_objective.R)
+- [Boosting from existing prediction](https://github.com/dmlc/xgboost/blob/master/R-package/demo/boost_from_prediction.R)
+- [Predicting using first n trees](https://github.com/dmlc/xgboost/blob/master/R-package/demo/predict_first_ntree.R)
+- [Generalized Linear Model](https://github.com/dmlc/xgboost/blob/master/R-package/demo/generalized_linear_model.R)
+- [Cross validation](https://github.com/dmlc/xgboost/blob/master/R-package/demo/cross_validation.R)
+- [Create a sparse matrix from a dense one](https://github.com/dmlc/xgboost/blob/master/R-package/demo/create_sparse_matrix.R)
+- [Use GPU-accelerated tree building algorithms](https://github.com/dmlc/xgboost/blob/master/R-package/demo/gpu_accelerated.R)
+
+
+### サンプルデータ
+サンプルデータはKaggleの[House Prices: Advanced Regression Techniques](https://www.kaggle.com/c/house-prices-advanced-regression-techniques)。簡単に説明すると、アメリカのアイオワ州エイムスの住宅を説明する79の特徴量を使用して、各住宅の価格(`SalePrice`)を予測するためのデータセット。データの詳細説明は末尾に乗せている。
+
+```R:R
+library(tidyverse)
+library(xgboost)
+library(pdp) 
+library(vip) 
+library(gridExtra)
+
+train <- readr::read_csv("train.csv")
+test  <- readr::read_csv("test.csv")
+
+df <- train %>% 
+  dplyr::bind_rows(., test) %>% 
+  dplyr::select(-Id) %>% 
+  dplyr::mutate(SalePrice = log(SalePrice))
+
+dplyr::glimpse(df)
+
+Observations: 2,919
+Variables: 80
+$ MSSubClass    <dbl> 60, 20, 60, 70, 60, 50, 20, 60, 50, 190, 20, 60, 20, 20, 20, 45, 20, 90, 20, 20, 60, 45, 20, 120, 20, 20,…
+$ MSZoning      <chr> "RL", "RL", "RL", "RL", "RL", "RL", "RL", "RL", "RM", "RL", "RL", "RL", "RL", "RL", "RL", "RM", "RL", "RL…
+【略】
+$ SaleCondition <chr> "Normal", "Normal", "Normal", "Abnorml", "Normal", "Normal", "Normal", "Normal", "Abnorml", "Normal", "No…
+$ SalePrice     <dbl> 12.24769, 12.10901, 12.31717, 11.84940, 12.42922, 11.87060, 12.63460, 12.20607, 11.77452, 11.67844, 11.77…
+```
+
+欠損値とかを雑に確認しておく。
+
+```R:R
+# NAを含む変数
+df %>% 
+  dplyr::select(-SalePrice) %>% 
+  purrr::map_int(.x = .,
+          .f = function(x) {sum(is.na(x))} ) %>%
+  purrr::keep(.x = .,
+              .p = . > 0) %>% 
+  names()
+
+ [1] "MSZoning"     "LotFrontage"  "Alley"        "Utilities"    "Exterior1st"  "Exterior2nd"  "MasVnrType"   "MasVnrArea"  
+ [9] "BsmtQual"     "BsmtCond"     "BsmtExposure" "BsmtFinType1" "BsmtFinSF1"   "BsmtFinType2" "BsmtFinSF2"   "BsmtUnfSF"   
+[17] "TotalBsmtSF"  "Electrical"   "BsmtFullBath" "BsmtHalfBath" "KitchenQual"  "Functional"   "FireplaceQu"  "GarageType"  
+[25] "GarageYrBlt"  "GarageFinish" "GarageCars"   "GarageArea"   "GarageQual"   "GarageCond"   "PoolQC"       "Fence"       
+[33] "MiscFeature"  "SaleType"  
+```
+ラベルエンコーディングしておく。集計値などをつかう特徴量エンジニアリングをする際は、学習用、テスト用で分けてやる。
+
+```R:R
+# Label Encoding
+df_labeled <- df %>% 
+  mutate_if(is.character, as.factor) %>% 
+  data.matrix() %>%
+  tidyr::as_tibble() 
+  
+dplyr::glimpse(df_labeled)
+
+Observations: 2,919
+Variables: 80
+$ MSSubClass    <dbl> 60, 20, 60, 70, 60, 50, 20, 60, 50, 190, 20, 60, 20, 20, 20, 45, 20, 90, 20, 20, 60, 45, 20, 120, 20, 20,…
+$ MSZoning      <dbl> 4, 4, 4, 4, 4, 4, 4, 4, 5, 4, 4, 4, 4, 4, 4, 5, 4, 4, 4, 4, 4, 5, 4, 5, 4, 4, 4, 4, 4, 5, 1, 4, 4, 4, 4, …
+【略】
+$ SaleCondition <dbl> 5, 5, 5, 1, 5, 5, 5, 5, 1, 5, 5, 6, 5, 6, 5, 5, 5, 5, 5, 1, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, …
+$ SalePrice     <dbl> 12.24769, 12.10901, 12.31717, 11.84940, 12.42922, 11.87060, 12.63460, 12.20607, 11.77452, 11.67844, 11.77…
+```
+
+ここでは、ローデータの段階で訓練データとテストデータが別れているので、下記のように分割している。そうではない場合に分割するときは`{rsample}`の関数が便利。
+
+```R:R
+df_train <- df_labeled %>% dplyr::filter(!is.na(SalePrice))
+df_test  <- df_labeled %>% dplyr::filter(is.na(SalePrice))
+
+# library(rsample)
+# set.seed(1)
+# df_split <- rsample::initial_split(data = df_labeled,  prop = 0.7)
+# df_train <- rsample::training(df_split)
+# df_test  <- rsample::testing(df_split)
+```
+
+### `{xgboost}`でモデリング
+
+`xgboost()`を使うには、`xgb.DMatrix`というクラスにする必要があるので変換。
+
+```R:R
+xgb_train <- xgboost::xgb.DMatrix(data  = df_train %>% select(-SalePrice) %>% as.matrix(), 
+                                  label = df_train %>% pull(SalePrice))
+
+xgb_test <- xgboost::xgb.DMatrix(data  = df_test %>% select(-SalePrice) %>% as.matrix(),
+                                 label = df_test %>% pull(SalePrice))
+
+xgb_train
+xgb.DMatrix  dim: 1460 x 79  info: label  colnames: yes
+
+dimnames(xgb_train)
+[[1]]
+NULL
+
+[[2]]
+ [1] "MSSubClass"    "MSZoning"      "LotFrontage"   "LotArea"       "Street"        "Alley"         "LotShape"     
+ [8] "LandContour"   "Utilities"     "LotConfig"     "LandSlope"     "Neighborhood"  "Condition1"    "Condition2"   
+[15] "BldgType"      "HouseStyle"    "OverallQual"   "OverallCond"   "YearBuilt"     "YearRemodAdd"  "RoofStyle"    
+[22] "RoofMatl"      "Exterior1st"   "Exterior2nd"   "MasVnrType"    "MasVnrArea"    "ExterQual"     "ExterCond"    
+[29] "Foundation"    "BsmtQual"      "BsmtCond"      "BsmtExposure"  "BsmtFinType1"  "BsmtFinSF1"    "BsmtFinType2" 
+[36] "BsmtFinSF2"    "BsmtUnfSF"     "TotalBsmtSF"   "Heating"       "HeatingQC"     "CentralAir"    "Electrical"   
+[43] "1stFlrSF"      "2ndFlrSF"      "LowQualFinSF"  "GrLivArea"     "BsmtFullBath"  "BsmtHalfBath"  "FullBath"     
+[50] "HalfBath"      "BedroomAbvGr"  "KitchenAbvGr"  "KitchenQual"   "TotRmsAbvGrd"  "Functional"    "Fireplaces"   
+[57] "FireplaceQu"   "GarageType"    "GarageYrBlt"   "GarageFinish"  "GarageCars"    "GarageArea"    "GarageQual"   
+[64] "GarageCond"    "PavedDrive"    "WoodDeckSF"    "OpenPorchSF"   "EnclosedPorch" "3SsnPorch"     "ScreenPorch"  
+[71] "PoolArea"      "PoolQC"        "Fence"         "MiscFeature"   "MiscVal"       "MoSold"        "YrSold"       
+[78] "SaleType"      "SaleCondition"
+
+xgb_test
+xgb.DMatrix  dim: 1459 x 79  info: label  colnames: yes
+
+dimnames(xgb_test)
+[[1]]
+NULL
+
+[[2]]
+ [1] "MSSubClass"    "MSZoning"      "LotFrontage"   "LotArea"       "Street"        "Alley"         "LotShape"     
+ [8] "LandContour"   "Utilities"     "LotConfig"     "LandSlope"     "Neighborhood"  "Condition1"    "Condition2"   
+[15] "BldgType"      "HouseStyle"    "OverallQual"   "OverallCond"   "YearBuilt"     "YearRemodAdd"  "RoofStyle"    
+[22] "RoofMatl"      "Exterior1st"   "Exterior2nd"   "MasVnrType"    "MasVnrArea"    "ExterQual"     "ExterCond"    
+[29] "Foundation"    "BsmtQual"      "BsmtCond"      "BsmtExposure"  "BsmtFinType1"  "BsmtFinSF1"    "BsmtFinType2" 
+[36] "BsmtFinSF2"    "BsmtUnfSF"     "TotalBsmtSF"   "Heating"       "HeatingQC"     "CentralAir"    "Electrical"   
+[43] "1stFlrSF"      "2ndFlrSF"      "LowQualFinSF"  "GrLivArea"     "BsmtFullBath"  "BsmtHalfBath"  "FullBath"     
+[50] "HalfBath"      "BedroomAbvGr"  "KitchenAbvGr"  "KitchenQual"   "TotRmsAbvGrd"  "Functional"    "Fireplaces"   
+[57] "FireplaceQu"   "GarageType"    "GarageYrBlt"   "GarageFinish"  "GarageCars"    "GarageArea"    "GarageQual"   
+[64] "GarageCond"    "PavedDrive"    "WoodDeckSF"    "OpenPorchSF"   "EnclosedPorch" "3SsnPorch"     "ScreenPorch"  
+[71] "PoolArea"      "PoolQC"        "Fence"         "MiscFeature"   "MiscVal"       "MoSold"        "YrSold"       
+[78] "SaleType"      "SaleCondition"
+```
+
+パラメタをとりあえず(よしなに調整くだされ、Kaggleだったら他のユーザーが公開しているものとか)設定し、クロスバリデーションで`nrounds`の数を調整する。損失が減らないのであれば、それ以上学習する必要はないので、過学習する前に学習を打ち切る。`nrounds`のような木の数はハイパーパラメータのチューニングに入れる必要はないそうで、詳細は下記のサイトを参照。
+
+-[なぜn_estimatorsやepochsをパラメータサーチしてはいけないのか](https://amalog.hateblo.jp/entry/hyper-parameter-search)
+
+また、Kaggle本のp309の「6.1.2 パラメータチューニングで設定すること」の部分では、下記のようにある。
+
+> モデルのデフォルト値には、速度や単純さを重視しており、分析コンペには向いていないものもあります。例えば、xgboostのetaのデフォルト値は0.3となっていますが、これは大きすぎます。
+
+[Package ‘xgboost’](https://cran.r-project.org/web/packages/xgboost/xgboost.pdf)を確認すると、Rのパッケージでも0.3がetaのデフォルトのようです。
+
+> eta control the learning rate: scale the contribution of each tree by a factor of 0 < eta < 1 when it is added to the current approximation. Used to prevent overfitting by making the boosting process more conservative. Lower value for eta implies larger value for nrounds: low eta value means model more robust to overfitting but slower to compute. Default: 0.3
+
+主なパラメタは下記の通り。
+
+- `eta`: 学習率で、予測値をアップデートする際に掛け合わされる値。デフォルトは0.3。
+- `max_depth` : 木の深さ。深くすればするほど、複雑な関係を表現できるが過学習にもなる。デフォルトは6。
+- `min_child_weight` :分岐した後の葉の最低限必要なデータの数。大きくすると、葉に必要なデータ数が足りにくくなるので、分岐しにくくなる。デフォルトは1。
+- `subsample` : 決定木ごとに行数をサンプリングする割合。デフォルトは1。
+- `colsample_bytree` : 決定木ごとに特徴量の数をサンプリングする割合。デフォルトは1。
+- `gamma` : 決定木を分岐させるために最低限必要な目的関数の減少量。デフォルトは0。
+- `alpha` : 決定木の葉のウェイトに対するL1正則化項の重み。デフォルトは0。
+- `lambda` : 決定木の葉のウェイトに対するL2正則化項の重み。デフォルトは1。
+- `nrounds` : 構築する決定木の数。
+
+Kaggle本のp316の「6.1.5 GBDTのパラメータおよびそのチューニング」の「Author's Opinion」の部分では、下記のようにある。
+
+> max_depthが最も重要で、subsample、colsample_bytree、min_child_weightも重要という意見が多いようです。gamma、alpha、lambdaについてはそれぞれ好みよって優先度が異なるように思います。(T)
+
+```R:R
+# booster: c("gbtree", "gblinear", "dart") 
+# objective: Regression = "reg:linear", Classification = "binary:logistic", MultiClass = c("multi:softmax", "multi:softprob")
+# eval_metric: Regression = c("rmse", "mae"), Classification = c("logloss", "error", "auc"), MultiClass = c("merror", "mlogloss")
+
+params <- list(
+  booster = "gbtree",
+  objective = "reg:linear",
+  eval_metric = "rmse",
+  eta = 0.1, # etaが小さいと学習に時間がかかる。
+  gamma = 0,
+  max_depth = 5
+  # min_child_weight = 2,
+  # colsample_bytree = 0.8
+)
+
+# 繰り返し回数。
+# クロスバリデーションの分割数。
+# 評価関数の値が改善しないときの継続数。その継続数を満たすとストップ。
+
+# Fit
+set.seed(1989)
+xgb_cv <- xgboost::xgb.cv(
+  data = xgb_train, 
+  nrounds = 1000,  # 1000とか10000くらいでいいらしい
+  nfold = 5, 
+  params = params,
+  early_stopping_rounds = 50 
+)
+
+[1]	train-rmse:10.380313+0.002714	test-rmse:10.380307+0.012391 
+Multiple eval metrics are present. Will use test_rmse for early stopping.
+Will train until test_rmse hasn't improved in 50 rounds.
+
+[2]	train-rmse:9.344792+0.002420	test-rmse:9.344783+0.012631 
+[3]	train-rmse:8.412910+0.002161	test-rmse:8.412902+0.012840 
+[4]	train-rmse:7.574156+0.001924	test-rmse:7.574147+0.012563 
+【略】
+[228]	train-rmse:0.025341+0.001142	test-rmse:0.131419+0.014428 
+[229]	train-rmse:0.025216+0.001122	test-rmse:0.131407+0.014415 
+Stopping. Best iteration:
+[179]	train-rmse:0.033059+0.000671	test-rmse:0.131305+0.014494
+```
+
+これが`nrounds`の現状での設定での最適な回数。`evaluation_log`にはクロスバリデーションの経過過程の結果が入っている。
+
+```R:R
+xgb_cv$best_iteration
+[1] 179
+
+head(xgb_cv$evaluation_log, 5)
+   iter train_rmse_mean train_rmse_std test_rmse_mean test_rmse_std
+1:    1       10.380313    0.002713865      10.380307    0.01239056
+2:    2        9.344792    0.002419657       9.344783    0.01263102
+3:    3        8.412910    0.002161464       8.412902    0.01283981
+4:    4        7.574156    0.001924287       7.574147    0.01256348
+5:    5        6.819253    0.001710014       6.819239    0.01231013
+
+tail(xgb_cv$evaluation_log, 5)
+   iter train_rmse_mean train_rmse_std test_rmse_mean test_rmse_std
+1:  225       0.0256168    0.001081275      0.1314350    0.01439371
+2:  226       0.0255420    0.001095117      0.1314284    0.01439814
+3:  227       0.0254436    0.001153605      0.1314152    0.01441775
+4:  228       0.0253414    0.001142210      0.1314194    0.01442756
+5:  229       0.0252158    0.001122084      0.1314066    0.01441493
+
+# Learning Curve
+# xgb_cv$evaluation_log %>% 
+#   ggplot(aes(x = iter)) + 
+#   geom_line(aes(y = train_rmse_mean, col = "train")) + 
+#   geom_line(aes(y = test_rmse_mean,  col = "test")) + 
+#   ggtitle("rmse") + ylab("rmse_mean")
+```
+
+現状最適な`nrounds`を使ってモデルを学習し直す。
+
+```R:R
+# Fit 
+set.seed(1989)
+xgb_fit <- xgboost::xgboost(param = params,
+                            data = xgb_train,
+                            nrounds = xgb_cv$best_iteration)
+
+
+[1]	train-rmse:10.380111 
+[2]	train-rmse:9.344444 
+【略】
+[178]	train-rmse:0.039547 
+[179]	train-rmse:0.039418 
+
+# Prediction
+xgb_pred <- exp(predict(xgb_fit, xgb_test))
+
+# テストデータの正解ラベルをもっているようなバリデーションの仕方であれば
+# library(MLmetrics)
+# MLmetrics::RMSE(y_pred = xgb_pred, 
+#                 y_true = <test label>)
+
+```
+
+### `{vip}`で変数重要度を可視化する
+`{vip}`を使って変数重要度を確認する。変数重要度の計算に関する説明はこちらを参照。`{tidymodels}`を使って一連の説明をされていおり、しかも非常にわかりやすいです。
+
+- [変数重要度とPartial Dependence Plotでブラックボックスモデルを解釈する](https://dropout009.hatenablog.com/entry/2019/01/07/124214#Partial-Dependence-Plot)
+
+Permutationベースの変数重要度の計算は、簡単?に言ってしまうと、興味のある特徴量を1つ選び、それ以外の特徴量は固定しながら、興味のある特徴量はランダムにシャッフルする。予測値と興味のある特徴量の組み合わせが有効な場合、つまり予測に役立つ特徴量である場合、予測精度は良いわけだが、その組み合わせをシャッフルすることで、組み合わせが壊されると、その結果として予測精度が悪くなるのであれば、その興味のある特徴量というのは重要な特徴とみなせる一方で、そもそも、予測値と特徴量の組み合わせが有効ではない場合、シャッフルしようが、しまいが予測精度には影響しない、という考え方。
+
+```R:R
+# Variable Importance Plot
+vip_plot <- vip::vip(xgb_fit, num_features = 30)
+
+head(vip_plot$data)
+# A tibble: 6 x 2
+  Variable     Importance
+  <chr>             <dbl>
+1 OverallQual      0.196 
+2 GrLivArea        0.193 
+3 TotalBsmtSF      0.118 
+4 GarageCars       0.0708
+5 GarageFinish     0.0376
+6 YearRemodAdd     0.0368
+
+print(vip_plot)
+```
+[f:id:AZUMINO:20191130141530p:plain]
+
+### `{pdp}`で部分従属プロットを可視化する
+
+`{pdp}`を使って部分従属プロットを確認する。住宅の全体的な品質`Overall_Qual`と`Gr_Liv_Area`は、`Sale_Price`を予測する上で重要な特徴なので、これらが`Sale_Price`に与える影響を可視化する。`train`は訓練データのターゲット抜きを渡す。先程と同様にこちらを参照。
+
+- [変数重要度とPartial Dependence Plotでブラックボックスモデルを解釈する](https://dropout009.hatenablog.com/entry/2019/01/07/124214#Partial-Dependence-Plot)
+
+部分従属プロットは簡単?に言ってしまうと、興味のある特徴量を1つ選び、その特徴量の最小値から最大値までを使って、それ以外の特徴量は固定しながら順番に興味ある特徴量のみを数値を変化させたときに、予測値がどう変化するのかを見たもの。`{pdp}`の部分従属プロットの赤い線は平均的な予測値で、黒い線(Individual Conditional Expectation : ICE)は各レコードの予測値。
+
+```R:R
+# Partial Dependence Plot
+p1 <- pdp::partial(
+  xgb_fit,
+  pred.var = "OverallQual",
+  ice = TRUE,
+  center = TRUE,
+  plot = TRUE,
+  rug = TRUE,
+  alpha = 0.1,
+  plot.engine = "ggplot2",
+  train = df_train %>% select(-SalePrice) %>% as.matrix()
+)
+
+
+p2 <- pdp::partial(
+  xgb_fit,
+  pred.var = "GrLivArea",
+  ice = TRUE,
+  center = TRUE,
+  plot = TRUE,
+  rug = TRUE,
+  alpha = 0.1,
+  plot.engine = "ggplot2",
+  train = df_train %>% select(-SalePrice) %>% as.matrix()
+)
+
+p3 <- pdp::partial(
+  xgb_fit,
+  pred.var = c("OverallQual", "GrLivArea"),
+  plot = TRUE,
+  chull = TRUE,
+  plot.engine = "ggplot2",
+  train = df_train %>% select(-SalePrice) %>% as.matrix()
+)
+
+grid.arrange(p1, p2, p3, ncol = 3)
+```
+
+[f:id:AZUMINO:20191130142040p:plain]
+
+## 参照サイト
+
+- [kaggleで勝つデータ分析の技術](https://gihyo.jp/book/2019/978-4-297-10843-4)
+- [XGBoost論文を丁寧に解説する(1)](https://qiita.com/triwave33/items/aad60f25485a4595b5c8)
+- [XGBoost論文を丁寧に解説する(2): ShrinkageとSubsampling](https://qiita.com/triwave33/items/9adb883de185e14db919#_reference-83897cd430b8d7dd4e25)
+- [XGBoostのお気持ちを一部理解する](https://qiita.com/kenmatsu4/items/226f926d87de86c28089)
+- [XGBoostの概要](http://kefism.hatenablog.com/entry/2017/06/11/182959)
+- [変数重要度とPartial Dependence Plotでブラックボックスモデルを解釈する](https://dropout009.hatenablog.com/entry/2019/01/07/124214#Partial-Dependence-Plot)
+- [Interpreting XGBoost models](https://bgreenwell.github.io/pdp/articles/pdp-example-xgboost.html)
+- [XGBoost R Package for Scalable GBM](https://github.com/dmlc/xgboost/tree/master/R-package)
+
+## サンプルデータの詳細
+
+```R:R
+MSSubClass: Identifies the type of dwelling involved in the sale.	
+
+        20	1-STORY 1946 & NEWER ALL STYLES
+        30	1-STORY 1945 & OLDER
+        40	1-STORY W/FINISHED ATTIC ALL AGES
+        45	1-1/2 STORY - UNFINISHED ALL AGES
+        50	1-1/2 STORY FINISHED ALL AGES
+        60	2-STORY 1946 & NEWER
+        70	2-STORY 1945 & OLDER
+        75	2-1/2 STORY ALL AGES
+        80	SPLIT OR MULTI-LEVEL
+        85	SPLIT FOYER
+        90	DUPLEX - ALL STYLES AND AGES
+       120	1-STORY PUD (Planned Unit Development) - 1946 & NEWER
+       150	1-1/2 STORY PUD - ALL AGES
+       160	2-STORY PUD - 1946 & NEWER
+       180	PUD - MULTILEVEL - INCL SPLIT LEV/FOYER
+       190	2 FAMILY CONVERSION - ALL STYLES AND AGES
+
+MSZoning: Identifies the general zoning classification of the sale.
+		
+       A	Agriculture
+       C	Commercial
+       FV	Floating Village Residential
+       I	Industrial
+       RH	Residential High Density
+       RL	Residential Low Density
+       RP	Residential Low Density Park 
+       RM	Residential Medium Density
+	
+LotFrontage: Linear feet of street connected to property
+
+LotArea: Lot size in square feet
+
+Street: Type of road access to property
+
+       Grvl	Gravel	
+       Pave	Paved
+       	
+Alley: Type of alley access to property
+
+       Grvl	Gravel
+       Pave	Paved
+       NA 	No alley access
+		
+LotShape: General shape of property
+
+       Reg	Regular	
+       IR1	Slightly irregular
+       IR2	Moderately Irregular
+       IR3	Irregular
+       
+LandContour: Flatness of the property
+
+       Lvl	Near Flat/Level	
+       Bnk	Banked - Quick and significant rise from street grade to building
+       HLS	Hillside - Significant slope from side to side
+       Low	Depression
+		
+Utilities: Type of utilities available
+		
+       AllPub	All public Utilities (E,G,W,& S)	
+       NoSewr	Electricity, Gas, and Water (Septic Tank)
+       NoSeWa	Electricity and Gas Only
+       ELO	Electricity only	
+	
+LotConfig: Lot configuration
+
+       Inside	Inside lot
+       Corner	Corner lot
+       CulDSac	Cul-de-sac
+       FR2	Frontage on 2 sides of property
+       FR3	Frontage on 3 sides of property
+	
+LandSlope: Slope of property
+		
+       Gtl	Gentle slope
+       Mod	Moderate Slope	
+       Sev	Severe Slope
+	
+Neighborhood: Physical locations within Ames city limits
+
+       Blmngtn	Bloomington Heights
+       Blueste	Bluestem
+       BrDale	Briardale
+       BrkSide	Brookside
+       ClearCr	Clear Creek
+       CollgCr	College Creek
+       Crawfor	Crawford
+       Edwards	Edwards
+       Gilbert	Gilbert
+       IDOTRR	Iowa DOT and Rail Road
+       MeadowV	Meadow Village
+       Mitchel	Mitchell
+       Names	North Ames
+       NoRidge	Northridge
+       NPkVill	Northpark Villa
+       NridgHt	Northridge Heights
+       NWAmes	Northwest Ames
+       OldTown	Old Town
+       SWISU	South & West of Iowa State University
+       Sawyer	Sawyer
+       SawyerW	Sawyer West
+       Somerst	Somerset
+       StoneBr	Stone Brook
+       Timber	Timberland
+       Veenker	Veenker
+			
+Condition1: Proximity to various conditions
+	
+       Artery	Adjacent to arterial street
+       Feedr	Adjacent to feeder street	
+       Norm	Normal	
+       RRNn	Within 200' of North-South Railroad
+       RRAn	Adjacent to North-South Railroad
+       PosN	Near positive off-site feature--park, greenbelt, etc.
+       PosA	Adjacent to postive off-site feature
+       RRNe	Within 200' of East-West Railroad
+       RRAe	Adjacent to East-West Railroad
+	
+Condition2: Proximity to various conditions (if more than one is present)
+		
+       Artery	Adjacent to arterial street
+       Feedr	Adjacent to feeder street	
+       Norm	Normal	
+       RRNn	Within 200' of North-South Railroad
+       RRAn	Adjacent to North-South Railroad
+       PosN	Near positive off-site feature--park, greenbelt, etc.
+       PosA	Adjacent to postive off-site feature
+       RRNe	Within 200' of East-West Railroad
+       RRAe	Adjacent to East-West Railroad
+	
+BldgType: Type of dwelling
+		
+       1Fam	Single-family Detached	
+       2FmCon	Two-family Conversion; originally built as one-family dwelling
+       Duplx	Duplex
+       TwnhsE	Townhouse End Unit
+       TwnhsI	Townhouse Inside Unit
+	
+HouseStyle: Style of dwelling
+	
+       1Story	One story
+       1.5Fin	One and one-half story: 2nd level finished
+       1.5Unf	One and one-half story: 2nd level unfinished
+       2Story	Two story
+       2.5Fin	Two and one-half story: 2nd level finished
+       2.5Unf	Two and one-half story: 2nd level unfinished
+       SFoyer	Split Foyer
+       SLvl	Split Level
+	
+OverallQual: Rates the overall material and finish of the house
+
+       10	Very Excellent
+       9	Excellent
+       8	Very Good
+       7	Good
+       6	Above Average
+       5	Average
+       4	Below Average
+       3	Fair
+       2	Poor
+       1	Very Poor
+	
+OverallCond: Rates the overall condition of the house
+
+       10	Very Excellent
+       9	Excellent
+       8	Very Good
+       7	Good
+       6	Above Average	
+       5	Average
+       4	Below Average	
+       3	Fair
+       2	Poor
+       1	Very Poor
+		
+YearBuilt: Original construction date
+
+YearRemodAdd: Remodel date (same as construction date if no remodeling or additions)
+
+RoofStyle: Type of roof
+
+       Flat	Flat
+       Gable	Gable
+       Gambrel	Gabrel (Barn)
+       Hip	Hip
+       Mansard	Mansard
+       Shed	Shed
+		
+RoofMatl: Roof material
+
+       ClyTile	Clay or Tile
+       CompShg	Standard (Composite) Shingle
+       Membran	Membrane
+       Metal	Metal
+       Roll	Roll
+       Tar&Grv	Gravel & Tar
+       WdShake	Wood Shakes
+       WdShngl	Wood Shingles
+		
+Exterior1st: Exterior covering on house
+
+       AsbShng	Asbestos Shingles
+       AsphShn	Asphalt Shingles
+       BrkComm	Brick Common
+       BrkFace	Brick Face
+       CBlock	Cinder Block
+       CemntBd	Cement Board
+       HdBoard	Hard Board
+       ImStucc	Imitation Stucco
+       MetalSd	Metal Siding
+       Other	Other
+       Plywood	Plywood
+       PreCast	PreCast	
+       Stone	Stone
+       Stucco	Stucco
+       VinylSd	Vinyl Siding
+       Wd Sdng	Wood Siding
+       WdShing	Wood Shingles
+	
+Exterior2nd: Exterior covering on house (if more than one material)
+
+       AsbShng	Asbestos Shingles
+       AsphShn	Asphalt Shingles
+       BrkComm	Brick Common
+       BrkFace	Brick Face
+       CBlock	Cinder Block
+       CemntBd	Cement Board
+       HdBoard	Hard Board
+       ImStucc	Imitation Stucco
+       MetalSd	Metal Siding
+       Other	Other
+       Plywood	Plywood
+       PreCast	PreCast
+       Stone	Stone
+       Stucco	Stucco
+       VinylSd	Vinyl Siding
+       Wd Sdng	Wood Siding
+       WdShing	Wood Shingles
+	
+MasVnrType: Masonry veneer type
+
+       BrkCmn	Brick Common
+       BrkFace	Brick Face
+       CBlock	Cinder Block
+       None	None
+       Stone	Stone
+	
+MasVnrArea: Masonry veneer area in square feet
+
+ExterQual: Evaluates the quality of the material on the exterior 
+		
+       Ex	Excellent
+       Gd	Good
+       TA	Average/Typical
+       Fa	Fair
+       Po	Poor
+		
+ExterCond: Evaluates the present condition of the material on the exterior
+		
+       Ex	Excellent
+       Gd	Good
+       TA	Average/Typical
+       Fa	Fair
+       Po	Poor
+		
+Foundation: Type of foundation
+		
+       BrkTil	Brick & Tile
+       CBlock	Cinder Block
+       PConc	Poured Contrete	
+       Slab	Slab
+       Stone	Stone
+       Wood	Wood
+		
+BsmtQual: Evaluates the height of the basement
+
+       Ex	Excellent (100+ inches)	
+       Gd	Good (90-99 inches)
+       TA	Typical (80-89 inches)
+       Fa	Fair (70-79 inches)
+       Po	Poor (<70 inches
+       NA	No Basement
+		
+BsmtCond: Evaluates the general condition of the basement
+
+       Ex	Excellent
+       Gd	Good
+       TA	Typical - slight dampness allowed
+       Fa	Fair - dampness or some cracking or settling
+       Po	Poor - Severe cracking, settling, or wetness
+       NA	No Basement
+	
+BsmtExposure: Refers to walkout or garden level walls
+
+       Gd	Good Exposure
+       Av	Average Exposure (split levels or foyers typically score average or above)	
+       Mn	Mimimum Exposure
+       No	No Exposure
+       NA	No Basement
+	
+BsmtFinType1: Rating of basement finished area
+
+       GLQ	Good Living Quarters
+       ALQ	Average Living Quarters
+       BLQ	Below Average Living Quarters	
+       Rec	Average Rec Room
+       LwQ	Low Quality
+       Unf	Unfinshed
+       NA	No Basement
+		
+BsmtFinSF1: Type 1 finished square feet
+
+BsmtFinType2: Rating of basement finished area (if multiple types)
+
+       GLQ	Good Living Quarters
+       ALQ	Average Living Quarters
+       BLQ	Below Average Living Quarters	
+       Rec	Average Rec Room
+       LwQ	Low Quality
+       Unf	Unfinshed
+       NA	No Basement
+
+BsmtFinSF2: Type 2 finished square feet
+
+BsmtUnfSF: Unfinished square feet of basement area
+
+TotalBsmtSF: Total square feet of basement area
+
+Heating: Type of heating
+		
+       Floor	Floor Furnace
+       GasA	Gas forced warm air furnace
+       GasW	Gas hot water or steam heat
+       Grav	Gravity furnace	
+       OthW	Hot water or steam heat other than gas
+       Wall	Wall furnace
+		
+HeatingQC: Heating quality and condition
+
+       Ex	Excellent
+       Gd	Good
+       TA	Average/Typical
+       Fa	Fair
+       Po	Poor
+		
+CentralAir: Central air conditioning
+
+       N	No
+       Y	Yes
+		
+Electrical: Electrical system
+
+       SBrkr	Standard Circuit Breakers & Romex
+       FuseA	Fuse Box over 60 AMP and all Romex wiring (Average)	
+       FuseF	60 AMP Fuse Box and mostly Romex wiring (Fair)
+       FuseP	60 AMP Fuse Box and mostly knob & tube wiring (poor)
+       Mix	Mixed
+		
+1stFlrSF: First Floor square feet
+ 
+2ndFlrSF: Second floor square feet
+
+LowQualFinSF: Low quality finished square feet (all floors)
+
+GrLivArea: Above grade (ground) living area square feet
+
+BsmtFullBath: Basement full bathrooms
+
+BsmtHalfBath: Basement half bathrooms
+
+FullBath: Full bathrooms above grade
+
+HalfBath: Half baths above grade
+
+Bedroom: Bedrooms above grade (does NOT include basement bedrooms)
+
+Kitchen: Kitchens above grade
+
+KitchenQual: Kitchen quality
+
+       Ex	Excellent
+       Gd	Good
+       TA	Typical/Average
+       Fa	Fair
+       Po	Poor
+       	
+TotRmsAbvGrd: Total rooms above grade (does not include bathrooms)
+
+Functional: Home functionality (Assume typical unless deductions are warranted)
+
+       Typ	Typical Functionality
+       Min1	Minor Deductions 1
+       Min2	Minor Deductions 2
+       Mod	Moderate Deductions
+       Maj1	Major Deductions 1
+       Maj2	Major Deductions 2
+       Sev	Severely Damaged
+       Sal	Salvage only
+		
+Fireplaces: Number of fireplaces
+
+FireplaceQu: Fireplace quality
+
+       Ex	Excellent - Exceptional Masonry Fireplace
+       Gd	Good - Masonry Fireplace in main level
+       TA	Average - Prefabricated Fireplace in main living area or Masonry Fireplace in basement
+       Fa	Fair - Prefabricated Fireplace in basement
+       Po	Poor - Ben Franklin Stove
+       NA	No Fireplace
+		
+GarageType: Garage location
+		
+       2Types	More than one type of garage
+       Attchd	Attached to home
+       Basment	Basement Garage
+       BuiltIn	Built-In (Garage part of house - typically has room above garage)
+       CarPort	Car Port
+       Detchd	Detached from home
+       NA	No Garage
+		
+GarageYrBlt: Year garage was built
+		
+GarageFinish: Interior finish of the garage
+
+       Fin	Finished
+       RFn	Rough Finished	
+       Unf	Unfinished
+       NA	No Garage
+		
+GarageCars: Size of garage in car capacity
+
+GarageArea: Size of garage in square feet
+
+GarageQual: Garage quality
+
+       Ex	Excellent
+       Gd	Good
+       TA	Typical/Average
+       Fa	Fair
+       Po	Poor
+       NA	No Garage
+		
+GarageCond: Garage condition
+
+       Ex	Excellent
+       Gd	Good
+       TA	Typical/Average
+       Fa	Fair
+       Po	Poor
+       NA	No Garage
+		
+PavedDrive: Paved driveway
+
+       Y	Paved 
+       P	Partial Pavement
+       N	Dirt/Gravel
+		
+WoodDeckSF: Wood deck area in square feet
+
+OpenPorchSF: Open porch area in square feet
+
+EnclosedPorch: Enclosed porch area in square feet
+
+3SsnPorch: Three season porch area in square feet
+
+ScreenPorch: Screen porch area in square feet
+
+PoolArea: Pool area in square feet
+
+PoolQC: Pool quality
+		
+       Ex	Excellent
+       Gd	Good
+       TA	Average/Typical
+       Fa	Fair
+       NA	No Pool
+		
+Fence: Fence quality
+		
+       GdPrv	Good Privacy
+       MnPrv	Minimum Privacy
+       GdWo	Good Wood
+       MnWw	Minimum Wood/Wire
+       NA	No Fence
+	
+MiscFeature: Miscellaneous feature not covered in other categories
+		
+       Elev	Elevator
+       Gar2	2nd Garage (if not described in garage section)
+       Othr	Other
+       Shed	Shed (over 100 SF)
+       TenC	Tennis Court
+       NA	None
+		
+MiscVal: $Value of miscellaneous feature
+
+MoSold: Month Sold (MM)
+
+YrSold: Year Sold (YYYY)
+
+SaleType: Type of sale
+		
+       WD 	Warranty Deed - Conventional
+       CWD	Warranty Deed - Cash
+       VWD	Warranty Deed - VA Loan
+       New	Home just constructed and sold
+       COD	Court Officer Deed/Estate
+       Con	Contract 15% Down payment regular terms
+       ConLw	Contract Low Down payment and low interest
+       ConLI	Contract Low Interest
+       ConLD	Contract Low Down
+       Oth	Other
+		
+SaleCondition: Condition of sale
+
+       Normal	Normal Sale
+       Abnorml	Abnormal Sale -  trade, foreclosure, short sale
+       AdjLand	Adjoining Land Purchase
+       Alloca	Allocation - two linked properties with separate deeds, typically condo with a garage unit	
+       Family	Sale between family members
+       Partial	Home was not completed when last assessed (associated with New Homes)
+```

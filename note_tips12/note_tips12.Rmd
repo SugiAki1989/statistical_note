@@ -1,0 +1,160 @@
+---
+title: "特殊な演算子を作る"
+pagetitle: "特殊な演算子を作る"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+計算時間がかかる処理の時間計測をとにかく忘れるので「代入＋時間計測」演算子を作った、という話。分析していると、これ重たそうだから時間図りたいな〜計算中に他の仕事したいし・・・という場面がある。まぁ仕事でRを使う場面と言ったら、面倒なややこいSQLのクエリの結果が意図した通りなのか、Rでテストを書く場面くらいだが・・・。
+
+## 「代入＋時間計測」演算子
+「代入＋時間計測」演算子という中置演算子もなんなので、アップサート(up-sert)てきなノリでタイムサート(time-sert)演算子くらいにしておく。R
+で時間を測る方法はいくつかある。`system.time()`や`Sys.time()`、最近だと`tictok`パッケージなんかもあるが、時間計測して代入となると、たぶん・・・面倒くさい。
+
+```R:R
+# できていない
+t <- system.time(1:10)
+t
+   user  system elapsed 
+  0.012   0.000   0.011 
+
+# 長い・・・
+s <- Sys.time()
+t <- 1:10
+e <- Sys.time()
+as.numeric(e - s)
+[1] 0.005695105
+
+```
+
+ということでボケ防止と楽をするために作った。
+
+```R:R
+`%time%` <- function(lhs, rhs){
+  
+  var <- deparse(substitute(lhs))
+  code <- substitute(rhs)
+  
+  start_time <- Sys.time()
+  res <- eval(code, envir = .GlobalEnv)
+  end_time <- Sys.time()
+  elapsed_time <- end_time - start_time
+  
+  assign(var, res, envir = .GlobalEnv)
+  
+  cat("# -----------------------------","\n")
+  cat("# Elapsed time is", elapsed_time, "\n")
+  cat("# -----------------------------","\n")
+}
+```
+
+使い方は普通の代入演算子`<-`のように使えば、代入と時間計測が可能。中置演算子については、「[R言語徹底解説](https://www.kyoritsu-pub.co.jp/bookdetail/9784320123939)」のp96にある「中置関数」を参照。
+
+```R:R
+x %time% 1:10
+# ----------------------------- 
+# Elapsed time is 2.622604e-05 
+# ----------------------------- 
+x
+ [1]  1  2  3  4  5  6  7  8  9 10
+
+f <- function(x) {return(x * x)}
+y %time% f(1:10)
+# ----------------------------- 
+# Elapsed time is 3.695488e-05 
+# ----------------------------- 
+y
+ [1]   1   4   9  16  25  36  49  64  81 100
+
+
+z %time% lm(Petal.Length ~ Petal.Width, iris)
+# ----------------------------- 
+# Elapsed time is 0.002145052 
+# ----------------------------- 
+
+z
+
+Call:
+lm(formula = Petal.Length ~ Petal.Width, data = iris)
+
+Coefficients:
+(Intercept)  Petal.Width  
+      1.084        2.230  
+
+# pipeで繋ぐ場合は丸括弧で囲まないと中置演算子がうまく機能しない
+xx %time% (iris %>% 
+            sample_n(50) %>% 
+            group_by(Species) %>% 
+            summarise(sum = sum(Petal.Length))
+          )
+`summarise()` ungrouping output (override with `.groups` argument)
+# ----------------------------- 
+# Elapsed time is 0.01261497 
+# ----------------------------- 
+
+xx
+# A tibble: 3 x 2
+  Species      sum
+  <fct>      <dbl>
+1 setosa      17.4
+2 versicolor  82  
+3 virginica  106. 
+```
+
+# はじめに
+Twitterでおもしろいものを見つけたのでメモ。
+
+## 重複エラー演算子
+同じ変数名で上書きすることを許さない演算子`:=`の作り方。Twitterのタイムラインに流れていたのでメモ。
+
+<blockquote class="twitter-tweet"><p lang="en" dir="ltr">A hallmark of functional programming languages is the lack of assignment statements. Once a variable is defined its value cannot be changed. I was wondering how to make <a href="https://twitter.com/hashtag/RStats?src=hash&amp;ref_src=twsrc%5Etfw">#RStats</a> act that way and came up with this solution. Fun to see this actually working. <a href="https://t.co/mpD2vFV7Wy">pic.twitter.com/mpD2vFV7Wy</a></p>&mdash; /usr/bin/env thomas (@thomas_neitmann) <a href="https://twitter.com/thomas_neitmann/status/1304340413915049984?ref_src=twsrc%5Etfw">September 11, 2020</a></blockquote> <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+
+なるほどな〜と思ったのは、変数名と値の関係において、変数名をチェックするには、このように書けばよいのかと勉強になりました。演算子の左側の文字…どうやって扱うのが良いのか以前悩んだことがあったのだけど、演算子の左とかいう発想ではなく、この関数のように考えれば幾分楽に処理できる。ついでに、`var <- deparse(substitute(lhs))`は、tidyevalの関数群なら`var <- quo_text(enquo(lhs))` になるのでこっちでもよいと思われ。
+ 
+```R:R
+`:=` <- function(lhs, rhs){
+  var <- deparse(substitute(lhs))
+  if(exists(var, parent.frame(), inherits = FALSE)){
+    stop("Variable `", var, "` is already defined.", call. = FALSE)
+  } else {
+    assign(var, rhs, parent.frame())
+  }
+}
+```
+
+動かすとこうなる。
+
+```R:R
+a := 1:10
+a
+ [1]  1  2  3  4  5  6  7  8  9 10
+
+a := 11:20
+Error: Variable `a` is already defined.
+```
+
+みんな頭よすぎでしょ…

@@ -1,0 +1,129 @@
+---
+title: "数字のフォーマット"
+pagetitle: "数字のフォーマット"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+## 数字の表記をフォーマット
+```
+sprintf('%s', pi)
+[1] "3.14159265358979"
+sprintf('%e', pi)
+[1] "3.141593e+00"
+sprintf('%E', pi)
+[1] "3.141593E+00"
+sprintf('%g', pi)
+[1] "3.14159"
+sprintf('%f', pi)
+[1] "3.141593"
+sprintf('%.0f', pi)
+[1] "3"
+sprintf('%.1f', pi)
+[1] "3.1"
+sprintf('%.2f', pi)
+[1] "3.14"
+sprintf('%.3f', pi)
+[1] "3.142"
+sprintf('%.10f', pi)
+[1] "3.1415926536"
+```
+
+## 指定した文字幅でフォーマット
+```
+sprintf('%10-s', 1)
+[1] "1         "
+sprintf('%10-s', 111)
+[1] "111       "
+sprintf('%10-s', 111111)
+[1] "111111    "
+sprintf('%10.1f', pi)
+[1] "       3.1"
+sprintf('%10.3f', pi)
+[1] "     3.142"
+sprintf('%10.6f', pi)
+[1] "  3.141593"
+
+# パーセントや切り上げ
+sprintf('Percent stlye %.0f%%', 66.345667)
+[1] "Percent stlye 66%"
+sprintf('Floor stlye %.0f', 7.7777)
+[1] "Floor stlye 8"
+
+# プラス記号、先頭空白
+sprintf('%+f', pi)
+[1] "+3.141593"
+sprintf('%+.3f', pi)
+[1] "+3.142"
+sprintf('% f', pi)
+[1] " 3.141593"
+```
+## ベクトルを使ってフォーマット
+```
+# パディング
+sprintf('daily%02d.csv', 1:10)
+ [1] "daily01.csv" "daily02.csv" "daily03.csv"
+ [4] "daily04.csv" "daily05.csv" "daily06.csv"
+ [7] "daily07.csv" "daily08.csv" "daily09.csv"
+[10] "daily10.csv"
+sprintf('name_%s.csv', c('Tom', 'Mike', 'Carry'))
+[1] "name_Tom.csv"   "name_Mike.csv" 
+[3] "name_Carry.csv"
+sprintf("%09s", month.name)
+ [1] "00January" "0February" "0000March"
+ [4] "0000April" "000000May" "00000June"
+ [7] "00000July" "000August" "September"
+[10] "00October" "0November" "0December"
+sprintf("%s_%03d", "test", 1:3)
+[1] "test_001" "test_002" "test_003"
+n <- 1:5
+sprintf(paste0("e with %2d digits = %.", n, "g"), n, exp(1))
+[1] "e with  1 digits = 3"     
+[2] "e with  2 digits = 2.7"   
+[3] "e with  3 digits = 2.72"  
+[4] "e with  4 digits = 2.718" 
+[5] "e with  5 digits = 2.7183"
+sprintf("second %2$1.0f, first %1$.2f, third %3$1.0f", pi, 2, 3)
+[1] "second 2, first 3.14, third 3"
+
+categorys <- c("A", "B", "C") 
+numbers <- c(1, 10, 100) 
+for (category in categorys) { 
+  for (number in numbers) { 
+    file.name <- sprintf("Category_%s_Branch_%03d.txt", category, number) # ファイル名を作る
+    print(file.name)
+  }
+}
+[1] "Category_A_Branch_001.txt"
+[1] "Category_A_Branch_010.txt"
+[1] "Category_A_Branch_100.txt"
+[1] "Category_B_Branch_001.txt"
+[1] "Category_B_Branch_010.txt"
+[1] "Category_B_Branch_100.txt"
+[1] "Category_C_Branch_001.txt"
+[1] "Category_C_Branch_010.txt"
+[1] "Category_C_Branch_100.txt"
+```

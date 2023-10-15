@@ -1,0 +1,237 @@
+---
+title: "ベイジアンABテストのはなし(rstan編)"
+pagetitle: "ベイジアンABテストのはなし(rstan編)"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、以前おさらいしたベイジアンフレームワークのもとでのABテストを[rstan](https://mc-stan.org/users/interfaces/rstan)パッケージを利用して再現する。RStanはStanをRから使うためのインターフェースで、Stanは確率的プログラミング言語である。密度関数を指定して、MCMCサンプリングによるベイジアン統計推論による結果が得ることが可能。詳しい話は良き書籍やWebサイトがあるので、そちらにお任せする。
+
+## サンプルデータの準備
+
+ABテストで使用するサンプルデータは[BayesAB](https://github.com/FrankPortman/bayesAB)パッケージのまとめの時に使用したサンプルデータを利用する。日付は14日に限定し、aパターンの方がコンバージョンレートが高くなるようにしている。
+
+```{r}
+library(tidyverse)
+library(bayesAB)
+library(rstan)
+library(scales)
+# exploratory社のデータカタログからお借りする
+df_ab <- read_csv('https://exploratory.io/public/api/GMq1Qom5tS/A-B-IJp6BcB2/data')
+# uniquePageViewとconversion_rateから集計前を再現するための関数
+vec_gen <- function(x, y){
+  map2(
+    .x = x, 
+    .y = y, 
+    .f = function(x, y){rbinom(n = x, size = 1, prob = y)}
+  ) %>% unlist()
+}
+df_a <- df_ab %>% 
+  dplyr::filter(
+    landingPagePath == '/post?id=11' & 
+      is_signup == TRUE &
+      date >= '2017-06-01' & 
+      '2017-06-15' > date
+    )
+df_b <- df_ab %>% 
+  dplyr::filter(
+    landingPagePath == '/post?id=12' & 
+      is_signup == TRUE &
+      date >= '2017-06-01' & 
+      '2017-06-15' > date
+  )
+
+dt <- seq(as.Date('2023-08-01'), as.Date('2023-08-14'),  by = "day")
+dt_a <- rep(dt, times = df_a$uniquePageView)
+dt_b <- rep(dt, times = df_b$uniquePageView)
+
+set.seed(1989)
+cv_a <- vec_gen(x = df_a$uniquePageView, y = df_a$conversion_rate+0.015)
+cv_b <- vec_gen(x = df_b$uniquePageView, y = df_b$conversion_rate)
+
+df <- union_all(
+  tibble(dt = dt_a, cv = cv_a, flag = 'a'),
+  tibble(dt = dt_b, cv = cv_b, flag = 'b')
+)
+
+df_summary <- df %>% 
+  group_by(flag) %>% 
+  summarise(
+    cnt = n(),
+    cv = sum(cv),
+    not_cv = cnt - cv,
+    cvr = cv / cnt
+  )
+
+df_summary
+```
+
+サンプルデータの準備が整ったので、これからベイジアンフレームワークのABテストを行う。
+
+## ベイジアンフレームワークのABテスト
+
+事前分布として前回同様`Beta(2, 10)`を利用する。これは、コンバージョンレートは10%前後であると考えており、この確信度合いを観察されたデータから計算できる尤度に反映する。可視化するとこんな感じのベータ分布である。
+
+```{r}
+prior_alpha <- 2
+prior_beta <- 10
+
+tibble(
+  x = seq(0, 1, 0.01),
+  y = dbeta(x, prior_alpha, prior_beta)
+) %>% 
+  ggplot(., aes(x, y)) +
+  geom_line() + 
+  geom_vline(xintercept = 0.10, linetype = "dashed") + 
+  scale_x_continuous(breaks = seq(0, 1, 0.05)) + 
+  labs(title = "Beta Distribution with alpha = 2, beta = 10", x = "Conversion Rate", y = "Density") + 
+  theme_bw()
+```
+
+rstanでMCMCを行って、パラメタを推定する前に、モデルを定義しておく必要がある。ここでのモデルを説明する。`sA(sB)`はパラメータ`rateA(rateB)`を成功確率として持つ二項分布に従うと仮定しており、`nA(nB)`回の試行中で`rateA(rateB)`の確率で成功する回数が`sA(sB)`回となる確率を計算している。また、`rateA`と`rateB`に対して、`Beta(2, 10)`を事前分布として設定。これは、成功確率が低いことを反映した分布。
+
+```{r}
+model <- "
+data {
+  // Number of imp
+  int nA;
+  int nB;
+  // Number of cv
+  int sA;
+  int sB;
+}
+
+parameters {
+  real<lower=0, upper=1> rateA;
+  real<lower=0, upper=1> rateB;
+}
+
+model {
+  // 前回の事前分布の設定
+  rateA ~ beta(2, 10);
+  rateB ~ beta(2, 10);
+  sA ~ binomial(nA, rateA);
+  sB ~ binomial(nB, rateB); 
+}
+generated quantities {
+  real rate_diff;
+  rate_diff = (rateA - rateB) / rateB;
+}
+"
+```
+
+あとは観測されたデータを渡し、
+
+```{r}
+data <- list(
+  nA = df_summary$cnt[1],
+  nB = df_summary$cnt[2], 
+  sA = df_summary$cv[1], 
+  sB = df_summary$cv[2]
+  )
+
+data
+```
+
+
+コンパイルして、事後分布を推定する。チェインは4回、試行は1万回とする。
+
+```{r}
+stan_samples <- stan(
+  model_code = model, 
+  data = data,
+  chains = 4, 
+  iter = 10000,
+  seed = 1989
+  )
+```
+
+パラメータの事後分布の収束を確認しておく。サンプリングチェーンが安定して、トレースが描かれているので、収束していると思われる。また、自己相関なども確認できないので問題はなさそう。`rate_diff`のトレースプロットをみるとわかるが、パターンAとパターンBの成功率の相対比にグループAに偏っていることがわかる。
+
+```{r}
+traceplot(stan_samples)
+```
+
+相対比のところは、トレースプロットでみなくても事後分布のプロットを見たほうが早い。
+
+```{r}
+plot(stan_samples)
+```
+
+最後に、前回もまとめているAとBの相対的な優秀さ度合いを可視化しておく。まずは、サンプリング結果を取り出す。
+
+```{r}
+df_posterior <- as.data.frame(stan_samples)
+head(df_posterior)
+```
+
+`rate_diff`はstanのモデルのgenerated quantitiesブロックで定義しておいたので、これが0より大きい回数を計算して平均すれば割合がわかる。結果として97%でパターンAが優れていることがわかる。
+
+```{r}
+ab_result <- mean(sign(df_posterior$rate_diff > 0))
+ab_result
+```
+
+事後分布の信用区間も計算しておく。`5%:0.01`はAをBと比較した際に、Aが101%以下の効果を出す確率が5%で、`95%:0.12`は、AをBと比較した際に、Aが112%以上の効果を出す確率が5%。つまり、AをBと比較した際に、Aが90%の確率で101%から112%の効果を出すだろうと解釈できる。
+
+```{r}
+# 90% Credible Interval
+quantile(df_posterior$rate_diff, probs = c(0.05, 0.95))
+```
+
+最後に可視化しておく。
+
+```{r}
+df_posterior %>% 
+  mutate(col = if_else(rate_diff > 0 , 'high', 'low')) %>% 
+  ggplot(aes(rate_diff, fill = col)) + 
+  geom_histogram(bins = 100, alpha = 1/2) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_text(
+    data = data.frame(),
+    aes(x = 0.03, y = 50, label = percent(ab_result, accuracy = 0.01)), inherit.aes = FALSE, size = 5
+    ) +
+  scale_x_continuous(labels = percent_format(accuracy = 0.01)) +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(subtitle = "Histogramn of (A - B) / B Samples: Probability", x = "(A-B)/B", y = "Density") + 
+  theme_bw()
+  
+```
+
+## おまけ
+
+`(x - y) / y`の数式のお気持ちをおまけとしてまとめておく。突然ベイジアンABテストの文脈で出てくるので、どういうことなんだろうかと疑問に思ったが、よく見ると、この式自体は売上高成長率(Sales Growth Rate)と同じである。`x`と`y`の差を`y`で割ることによって、`x`と`y`の相対的な大きさや関係性を表現しようとしているだけではあるが、おさらいを兼ねてメモ書きを残しておく。
+
+式の分子`(x - y)`は、`x`と`y`の差を表している。これにより、`x`が`y`よりも大きい場合は正の値が、`x`が`y` よりも小さい場合は負の値が得られる。つまり、この差が意味しているのは、どれだけの大きさの差があるか、またその方向性は正なのか負なのかを意味する。
+
+次に、分母`y`は除数で、差をどれだけの大きさで割るかを決める。`y`の値が大きいほど、差をより小さな比率で表すことになり、`y`の値が小さいと、差の影響がより強く反映される。
+
+式全体で見ると`(x - y) / y`は、`x`と`y`の相対的な関係を示すことになる。例として`x`が100で`y`が50の場合、絶対的な差は50。しかし、相対的な比率を計算すると、`(100 - 50)/50 = 1`となる。この場合、`x`は`y`の倍の値を持っていることが分かる。`(x - y)/y = -0.5`は、`x`が`y`の半分以下であることを示す。このように、相対的な比率を用いることで、数値間の関係性を相対的に評価できる。
+
+## 参考文献
+
+- [rstan](https://mc-stan.org/users/interfaces/rstan)
+- [BayesAB](https://github.com/FrankPortman/bayesAB)

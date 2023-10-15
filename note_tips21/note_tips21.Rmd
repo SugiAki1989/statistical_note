@@ -1,0 +1,82 @@
+---
+title: "じゃんけんの判定をモジュロ演算で楽をする"
+pagetitle: "じゃんけんの判定をモジュロ演算で楽をする"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# モジュロ演算を使った基礎的な加工方法のメモ
+
+人間とPCがじゃんけんをして、人間の判定結果を計算したい。
+じゃんけんの9通りの場合分けを記述するのは面倒なので、モジュロ演算で判定する方法。
+ここでは、グー(0)、チョキ(1)、パー(2)と対応しているとする。
+
+人間(左)がPC(右)に勝つ場合は、下記の組み合わせが考えられる。
+
+- グー(0) vs. チョキ(1)
+- チョキ(1) vs. パー(2)
+- パー(2) vs. グー(0)
+
+上から数値の差を考えると、1、1、2となって、最後の組み合わせが、対応している数値の影響で循環している。このような場合に、PCの数値に3を足して、人間の数値を引いて、3で割ったあまりを見ると、人間が勝利する場合の組み合わせが1として計算される。
+
+```{r}
+library(tidyverse)
+
+p <- expand.grid(x = c(0,1,2), y = c(0,1,2))
+ref <- expand.grid(me = c('rock','scissors','paper'), 
+                   pc = c('rock','scissors','paper'))
+df <- tibble::tibble(p, ref)
+
+df %>% 
+  mutate(
+    ref = paste(me, pc, sep = '-'),
+    res =
+           case_when(
+             (y + 3 - x) %% 3 == 1 ~ 'win',
+             x == y ~ 'draw',
+             TRUE ~ 'lose'
+           )
+         ) %>% 
+  select(x, y, res, ref)
+```
+
+途中の過程はこんな感じ。
+
+``````{r}
+df %>% 
+  mutate(tmp1 = y + 3,
+         tmp2 = tmp1 - x,
+         tmp3 = tmp2 %% 3,
+         TMP4 = tmp3 == 1,
+         res =
+           case_when(
+             (y + 3 - x) %% 3 == 1 ~ 'win',
+             x == y ~ 'draw',
+             TRUE ~ 'lose'
+           )
+         )
+```
+

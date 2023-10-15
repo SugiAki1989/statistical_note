@@ -1,0 +1,333 @@
+---
+title: "指数曲線のあてはめについて"
+pagetitle: "指数曲線のあてはめについて"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここでは指数曲線のあてはめについてまとめておく。上限のあるビジネス系のデータを扱っている際に、そのモデリングで悩んだので、とくに上限があるデータをモデリングする方法に焦点を当てている。
+
+## 線形と非線形
+
+本題の指数曲線のあてはめに入る前に、線形、非線形の解釈を誤っていたので、そのあたりを整理しておきたい。特に詳しく調べるわけでもなく、グラフが直線であれば線形、曲線であれば非線形と簡単に考えてしまっていた。ただ、下記の書籍を読んでいると、「直線であっても線形ではない」モデルが紹介されており、この解釈は正しくないことに気づいたので、まとめておく。
+
+- [医薬品開発のための統計解析 第3部 非線形モデル](https://scientist-press.com/2019/06/12/igaku-004/)
+
+線形性の定義は下記の通り。
+
+- 1. 加法性(additivity): 任意の$x,y$に対して、$f(x+y) = f(x) + f(y)$
+- 2. 斉次性(homogeneity): 任意の$x$、スカラー$k$に対して、$f(kx) = kf(x)$
+
+これら2つの条件を満たすとき、関数が線形性(linearity)を持つとする。つまり、グラグが直線であることは関係ないため、グラフが直線関係であっても非線形なモデルである場合が存在することになる。
+
+簡単な例として、下記のモデルを考える。
+
+$$
+y = \beta_{0} + \beta_{1} \cdot x
+$$
+
+これは加法性、斉次性を満たすので、直線関係の線形モデル。実際にRで確認してみる。
+
+```{r}
+f1 <- function(x, b0 = 1, b1 = 2){
+  res <- b1*x
+  return(res)
+}
+
+c(
+  additivity = f1(5) == f1(2) + f1(3), 
+  homogeneity = 5*f1(2) == f1(5*2)
+  )
+```
+
+次は下記のモデル。
+
+$$
+y = \beta_{0} \cdot exp^{\beta_{1} \cdot x}
+$$
+
+グラフに関しても曲線関係をもっており、線形性も成り立たないので非線形モデル。
+
+```{r}
+f2 <- function(x, b0 = 1, b1 = 2){
+  res <- b0 * exp(b1*x)
+  return(res)
+}
+
+c(
+  additivity = f2(5) == f2(2) + f2(3),
+  homogeneity = 5*f2(2) == f2(5*2)
+)
+```
+
+次は下記のモデル。
+
+$$
+y = \beta_{0} + \beta_{1} ( x -  \beta_{2})
+$$
+
+このモデルはグラフに関しては直線関係をもっているが、線形性が成り立たないので非線形モデル。
+
+```{r}
+
+f3 <- function(x, b0 = 1, b1 = 2, b2 = 3){
+  res <- b0 + b1*(x-b2)
+  return(res)
+}
+
+c(
+  additivity = f3(5) == f3(2) + f3(3),
+  homogeneity = 5*f3(2) == f3(5*2)
+)
+```
+
+グラフにすると直線関係をもっていることがわかるが、これは非線形モデル。
+
+```{r}
+plot(x = 1:100, y = f3(1:100), type = 'l')
+```
+
+最後はこのモデル。
+
+$$
+y = \frac{\beta_{0} \cdot x}{\beta_{1} + x} 
+$$
+
+グラフに関しても曲線関係をもっており、線形性も成り立たないので非線形モデル。
+
+```{r}
+f4 <- function(x,b0 = 1, b1 = 2){
+  res <- (b0 * x)/(b1 + x)
+  return(res)
+}
+
+c(
+  additivity = f4(5) == f4(2) + f4(3),
+  homogeneity = 5*f4(2) == f4(5*2)
+)
+```
+
+このように線形、非線形という区別と、グラフが直線、曲線かという区分は異なるので、グラフだけから線形モデルかどうかは判断できない。
+
+## 指数曲線モデル
+
+指数曲線モデルの一般式は下記の通り。
+
+$$
+y = \alpha \beta^{x}
+$$
+
+こちらの本に、指数曲線モデルについて面白い問題が乗っていたので、問題をお借りする。
+
+- [医薬品開発のための統計解析 第3部 非線形モデル](https://scientist-press.com/2019/06/12/igaku-004/)
+
+例えば、1時点(24H)ごとに3%増加するとき、1週間(=7日)後には何倍になっているのかがすぐわかる。$\alpha=1$として、このモデルに当てはめると、1.23倍となる。
+
+$$
+y = 1 \cdot 1.03^{7} = 1.23
+$$
+
+他にも、1時点(24H)ごとに3%増加するとき、1%増加するのに何時間かかるかもすぐわかる。指数曲線モデルを対数をとって扱いやすくしてから、
+
+$$
+y = \alpha \beta^{x} \Leftrightarrow ln(y) = ln(\alpha) +  ln(\beta) \cdot x
+$$
+
+そして、このモデルを$x$について変形すれば、0.34とわかる。0.34を24時間に変換すると、8.08時間くらいかかる。
+
+$$
+x = \frac{ln(y) - ln(\alpha)}{ln(\beta)} = \frac{ln(1.01) - ln(1)}{ln(1.03)} = 0.34
+$$
+
+他にも、1時点(24H)ごとに3%増加するとき、3倍になるのは何時点後なのかもわかる。答えは37.17日後。
+
+$$
+x = \frac{ln(y) - ln(\alpha)}{ln(\beta)} = \frac{ln(3) - ln(1)}{ln(1.03)} = 37.17
+$$
+
+## 指数曲線モデルの形状
+
+指数曲線モデルの形状は$\beta$によって決定される。$\beta \gt 1$であれば、$x$が増加するにつれて$y$も増加する。反対に、$0 \lt \beta \lt 1$であれば、$x$が増加するにつれて$y$は減少する。$\beta$が変化することで、減衰するパターンが異なることがわかる。
+
+```{r}
+exp_f <- function(a, b, x) a * b^x
+
+plot(NA, xlim = c(0, 10), ylim = c(0, 100), xlab = "x", ylab = "y")
+for (i in 5:9) {
+  curve(exp_f(a = 100, b = i / 10, x), 0, 10,
+        ylim = c(0, 100), col = i - 4, add = TRUE)
+}
+abline(h = (0:10) * 10, lty = 3, lwd = 1)
+
+```
+
+また、よく見る指数曲線モデルの形にするために下記変換を行っておく。式変更の参考は[こちら](https://www.youtube.com/watch?v=HL6AWNjVOnU)。
+
+$$
+y = \alpha \beta^{x} = \alpha \exp(ln(\beta)x) = \alpha \exp(B x)
+$$
+
+特定の$\beta$によって生成される値の各時点での傾きの大きさは「消失速度」とも言われる。これは時点$x$で微分すればよい。このモデルについて、
+
+$$
+y = \alpha \exp(B x)
+$$
+
+$x$で微分すると、
+
+$$
+\frac{ dy }{ dx } = B \overbrace{\alpha \exp(B x)}^{y} = By
+$$
+
+となる。これを用いて、10%減少する指数曲線モデルがあったときに、
+
+$$
+y = 100 \cdot 0.9^x = 100exp(ln(0.9) x) = 100exp(-0.1053 x)
+$$
+
+のように消失速度を考えられるので、$y=100,80,50,20,0$のときの消失速度を計算すると、傾きが緩やかになっていることがわかる。
+
+$$
+\begin{eqnarray}
+By_{100} &=& ln(0.9) \cdot 100 &=& -10.54\\
+By_{80} &=& ln(0.9) \cdot 80 &=& -8.43\\
+By_{50} &=& ln(0.9) \cdot 50 &=& -5.27\\
+By_{20} &=& ln(0.9) \cdot 20 &=& -2.11\\
+By_{0} &=& ln(0.9) \cdot 0 &=& 0\\
+\end{eqnarray}
+$$
+
+## 下限/上限のある指数曲線モデル
+
+下限/上限のある指数曲線モデルは下記の式で表される。
+
+$$
+\begin{eqnarray}
+y &=& y_{lim} + (\alpha - y_{lim}) \beta^{x} \\ 
+&=& y_{lim} + (\alpha - y_{lim}) \exp(\ln(\beta) x) \\ 
+&=& y_{lim} + (\alpha - y_{lim}) \exp(B x) \\ 
+0 &\lt& \beta \lt 1, \ln(\beta) = B \lt 0
+\end{eqnarray}
+$$
+
+$y_{lim}$を設定すると、下記のようにモデルの上限下限をコントロールできる。
+
+```{r}
+explim_f <- function(x, a, ylim, b) {ylim + (a - ylim) * b^x}
+x <- seq(0, 15, 0.01)
+yy <- matrix(0, nrow = length(x), ncol = 4)
+ylim <- c(90, 90, 10, 10)
+b   <- c(0.5, 0.8, 0.8, 0.5)
+
+for (i in 1:4) {
+  yy[, i] <- explim_f(x, 50, ylim[i], b[i])
+}
+
+plot(NA, xlim = c(0, 15), ylim = c(0, 100), xlab = "x", ylab = "y")
+for (i in 1:4) {
+  lines(x, yy[, i], type = "l", col = i, lwd = 2)
+}
+abline(h = (1:10) * 10, lty = 3, lwd = 1)
+```
+
+本題に入るまでが長かったが、下限/上限のある指数曲線モデルのパラメタを推定していく。非線形最小2乗問題をレーベンバーグ・マルカート法(Levenberg-Marquadt)で推定した結果、$\alpha=3.14, B = -0.08$、つまり$\ln(0.92) = B = -0.08$となる。
+
+```{r}
+library(tidyverse)
+library(gslnls)
+
+df <- tibble(
+  x = seq(0, 30, 5),
+  y = c(3, 10, 13, 17, 17, 20, 21)
+)
+
+# 上限が決まっているのでylimはfnとstartには不要と思われる。
+model <- gsl_nls(
+  fn = y ~ 22 + (a - 22) * exp(B * x),
+  data = df,     
+  start = c(a = 0, B = -0.1), 
+  control = gsl_nls_control(maxiter = 100),
+  algorithm = 'lm'
+)
+summary(model)
+```
+
+これを可視化すると下記のようになる。
+
+```{r}
+cbind(
+  df, 
+  predict(model, interval = "prediction", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y)) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) + 
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Exponential curve with upper bound')
+```
+
+## おまけ
+
+非線形最小二乗法を使っていたので、最尤法で推定できないものかと試行錯誤したものの、うまくパラメタが収束せず、私の能力では限界だったので諦めた。代わりに、`optim()`関数で推定した例を載せておく。
+
+`optim()`関数でデータ`d[i]`にパラメータベクトル`t`を持つ非線形関数`f[i]=F(i, t)`を当てはめるには、目的関数を`SS(t)=sum((d-f)^2)`と置いて`t`について最小化すれば良いはず。
+
+```{r}
+f <- function(par, x, y) {
+  a <- par[1]
+  b <- par[2]
+  y_hat <- exp_f(a,b,x)
+  res <- sum((y - y_hat)^2)
+  return(res)
+}
+
+exp_f <- function(a, b, x){
+  22 + (a - 22) * exp(b * x)
+}
+
+fit <- optim(c(1,0.1), f, x = df$x, y = df$y, method = "Nelder-Mead")
+fit
+```
+
+ちなみに`BFGS`法はうまく推定できなかった。
+
+```{r}
+y_fit <- exp_f(a = fit$par[1], b = fit$par[2], df$x)
+
+cbind(df, y_fit) %>% 
+  ggplot(., aes(x, y)) +
+  geom_line(aes(x, y_fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Exponential curve with upper bound')
+```
+
+## 参考文献
+
+- [医薬品開発のための統計解析 第3部 非線形モデル](https://scientist-press.com/2019/06/12/igaku-004/)
+- [数学・科学における「線形・非線形」の違いを詳しく解説](https://math-fun.net/20190619/1715/)
+- [Linearity](https://en.wikipedia.org/wiki/Linearity)

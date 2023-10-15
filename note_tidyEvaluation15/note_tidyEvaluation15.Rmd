@@ -1,0 +1,177 @@
+---
+title: "RのTidy evaluation_15"
+pagetitle: "RのTidy evaluation_15"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+# はじめに
+ここでは、`c()`と`setNames()`は違う(原因不明)ということをメモしておく。将来、また同じところで躓くだろうから。
+
+## 何をしたいのか
+tidyevalに基づいて関数を作っているときに、既存の関数の一部だけをそのままではなく、変更したいときがある。というかあった。例えば、こんな感じ。カラムを`enquo()`したりして、その変数名を`join()`のキーにしたい、みたいな状況。
+
+```R:R
+df1 <- tibble(ID = c("a","b","c"), KEY = 1:3)
+df2 <- tibble(id = c("a", "b"), key = 2:2, flg = c("key1", "key2"))
+
+join_func <- function(data1, data2, key1, key2){
+  key1_quo <- rlang::enquo(key1)
+  key2_quo <- rlang::enquo(key2)
+  
+  key1_nm_quo <- rlang::quo_text(key1_quo)
+  key2_nm_quo <- rlang::quo_text(key2_quo)
+  
+  left_join(data1, data2, by = setNames(nm     = c(key1_nm_quo, key2_nm_quo),
+                                        object = c("id", "key")))
+}
+join_func(data1 = df1, data2 = df2, key1 = ID, key2 = KEY)
+
+# A tibble: 3 x 3
+  ID      KEY w    
+  <chr> <int> <chr>
+1 a         1 NA   
+2 b         2 key2 
+3 c         3 NA   
+```
+
+このときに`join()`の`by`の部分で、いつものように`c(key1 = KEY1, key2 = KEY2)`みたいな指定すると何故か上手く行かない。エラーとしては左側のテーブルにそんなカラムがないと言われている。
+
+```R:R
+join_func <- function(data1, data2, key1, key2){
+  key1_quo <- rlang::enquo(key1)
+  key2_quo <- rlang::enquo(key2)
+  
+  key1_nm_quo <- rlang::quo_text(key1_quo)
+  key2_nm_quo <- rlang::quo_text(key2_quo)
+  
+  left_join(data1, data2, by = c(key1_nm_quo = "id", key2_nm_quo = "key"))
+}
+
+join_func(data1 = df1, data2 = df2, key1 = ID, key2 = KEY)
+ エラー: `by` can't contain join column `key1_nm_quo`, `key2_nm_quo` which is missing from LHS
+Call `rlang::last_error()` to see a backtrace. 
+
+```
+
+そこで、色々調べていると下記の記事を見つけた。
+
+- [dplyr join data frame in side a function using function arguments as by.x and by.y](https://stackoverflow.com/questions/51465129/dplyr-join-data-frame-in-side-a-function-using-function-arguments-as-by-x-and-by)
+- [dplyr: NSE in joins (by)](https://stackoverflow.com/questions/58518021/dplyr-nse-in-joins-by)
+
+関数内では`c()`は機能しないから`setNames()`使うほうがいいとのこと。
+
+何が違うのか調べてみたが、何がダメなのかわからない。
+
+```R:R
+func_c <- c("ID" = "id", "KEY" = "key")
+func_setNames <- setNames(nm = c("ID", "KEY"),
+                          object = c("id", "key"))
+
+str(func_c)
+ Named chr [1:2] "id" "key"
+ - attr(*, "names")= chr [1:2] "ID" "KEY"
+
+str(func_setNames)
+ Named chr [1:2] "id" "key"
+ - attr(*, "names")= chr [1:2] "ID" "KEY"
+
+identical(func_c, func_setNames)
+[1] TRUE
+```
+
+まぁ動くから良しとしよう。`join`側でなんかだめなんだろうか。名前とか変える必要ないなら下記に面白い例が載っていた。`by`の部分は、リストを`map_chr()`で回して文字列にする。なので、` by = map_chr(key, rlang::as_string)`みたいな感じ作っても行ける。
+
+- [using `rlang` quasiquotation with `dplyr::_join` functions](https://stackoverflow.com/questions/58846126/using-rlang-quasiquotation-with-dplyr-join-functions)
+
+```R:R
+df_combiner <- function(data, x, group.by) {
+  # check how many variables were entered for this grouping variable
+  group.by <- as.list(rlang::quo_squash(rlang::enquo(group.by)))
+
+  # based on number of arguments, select `group.by` in cases like `c(cyl)`,
+  # the first list element after `quo_squash` will be `c` which we don't need,
+  # but if we pass just `cyl`, there is no `c`, this will take care of that
+  # issue
+  group.by <-
+    if (length(group.by) == 1) {
+      group.by
+    } else {
+      group.by[-1]
+    }
+
+  # creating internal dataframe
+  df <- dplyr::group_by(.data = data, !!!group.by, .drop = TRUE)
+
+  # creating dataframes to be joined: one with tally, one with summary
+  df_tally <- dplyr::tally(df)
+  df_mean <- dplyr::summarise(df, mean = mean({{ x }}, na.rm = TRUE))
+
+  # without specifying `by` argument, this works but prints a message I want to avoid
+  #print(dplyr::left_join(x = df_tally, y = df_mean))
+
+  # joining by specifying `by` argument (my failed attempt)
+   dplyr::left_join(x = df_tally, y = df_mean, by = map_chr(group.by, rlang::as_string))
+
+}
+
+df_combiner(diamonds, carat, c(cut, clarity))
+# A tibble: 40 x 4
+# Groups:   cut [5]
+#   cut   clarity     n  mean
+#   <ord> <ord>   <int> <dbl>
+# 1 Fair  I1        210 1.36 
+# 2 Fair  SI2       466 1.20 
+# 3 Fair  SI1       408 0.965
+# 4 Fair  VS2       261 0.885
+# 5 Fair  VS1       170 0.880
+# 6 Fair  VVS2       69 0.692
+# 7 Fair  VVS1       17 0.665
+# 8 Fair  IF          9 0.474
+# 9 Good  I1         96 1.20 
+#10 Good  SI2      1081 1.04 
+# … with 30 more rows
+```
+
+` by = map_chr(key, rlang::as_string)`でなくても、` by = map_chr(key, rlang::quo_text)`でもよい。結局はクオーしているのを文字列に変えれればよいので。
+
+```R:R
+quos("a", "b", "c") %>%
+  map_chr(
+    .x = .,
+    .f = function(x) {
+      rlang::quo_text(x)
+    }
+  )
+
+"\"a\"" "\"b\"" "\"c\"" 
+```
+
+相変わらずTidyevalは難しいのぅ…。
+
+

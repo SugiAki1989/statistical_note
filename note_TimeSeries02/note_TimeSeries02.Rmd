@@ -1,0 +1,137 @@
+---
+title: "時系列データの分析(arima.simと季節調整法)"
+pagetitle: "時系列データの分析(arima.simと季節調整法)"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+時系列データへの理解、分析方法について、まとめていく。時系列データは、これまでやらないといけないと思いつつも、基礎をすっとばして、Prophet(一般化加法モデルベース)や状態空間モデルをやっていたが、やはり基礎は大事だと思うことがたくさんあったので、基礎からARIMAくらいまでをおさらいする。多分何回にわかれる。
+
+## arima.sim()でデータ生成過程
+`srima.sim()`というARIMAモデルからデータを生成し、シミュレーションできる便利な関数がある。これを色々と触ってみる。例えば、下記の設定であれば、自己回帰(AR)モデルが1次で、移動平均(MA)モデルも1次であるARMAモデルからシミュレーションデータが生成される。階差の設定をしていないので、和分過程ではなく、定常過程。
+
+```{r}
+library(tidyverse)
+library(forecast)
+
+set.seed(1989)
+y <- arima.sim(
+  n = 500,
+  model = list(
+    order = c(1,0,1),  # ARIMA(p,d,q)
+    ar = c(0.5),        # arの強さ
+    ma = c(0.5)        # maの強さ
+    )
+)
+
+ggplot(data = tibble::tibble(index = 1:length(y), y = y), aes(index, y)) + 
+  geom_line(col = "#01489D") + 
+  scale_y_continuous() +
+  ggtitle("Time Series Data ARIMA(1, 0, 1)") + 
+  theme_bw()
+```
+
+下記の設定であれば、自己回帰(AR)モデルが1次で、移動平均(MA)モデルも1次で、階差が1次のARIMAモデルからシミュレーションデータが生成される。階差の設定をしているので、これは1次和分過程。
+
+```{r}
+set.seed(1989)
+y <- arima.sim(
+  n = 500,
+  model = list(
+    order = c(1,1,1),  # ARIMA(p,d,q)
+    ar = c(0.5),        # arの強さ
+    ma = c(0.5)        # maの強さ
+    )　
+)
+
+ggplot(data = tibble::tibble(index = 1:length(y), y = y), aes(index, y)) + 
+  geom_line(col = "#01489D") + 
+  scale_y_continuous() +
+  ggtitle("Time Series Data ARIMA(1, 1, 1)") + 
+  theme_bw()
+```
+
+季節成分を入れたい場合は、`Arima()`でモデルを作って、それからそのモデルを`simulate()`に入れることで、データを生成すれば季節成分が入ったデータをシュミレーションできる。
+
+```{r}
+model <- Arima(ts(rnorm(100), freq = 12),
+               order = c(1,0,1),
+               seasonal = list(order=c(0,1,0), period=12),
+               fixed=c(phi = 0.5, theta = -0.4), #AR,MAのつよさ
+               )
+y <- simulate(model, nsim=200)
+forecast::ggtsdisplay(y, lag.max = 60)
+```
+
+## 季節調整法
+Rには便利な関数`decompose() `がある。これは時期列データを、移動平均法を使って季節性、トレンド、不規則変動に分解してくれる関数。つまり、時期列データは下記の要素で構成されていると考える。
+
+- 季節性：一定期間繰り返されるパターンのこと。
+- トレンド：メトリックの基本的な傾向。
+- 不規則変動：ノイズのことで、季節およびトレンドが削除された後の元の時系列の残差。
+
+内容を把握したいので、やっていることを再現する。データを分割する方法は下記のように行われている。中心化移動平均でトレンドを推定する。周期が12ヶ月周期であれば、`window`は12で、クオーターとかであれば、`window`は4となる。このトレンドをもとに、トレンドを除去したデータを作り、これの月ごとの平均を得ることで、平均的な季節周期の値が得られる。そして、もとの現系列からトレンド、季節周期を除けば、ランダムノイズが得られ分解完了。
+
+```{r}
+df <- tibble::as_tibble(AirPassengers) %>% 
+  dplyr::mutate(time  = seq(from = lubridate::ymd("1949-01-01"), by = "1 month", length.out = nrow(.))) %>% 
+  dplyr::rename(y = x)
+
+df_plt <- 
+  df %>% 
+  dplyr::mutate(trend_air = ma(y, order = 12, centre = TRUE),
+                detrend = y - trend_air) %>% 
+  dplyr::group_by(m = lubridate::month(time)) %>% 
+  dplyr::mutate(seasonal_air = mean(detrend, na.rm = TRUE),
+                random_air = y - trend_air - seasonal_air,
+                y_recomp = trend_air + seasonal_air + random_air) %>% 
+  dplyr::select(time, y, trend_air, seasonal_air, random_air, y_recomp) %>% 
+  dplyr::ungroup()
+
+df_plt %>% 
+  print(n = 24)
+
+```
+
+まとめてプロットするとこんな感じ。
+
+```{r}
+# pivot_longerでlongでプロットしたほうがいいけど、tsクラスの消し方がわからん…
+ggplot(df_plt) + 
+  geom_line(aes(time, y), col = "#e41749") + 
+  geom_line(aes(time, trend_air), col = "#ff8a5c") + 
+  geom_line(aes(time, seasonal_air), col = "#f5587b") +
+  geom_line(aes(time, random_air), col = "#8ac6d1") +
+  theme_bw()
+```
+
+便利な関数があるので、賢い人はこっちを使うこと。
+
+```{r}
+AirPassengers %>% decompose() %>% autoplot()
+```

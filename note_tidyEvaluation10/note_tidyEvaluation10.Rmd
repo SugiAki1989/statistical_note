@@ -1,0 +1,171 @@
+---
+title: "RのTidy evaluation_0"
+pagetitle: "RのTidy evaluation_0"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+## はじめに
+この記事はTidy evaluationについて学習した内容を自分の備忘録としてまとめたものです。
+
+(追記)
+ここのように並列化させたりすれば、処理速度をはやめられるかも。
+[https://rlang.hatenablog.jp/entry/2019/11/20/225340:title]
+
+### 距離を求める関数
+2点のポイントの緯度と経度の情報を持っている場合に、直線距離を求めたいときがある。例えばこんなデータがあったとする。
+
+```R:R
+library(dplyr)
+library(purrr)
+library(geosphere)
+
+df <- tibble(city1 = c("Kyoto","Tokyo","Sapporo", "Fukuoka"),
+             lon1 = c(135.7680, 139.6917, 141.3544, 130.41806),
+             lat1 = c(35.01164, 35.68949, 43.06210, 33.60639),
+             city2 = c("Osaka"),
+             lon2 = c(135.51346),
+             lat2 = c(34.706824))
+
+df
+# A tibble: 4 x 6
+  city1    lon1  lat1 city2  lon2  lat2
+  <chr>   <dbl> <dbl> <chr> <dbl> <dbl>
+1 Kyoto    136.  35.0 Osaka  136.  34.7
+2 Tokyo    140.  35.7 Osaka  136.  34.7
+3 Sapporo  141.  43.1 Osaka  136.  34.7
+4 Fukuoka  130.  33.6 Osaka  136.  34.7
+```
+
+`{geosphere}`は様々な距離を計算してくれる便利なパッケージ。パッケージの解説は[Rの geosphere パッケージ(1)：2点間の距離と方位角を計算する](https://id.fnshr.info/2018/05/19/geosphere1/)が詳しい。
+
+このパッケージの関数は各点における緯度と経度をまとめてから、`{geosphere}`の関数に渡す必要がある。なのでこのまま先程のデータに対して、`mutate()`などでそのまま使用できない。
+
+```R:R
+tokyo <- c(139.766905, 35.681242)
+london <- c(-0.118092, 51.509865)
+
+distGeo(tokyo, london)
+[1] 9585300
+```
+
+そこで、`{geosphere}`の関数を`mutate()`ないし、さきほどのデータに対してそのまま使えるようにしたいので、ラッパー関数を作成する。`get_distance1()`を使えば、そのままデータフレームに対して、各2点間の距離を計算してくれる。
+
+```R:R
+get_distance1 <- function(data, longitude1, latitude1, longitude2, latitude2) {
+  
+  longitude1 <- enquo(longitude1)
+  latitude1  <- enquo(latitude1)
+  longitude2 <- enquo(longitude2)
+  latitude2  <- enquo(latitude2)
+  
+  longitude1_tmp <- data %>% dplyr::select(!!longitude1) %>% list()
+  latitude1_tmp  <- data %>% dplyr::select(!!latitude1)  %>% list()
+  point1 <- purrr::map2(longitude1_tmp, latitude1_tmp, function(x, y) cbind(x, y))
+  
+  longitude2_tmp <- data %>% dplyr::select(!!longitude2) %>% list()
+  latitude2_tmp  <- data %>% dplyr::select(!!latitude2)  %>% list()
+  point2 <- purrr::map2(longitude2_tmp, latitude2_tmp, function(x, y) cbind(x, y))
+  
+  # distMeeus func returns meter scale, chage scale to kilometer
+  dist_tmp <- purrr::map2_dfc(point1, point2, function(x, y)
+    geosphere::distMeeus(x, y)) / 1000.0
+  
+  data <- data %>%
+    dplyr::bind_cols(., dist_tmp) %>%
+    dplyr::rename(distance_km = V1)
+  
+  return(data)
+}
+```
+
+こんな感じである。
+
+```R:R
+df %>% 
+  get_distance1(longitude1 = lon1,
+               latitude1  = lat1,
+               longitude2 = lon2,
+               latitude2  = lat2)
+
+# A tibble: 4 x 7
+   city1    lon1  lat1 city2  lon2  lat2 distance_km
+   <chr>   <dbl> <dbl> <chr> <dbl> <dbl>       <dbl>
+1 Kyoto    136.  35.0 Osaka  136.  34.7        41.1
+2 Tokyo    140.  35.7 Osaka  136.  34.7       396. 
+3 Sapporo  141.  43.1 Osaka  136.  34.7      1056. 
+4 Fukuoka  130.  33.6 Osaka  136.  34.7       485. 
+```
+
+また別のパターンとして、`mutate()`の中で使う場合はさきほどの`get_distance1()`を少し修正する必要がある。
+
+```R:R
+get_distance2 <- function(data, longitude1, latitude1, longitude2, latitude2) {
+  
+  longitude1 <- enquo(longitude1)
+  latitude1  <- enquo(latitude1)
+  longitude2 <- enquo(longitude2)
+  latitude2  <- enquo(latitude2)
+  
+  longitude1_tmp <- data %>% dplyr::select(!!longitude1) %>% dplyr::pull()
+  latitude1_tmp  <- data %>% dplyr::select(!!latitude1)  %>% dplyr::pull()
+  point1 <- purrr::map2(longitude1_tmp, latitude1_tmp, function(x, y) c(x, y))
+  
+  longitude2_tmp <- data %>% dplyr::select(!!longitude2) %>% dplyr::pull()
+  latitude2_tmp  <- data %>% dplyr::select(!!latitude2)  %>% dplyr::pull()
+  point2 <- purrr::map2(longitude2_tmp, latitude2_tmp, function(x, y) c(x, y))
+  
+  # distMeeus func returns meter scale, chage scale to kilometer
+  dist <- purrr::map2_dbl(point1, point2, function(x, y) geosphere::distMeeus(x, y)/1000.0)
+}
+```
+
+`geosphere::distMeeus()`に値を渡すまでも少し修正している。動かすとこんな感じ。
+
+```R:R
+df %>%
+  mutate(dist = get_distance2(
+    data = .,
+    longitude1 = lon1,
+    latitude1  = lat1,
+    longitude2 = lon2,
+    latitude2  = lat2
+  ))
+
+# A tibble: 4 x 7
+  city1    lon1  lat1 city2  lon2  lat2   dist
+  <chr>   <dbl> <dbl> <chr> <dbl> <dbl>  <dbl>
+1 Kyoto    136.  35.0 Osaka  136.  34.7   41.1
+2 Tokyo    140.  35.7 Osaka  136.  34.7  396. 
+3 Sapporo  141.  43.1 Osaka  136.  34.7 1056. 
+4 Fukuoka  130.  33.6 Osaka  136.  34.7  485. 
+```
+
+以上、Tidy evaluationを使った関数作成であった。
+
+なんかもっと苦労せずに色々かけるようになりたい…。切実に。

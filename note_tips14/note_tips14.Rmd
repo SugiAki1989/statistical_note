@@ -1,0 +1,1223 @@
+---
+title: "正規表現40本ノック"
+pagetitle: "正規表現40本ノック"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここでは`{stringr}`を使い、正規表現40本ノックを行う。100本の予定だったけど、やる元気がなかった。新しいパターンが実務で発生したら追加していく。
+参考にするときはブラウザの検索機能を利用する。
+
+下記は参考サイトおよび正規表現チェックツール。javascriptの正規表現マッチなので、Rでエスケープする場合とは異なるので注意。
+
+- [regexr](https://regexr.com/)
+- [よく使う正規表現はもうググりたくない！](https://qiita.com/dongri/items/2a0a18e253eb5bf9edba)
+- [Handling and Processing Strings in R](https://www.gastonsanchez.com/Handling_and_Processing_Strings_in_R.pdf)
+
+下記はメタキャラクタと呼ばれるもの。これらを文字として使う場合エスケープする必要がある。
+
+```R:R
+. ^ $ * ? { } [ ] \ | ( )
+```
+
+|正規表現|パターン|
+|:---:|:---|
+|`\`|メタキャラクタのエスケープ。|
+|`.`|任意の1文字 に一致します。|
+|`+`|直前の文字が1回以上 繰り返す場合に一致します。最長一致。|
+|`*`|直前の文字が0回以上 繰り返す場合に一致します。最長一致。|
+|`?`|直前の文字が0個か１個 の場合に一致します。最長一致。|
+|`+?`|直前の文字が1回以上 繰り返す場合に一致します。最短一致。|
+|`*?`|直前の文字が0回以上 繰り返す場合に一致します。最短一致。|
+|`??`|直前の文字が0個か1個の場合に一致します。最短一致。|
+|`\|`|Or条件。|
+|`[...]`|文字リスト。括弧に含まれるいずれか１文字に一致します。|
+|`[^...]`|反転文字リスト。括弧に含まれるいずれか文字以外に一致します。|
+|`(...)`|正規表現のグループ化。|
+|`{n}`|直前の文字のn回の繰り返しに一致します。	|
+|`{n,}`|少なくともn回の繰り返しに一致します。	|
+|`{n,m}`|n回~m回の繰り返しに一致します。	|
+|`^`|直後の文字が行の先頭にある場合に一致します。|
+|`$`|直前の文字が行の末尾にある場合に一致します。|
+|`\t`|タブに一致します。|
+|`\\r`|改行に一致します。CR(Carriage Return : 0x0D)|
+|`\\n`|改行に一致します。LF(Line Feed : 0x0A)|
+|`\\d`|すべての数字に一致します。[0-9]|
+|`\\D`|すべての数字以外の文字に一致します。[^0-9]|
+|`\\s`|垂直タブ以外のすべての空白文字に一致します。[ \t\f\r\n]|
+|`\\S`|すべての非空白文字に一致します。[^ \t\f\r\n]|
+|`\\w`|アルファベット、アンダーバー、数字に一致します。[a-zA-Z_0-9]|
+|`\\W`|アルファベット、アンダーバー、数字以外の文字に一致します。[^a-zA-Z_0-9]|
+|`\\<`|単語の先頭に一致します。|
+|`\\>`|単語の末尾に一致します。|
+|`\\b`|単語の両端の空文字列に一致します。|
+|`\\B`|単語の端にない場合、空の文字列に一致します。|
+|`(?=)`|先読み。`X(?=Y)`は、Xを探すがYが続く場合にだけ一致します。 |
+|`(?!)`|否定先読み。`X(?!Y)`は、Xを探すがYが続かない場合にだけ一致します。|
+|`(?<=)`|後読み。`(?<=Y)X`は、Xの前にYがある場合にのみ一致します。|
+|`(?<!)`|否定後読み。`(?<!Y)X`は、Xの前にYがない場合にのみ一致します。|
+|`[:digit:]`|[0-9]に一致します。|
+|`[:lower:]`|小文字[a-z]に一致します。|
+|`[:upper:]`|大文字[A-Z]に一致します。|
+|`[:alpha:]`|[A-z]に一致します。|
+|`[:alnum:]`|英数字[A-z0-9]に一致します。|
+|`[:xdigit:]`|16進数[0-9A-Fa-f]に一致します。|
+|`[:blank:]`|スペースとタブに一致します。|
+|`[:space:]`|タブ、改行、垂直タブ、フォームフィード、CR、スペースに一致します。|
+|`[:punct:]`|句読文字に一致します。「!"#$%&’()*+,-./:;<=>?@[]^_`{|}~」。|
+|`[:cntrl:]`|制御文字など\nや\rに一致します。[\x00-\x1F\x7F]。|
+|`[0-9]`| 数字に一致します。|
+|`[a-z]` | アルファベット小文字に一致します。|
+| `[A-z]`  |アルファベットに一致します。
+| `[A-Z]` | アルファベット大文字に一致します。|
+| `[ぁ-ん]` | ひらがなに一致します。|
+| `[ァ-ヶ]` | カタカナに一致します。|
+| `[ｦ-ﾟ]` | 半角カタカナに一致します。|
+
+## 01 : 任意の1文字にマッチする表現
+
+```R:R
+strings <- str_c("This is a ",
+                 c("apple", "orange", "Banana", "cherry", "plum", "strawberry", "persimmon"),
+                 ".")
+regs <- "This is a ......\\."
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 7 x 3
+  strings               match1 match2
+  <chr>                 <lgl>  <chr>
+1 This is a apple.      FALSE  NA
+2 This is a orange.     TRUE   This is a orange.
+3 This is a Banana.     TRUE   This is a Banana.
+4 This is a cherry.     TRUE   This is a cherry.
+5 This is a plum.       FALSE  NA
+6 This is a strawberry. FALSE  NA
+7 This is a persimmon.  FALSE  NA
+```
+
+## 02 : 0回以上の繰り返しにマッチする表現
+
+```R:R
+strings <- c("Goooood morning", "Good morning", "God morning", "Gooddood morning")
+regs <- "Gooo*d morning"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 4 x 3
+  strings          match1 match2
+  <chr>            <lgl>  <chr>
+1 Goooood morning  TRUE   Goooood morning
+2 Good morning     TRUE   Good morning
+3 God morning      FALSE  NA
+4 Gooddood morning FALSE  NA
+```
+
+## 03 : 1回以上の繰り返しにマッチする表現
+
+```R:R
+strings <- c("Goooood morning", "Good morning", "God morning", "Gooddood morning")
+regs <- "Gooo+d morning"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 4 x 3
+  strings          match1 match2
+  <chr>            <lgl>  <chr>
+1 Goooood morning  TRUE   Goooood morning
+2 Good morning     FALSE  NA
+3 God morning      FALSE  NA
+4 Gooddood morning FALSE  NA
+```
+
+## 04 : n回の繰り返しにマッチする表現
+
+```R:R
+
+strings <- c("Goooood morning", "Gooooood morning", "God morning", "Gooddood morning")
+regs <- "Go{5}d morning"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 4 x 3
+  strings          match1 match2
+  <chr>            <lgl>  <chr>
+1 Goooood morning  TRUE   Goooood morning
+2 Gooooood morning FALSE  NA
+3 God morning      FALSE  NA
+4 Gooddood morning FALSE  NA
+```
+
+## 05 : n回以上の繰り返しにマッチする表現
+
+```R:R
+strings <- c("Goooood morning", "Gooooood morning", "God morning", "Gooddood morning")
+regs <- "Go{5,}d morning"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 4 x 3
+  strings          match1 match2
+  <chr>            <lgl>  <chr>
+1 Goooood morning  TRUE   Goooood morning
+2 Gooooood morning TRUE   Gooooood morning
+3 God morning      FALSE  NA
+4 Gooddood morning FALSE  NA
+```
+
+## 06 : n回以上m回以下の繰り返しにマッチする表現
+
+```R:R
+strings <- c("Goooood morning", "Gooooood morning", "God morning", "Goooooooood morning", "Gooddood morning")
+regs <- "Go{5,6}d morning"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 5 x 3
+  strings             match1 match2
+  <chr>               <lgl>  <chr>
+1 Goooood morning     TRUE   Goooood morning
+2 Gooooood morning    TRUE   Gooooood morning
+3 God morning         FALSE  NA
+4 Goooooooood morning FALSE  NA
+5 Gooddood morning    FALSE  NA
+```
+
+## 07 : 0回または1回の出現にマッチする表現
+
+```R:R
+regs <- "Good-?morning"
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 5 x 3
+  strings       match1 match2
+  <chr>         <lgl>  <chr>
+1 Good morning  FALSE  NA
+2 Goodmorning   TRUE   Goodmorning
+3 Good-morning  TRUE   Good-morning
+4 Good/morning  FALSE  NA
+5 Good--morning FALSE  NA
+```
+
+## 08 : 文字列の先頭にマッチする表現
+
+```R:R
+strings <- c("Language R", "R", "R Language", "R script",
+             "Language Python", "Python", "Python Language", "R script")
+regs <- "^R.*"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+# A tibble: 8 x 3
+  strings         match1 match2
+  <chr>           <lgl>  <chr>
+1 Language R      FALSE  NA
+2 R               TRUE   R
+3 R Language      TRUE   R Language
+4 R script        TRUE   R script
+5 Language Python FALSE  NA
+6 Python          FALSE  NA
+7 Python Language FALSE  NA
+8 R script        TRUE   R script
+```
+
+## 09 : 文字列の末尾にマッチする表現
+
+```R:R
+strings <- c("Language R", "R", "R Language", "R script",
+             "Language Python", "Python", "Python Language", "R script")
+regs <- "script$"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+# A tibble: 8 x 3
+  strings         match1 match2
+  <chr>           <lgl>  <chr>
+1 Language R      FALSE  NA
+2 R               FALSE  NA
+3 R Language      FALSE  NA
+4 R script        TRUE   script
+5 Language Python FALSE  NA
+6 Python          FALSE  NA
+7 Python Language FALSE  NA
+8 R script        TRUE   script
+```
+
+## 09 : 単語にマッチする表現
+
+```R:R
+strings <- c("I wish you every happiness.",
+             "He did not die happily.",
+             "happify our Social system.",
+             "His letter made me happy.")
+regs <- ".*\\bhappy\\b.*"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+# A tibble: 4 x 3
+  strings                     match1 match2
+  <chr>                       <lgl>  <chr>
+1 I wish you every happiness. FALSE  NA
+2 He did not die happily.     FALSE  NA
+3 happify our Social system.  FALSE  NA
+4 His letter made me happy.   TRUE   His letter made me happy.
+```
+
+## 10 : いずれかの文字にマッチする表現
+
+```R:R
+strings <- c("I like R.", "I like C.", "I like Python.", "I like C++.", "I like なでしこ.")
+regs <- "I like [R|P].*"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+ # A tibble: 5 x 3
+  strings          match1 match2
+  <chr>            <lgl>  <chr>
+1 I like R.        TRUE   I like R.
+2 I like C.        FALSE  NA
+3 I like Python.   TRUE   I like Python.
+4 I like C++.      FALSE  NA
+5 I like なでしこ. FALSE  NA
+```
+
+## 11 : いずれかの文字にマッチする表現
+このようにもかけるが、`I like Py`が意図したようにマッチしていないので、指定したいずれかの1文字とマッチすることに注意。
+
+```R:R
+strings <- c("I like R.", "I like C.", "I like Python.", "I like C++.", "I like なでしこ.")
+regs <- "I like [R|Python]."
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 5 x 3
+  strings          match1 match2
+  <chr>            <lgl>  <chr>
+1 I like R.        TRUE   I like R.
+2 I like C.        FALSE  NA
+3 I like Python.   TRUE   I like Py
+4 I like C++.      FALSE  NA
+5 I like なでしこ. FALSE  NA
+```
+
+## 12 : いずれかの文字以外にマッチする表現
+
+```R:R
+strings <- c("I like R.", "I like C.", "I like Python.", "I like C++.", "I like なでしこ.")
+regs <- "I like [^R|^P].*"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+# A tibble: 5 x 3
+  strings          match1 match2
+  <chr>            <lgl>  <chr>
+1 I like R.        FALSE  NA
+2 I like C.        TRUE   I like C.
+3 I like Python.   FALSE  NA
+4 I like C++.      TRUE   I like C++.
+5 I like なでしこ. TRUE   I like なでしこ.
+```
+
+## 13 : 単語の範囲にマッチする表現
+
+```R:R
+strings <- c("I like R.", "I like S.", "I like TeX.", "I like C", "I like Python.")
+# [R|S]でも同じ
+regs <- "I like [R-S]."
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 5 x 3
+  strings        match1 match2
+  <chr>          <lgl>  <chr>
+1 I like R.      TRUE   I like R.
+2 I like S.      TRUE   I like S.
+3 I like TeX.    FALSE  NA
+4 I like C       FALSE  NA
+5 I like Python. FALSE  NA
+```
+アルファベットの範囲は注意が必要。
+
+```R:R
+m <- c(LETTERS, letters, "[", "\\", "]", "^", "_", "`")
+m[str_detect(m, "[A-Z]")]
+ [1] "A" "B" "C" "D" "E" "F" "G" "H" "I" "J" "K" "L" "M" "N" "O" "P" "Q" "R" "S" "T" "U" "V" "W" "X" "Y" "Z"
+
+m[str_detect(m, "[a-z]")]
+ [1] "a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m" "n" "o" "p" "q" "r" "s" "t" "u" "v" "w" "x" "y" "z"
+
+m[str_detect(m, "[A-z]")]
+ [1] "A"  "B"  "C"  "D"  "E"  "F"  "G"  "H"  "I"  "J"  "K"  "L"  "M"  "N"  "O"  "P"  "Q"  "R"  "S"  "T"  "U"  "V"  "W"  "X"  "Y"  "Z"
+[27] "a"  "b"  "c"  "d"  "e"  "f"  "g"  "h"  "i"  "j"  "k"  "l"  "m"  "n"  "o"  "p"  "q"  "r"  "s"  "t"  "u"  "v"  "w"  "x"  "y"  "z"
+[53] "["  "\\" "]"  "^"  "_"  "`"
+```
+
+## 14 : 文字の範囲以外にマッチする表現
+
+```R:R
+strings <- c("I like R.", "I like S.", "I like TeX.", "I like C", "I like Python.")
+regs <- "I like [^R-S].*"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+# A tibble: 5 x 3
+  strings        match1 match2
+  <chr>          <lgl>  <chr>
+1 I like R.      FALSE  NA
+2 I like S.      FALSE  NA
+3 I like TeX.    TRUE   I like TeX.
+4 I like C       TRUE   I like C
+5 I like Python. TRUE   I like Python.
+```
+
+## 15 : 特定の数字の並びにマッチする表現
+
+```R:R
+strings <- c("R version 11, '10",
+             "R version 01, 2020",
+             "11 R version 2020",
+             "R version 2020 11 10",
+             "R version 2020 11 ten",
+             "R version 11, '10")
+regs <- "R version \\d\\d\\d\\d\\s\\d\\d\\s\\d\\d"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 6 x 3
+  strings               match1 match2
+  <chr>                 <lgl>  <chr>
+1 R version 11, '10     FALSE  NA
+2 R version 01, 2020    FALSE  NA
+3 11 R version 2020     FALSE  NA
+4 R version 2020 11 10  TRUE   R version 2020 11 10
+5 R version 2020 11 ten FALSE  NA
+6 R version 11, '10     FALSE  NA
+```
+
+```R:R
+strings <- c("R version 11, '10",
+             "R version 01, 2020",
+             "11 R version 2020",
+             "R version 2020 11 10",
+             "R version 2020 11, ten",
+             "R version 11, '10")
+regs <- "R version \\d\\d\\d\\d\\s\\d\\d,\\s\\D\\D\\D"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 6 x 3
+  strings                match1 match2
+  <chr>                  <lgl>  <chr>
+1 R version 11, '10      FALSE  NA
+2 R version 01, 2020     FALSE  NA
+3 11 R version 2020      FALSE  NA
+4 R version 2020 11 10   FALSE  NA
+5 R version 2020 11, ten TRUE   R version 2020 11, ten
+6 R version 11, '10      FALSE  NA
+```
+
+## 16 : 特定の繰り返し回数に一致する表現
+
+```R:R
+regs <- "R \\d{4,} version"
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+# A tibble: 5 x 3
+  strings          match1 match2
+  <chr>            <lgl>  <chr>
+1 R 01 version     FALSE  NA
+2 R 012 version    FALSE  NA
+3 R 0123 version   TRUE   R 0123 version
+4 R 01234 version  TRUE   R 01234 version
+5 R 012345 version TRUE   R 012345 version
+
+regs <- "R \\d{3,4} version"
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+# A tibble: 5 x 3
+  strings          match1 match2
+  <chr>            <lgl>  <chr>
+1 R 01 version     FALSE  NA
+2 R 012 version    TRUE   R 012 version
+3 R 0123 version   TRUE   R 0123 version
+4 R 01234 version  FALSE  NA
+5 R 012345 version FALSE  NA
+
+regs <- "R \\d{5} version"
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+# A tibble: 5 x 3
+  strings          match1 match2
+  <chr>            <lgl>  <chr>
+1 R 01 version     FALSE  NA
+2 R 012 version    FALSE  NA
+3 R 0123 version   FALSE  NA
+4 R 01234 version  TRUE   R 01234 version
+5 R 012345 version FALSE  NA
+```
+
+## 17 : 複数の日付表現に一致させる表現
+
+```R:R
+strings <- c("2020-01-01","2020/01/01","2020 01 01","2020.01.01","01-01-2020","01 2020 01")
+
+regs <- "\\d\\d\\d\\d[/|\\-|\\.]\\d\\d[/|\\-|\\.]\\d\\d"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 6 x 3
+  strings    match1 match2
+  <chr>      <lgl>  <chr>
+1 2020-01-01 TRUE   2020-01-01
+2 2020/01/01 TRUE   2020/01/01
+3 2020 01 01 FALSE  NA
+4 2020.01.01 TRUE   2020.01.01
+5 01-01-2020 FALSE  NA
+6 01 2020 01 FALSE  NA
+```
+
+## 18 : 表現の違いにより同じ意味に言葉への表現
+
+```R:R
+strings <- c("おはようございます",
+             "084531ます",
+             "こんにちは",
+             "オハヨウゴザイマス",
+             "おハよウごザいマす",
+             "コンバンワ",
+             "Good morning")
+
+regs <- "[ぁ-んァ-ヶ]{6,}"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 7 x 3
+  strings            match1 match2
+  <chr>              <lgl>  <chr>
+1 おはようございます TRUE   おはようございます
+2 084531ます         FALSE  NA
+3 こんにちは         FALSE  NA
+4 オハヨウゴザイマス TRUE   オハヨウゴザイマス
+5 おハよウごザいマす TRUE   おハよウごザいマす
+6 コンバンワ         FALSE  NA
+7 Good morning       FALSE  NA
+```
+
+## 19 : 大文字小文字の両方にマッチする表現
+
+```R:R
+strings <- c("good",
+             "GOOD",
+             "GoOd",
+             "gOoD",
+             "GOod",
+             "goOd")
+
+regs <- "[Gg][Oo][Oo]d"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 6 x 3
+  strings match1 match2
+  <chr>   <lgl>  <chr>
+1 good    TRUE   good
+2 GOOD    FALSE  NA
+3 GoOd    TRUE   GoOd
+4 gOoD    FALSE  NA
+5 GOod    TRUE   GOod
+6 goOd    TRUE   goOd
+
+```
+
+## 20 : 特定の文字から始まる単語にマッチする表現
+
+```R:R
+strings <- c(stringr::sentences[1:5])
+# dから始まる単語
+regs <- "\\bd\\w*\\b"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 6 x 3
+  strings                                     match1 match2[,1]
+  <chr>                                       <lgl>  <chr>
+1 The birch canoe slid on the smooth planks.  FALSE  NA
+2 Glue the sheet to the dark blue background. TRUE   dark
+3 It's easy to tell the depth of a well.      TRUE   depth
+4 These days a chicken leg is a rare dish.    TRUE   days
+5 These days a chicken leg is a rare dish.    TRUE   dish
+6 Rice is often served in round bowls.        FALSE  NA
+```
+
+## 21 : 引用符の中にマッチする表現
+
+```R:R
+strings <- c("'りんご'は'リンゴ'であり'赤い果物'でもあり'Apple'でもある。",
+             "An 'Apple' is 'APPLE', 'Red fruit', 'リンゴ'.")
+regs <- "'.*?'"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+ # A tibble: 8 x 3
+  strings                                                    match1 match2[,1]
+  <chr>                                                      <lgl>  <chr>
+1 'りんご'は'リンゴ'であり'赤い果物'でもあり'Apple'でもある。        TRUE   'りんご'
+2 'りんご'は'リンゴ'であり'赤い果物'でもあり'Apple'でもある。        TRUE   'リンゴ'
+3 'りんご'は'リンゴ'であり'赤い果物'でもあり'Apple'でもある。        TRUE   '赤い果物'
+4 'りんご'は'リンゴ'であり'赤い果物'でもあり'Apple'でもある。        TRUE   'Apple'
+5 An 'Apple' is 'APPLE', 'Red fruit', 'リンゴ'.               TRUE   'Apple'
+6 An 'Apple' is 'APPLE', 'Red fruit', 'リンゴ'.               TRUE   'APPLE'
+7 An 'Apple' is 'APPLE', 'Red fruit', 'リンゴ'.               TRUE   'Red fruit'
+8 An 'Apple' is 'APPLE', 'Red fruit', 'リンゴ'.               TRUE   'リンゴ'
+```
+
+## 22 : HTMLのタグにマッチする表現
+
+```R:R
+strings <- c("<p><a>apple.com</a></p>",
+             "<h1><a>apple.com</a></h1>",
+             "<p>apple.com</p>",
+             "<p><a>apple.com</p></a>")
+regs <- "<\\D+><\\w+>.*</\\w+></\\w+>"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 4 x 3
+  strings                   match1 match2
+  <chr>                     <lgl>  <chr>
+1 <p><a>apple.com</a></p>   TRUE   <p><a>apple.com</a></p>
+2 <h1><a>apple.com</a></h1> FALSE  NA
+3 <p>apple.com</p>          FALSE  NA
+4 <p><a>apple.com</p></a>   TRUE   <p><a>apple.com</p></a>
+```
+
+## 23 : 最短・最長マッチ問題
+最長マッチしている例。
+
+```R:R
+strings <- c("This is a 'pen' and 'PEN'.")
+regs <- "'.*'"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 1 x 3
+  strings                    match1 match2
+  <chr>                      <lgl>  <chr>
+1 This is a 'pen' and 'PEN'. TRUE   'pen' and 'PEN'
+```
+
+最短マッチしている例。
+
+```R:R
+strings <- c("This is a 'pen' and 'PEN'.")
+regs <- "'.*?'"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+# A tibble: 2 x 3
+  strings                    match1 match2[,1]
+  <chr>                      <lgl>  <chr>
+1 This is a 'pen' and 'PEN'. TRUE   'pen'
+2 This is a 'pen' and 'PEN'. TRUE   'PEN'
+```
+
+## 24 : 先読みを利用した表現
+先読み：`X(?=Y)`で、Xを探すけどYが続く場合にだけ一致。
+
+```R:R
+strings <- c("Mike is born in Heisei1 and 30 years old.",
+             "Tomy is born in Reiwa4 and 5 years old.")
+regs <- "\\d+(?=\\syears)"
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+# A tibble: 2 x 3
+  strings                                   match1 match2[,1]
+  <chr>                                     <lgl>  <chr>
+1 Mike is born in Heisei1 and 30 years old. TRUE   30
+2 Tomy is born in Reiwa4 and 5 years old.   TRUE   5
+```
+
+## 25 : 否定-先読みを利用した表現
+否定-先読み：`X(?!Y)`は、Xを探すがYが続かない場合にだけ一致。
+
+```R:R
+strings <- c("Mike is born in Heisei1 and 30 years old.",
+             "Tomy is born in Reiwa4 and 5 years old.")
+regs <- "\\d+(?!\\syears|\\d+)"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 2 x 3
+  strings                                   match1 match2[,1]
+  <chr>                                     <lgl>  <chr>
+1 Mike is born in Heisei1 and 30 years old. TRUE   1
+2 Tomy is born in Reiwa4 and 5 years old.   TRUE   4
+```
+
+## 27 : 後読みを利用した表現
+後読み：`(?<=Y)X`は、Xの前にYがある場合にのみ一致。
+
+```R:R
+strings <- c("Year2018 is Heisei30.",
+             "Year2020 is Reiwa1.")
+regs <- "(?<=Heisei|Reiwa)\\d+"
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 2 x 3
+  strings               match1 match2[,1]
+  <chr>                 <lgl>  <chr>
+1 Year2018 is Heisei30. TRUE   30
+2 Year2020 is Reiwa1.   TRUE   1
+```
+
+## 28 : 否定-後読みを利用した表現
+否定-後読み：`(?<!Y)X`は、Xの前にYがない場合にのみ一致。
+
+```R:R
+strings <- c("Year2018 is Heisei30.",
+             "Year2020 is Reiwa1.")
+regs <- "(?<!Heisei|Reiwa|\\d)\\d+"
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 2 x 3
+  strings               match1 match2[,1]
+  <chr>                 <lgl>  <chr>
+1 Year2018 is Heisei30. TRUE   2018
+2 Year2020 is Reiwa1.   TRUE   2020
+```
+
+## 29 : 郵便番号にマッチする表現
+
+```R:R
+strings <- c("123-4567","1234567","12-34567","1234-567","1-234567","12345678")
+regs <- "^[0-9]{3}-?[0-9]{4}$"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 6 x 3
+  strings  match1 match2
+  <chr>    <lgl>  <chr>
+1 123-4567 TRUE   123-4567
+2 1234567  TRUE   1234567
+3 12-34567 FALSE  NA
+4 1234-567 FALSE  NA
+5 1-234567 FALSE  NA
+6 12345678 FALSE  NA
+```
+
+## 30 : 携帯電話番号にマッチする表現
+単語の境界にマッチする表現は`\b`で表現できる。`\b`は単語の境界にマッチする。
+
+```R:R
+strings <- c("080-4567-1234","08012345678","01012345678","070-1234-5678","1-234567","12345678901")
+regs <- "^0[7-9]0-?[0-9]{4}-?[0-9]{4}$"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 6 x 3
+  strings       match1 match2
+  <chr>         <lgl>  <chr>
+1 080-4567-1234 TRUE   080-4567-1234
+2 08012345678   TRUE   08012345678
+3 01012345678   FALSE  NA
+4 070-1234-5678 TRUE   070-1234-5678
+5 1-234567      FALSE  NA
+6 12345678901   FALSE  NA
+```
+
+## 31 : 時刻にマッチする表現
+
+```R:R
+strings <- c("01:10","12:34","28:10","01:82","04:10","21-10","15/10","5:1")
+regs <- "(?:[01][0-9]|2[0-3]):[0-5][0-9]"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 8 x 3
+  strings match1 match2[,1]
+  <chr>   <lgl>  <chr>
+1 01:10   TRUE   01:10
+2 12:34   TRUE   12:34
+3 28:10   FALSE  NA
+4 01:82   FALSE  NA
+5 04:10   TRUE   04:10
+6 21-10   FALSE  NA
+7 15/10   FALSE  NA
+8 5:1     FALSE  NA
+```
+
+## 32 : 単日付にマッチする表現
+
+```R:R
+strings <- c("1920/11/01","1020-11-01","1999.12.01","20341101",
+             "H32/11/01","2oo0/11/01","12020/11/01","899/11/01")
+regs <- "^\\d{4}[-./]?\\d{1,2}[-./]?\\d{1,2}$"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 8 x 3
+  strings     match1 match2[,1]
+  <chr>       <lgl>  <chr>
+1 1920/11/01  TRUE   1920/11/01
+2 1020-11-01  TRUE   1020-11-01
+3 1999.12.01  TRUE   1999.12.01
+4 20341101    TRUE   20341101
+5 H32/11/01   FALSE  NA
+6 2oo0/11/01  FALSE  NA
+7 12020/11/01 FALSE  NA
+8 899/11/01   FALSE  NA
+```
+
+## 33 : 単語の境界にマッチする表現
+単語の境界にマッチする表現は`\b`で表現できる。`\b`は単語の境界にマッチする。
+
+```R:R
+strings <- c("正規表現(せいきひょうげん)は文字集合(Set)を1つの文字列(モジレツ)で表現(Expression)する方法の一つである。")
+regs <- "\\(.+?\\)"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 4 x 3
+  strings                                                                                    match1 match2[,1]
+  <chr>                                                                                      <lgl>  <chr>
+1 正規表現(せいきひょうげん)は文字集合(Set)を1つの文字列(モジレツ)で表現(Expression)する方法の一つである。 TRUE   (せいきひょうげん)
+2 正規表現(せいきひょうげん)は文字集合(Set)を1つの文字列(モジレツ)で表現(Expression)する方法の一つである。 TRUE   (Set)
+3 正規表現(せいきひょうげん)は文字集合(Set)を1つの文字列(モジレツ)で表現(Expression)する方法の一つである。 TRUE   (モジレツ)
+4 正規表現(せいきひょうげん)は文字集合(Set)を1つの文字列(モジレツ)で表現(Expression)する方法の一つである。 TRUE   (Expression)
+```
+
+## 34 : キーバリューにマッチする表現
+
+```R:R
+strings <- c("FirstName = 'Taro'",
+             "LastName = 'Sato'",
+             "Age = 20",
+             "BOD = '1989/06/23",
+             "Hobby = 'A,B,C'",
+             "Memo")
+regs <- "\\w+\\s*=\\s*.*"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 6 x 3
+  strings            match1 match2[,1]
+  <chr>              <lgl>  <chr>
+1 FirstName = 'Taro' TRUE   FirstName = 'Taro'
+2 LastName = 'Sato'  TRUE   LastName = 'Sato'
+3 Age = 20           TRUE   Age = 20
+4 BOD = '1989/06/23  TRUE   BOD = '1989/06/23
+5 Hobby = 'A,B,C'    TRUE   Hobby = 'A,B,C'
+6 Memo               FALSE  NA
+```
+
+## 35 : 拡張子つきデータにマッチする表現
+
+```R:R
+strings <- c("/usr/home/desktop/analysis.R",
+             "/usr/home/document/",
+             "../logs/error.log",
+             "~work/manuals/usermanual.Rmd",
+             "./workmanuals/user manual.html",
+             "/file.csv")
+regs <- "(?<=/)(?!.*/).+"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 6 x 3
+  strings                        match1 match2
+  <chr>                          <lgl>  <chr>
+1 /usr/home/desktop/analysis.R   TRUE   analysis.R
+2 /usr/home/document/            FALSE  NA
+3 ../logs/error.log              TRUE   error.log
+4 ~work/manuals/usermanual.Rmd   TRUE   usermanual.Rmd
+5 ./workmanuals/user manual.html TRUE   user manual.html
+6 /file.csv                      TRUE   file.csv
+```
+
+## 36 : ディレクトリパスにマッチする表現
+
+```R:R
+strings <- c("/usr/home/desktop/analysis.R",
+             "/usr/home/document/",
+             "../logs/error.log",
+             "~work/manuals/usermanual.Rmd",
+             "./workmanuals/user manual.html",
+             "/file.csv")
+regs <- ".*/"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 6 x 3
+  strings                        match1 match2
+  <chr>                          <lgl>  <chr>
+1 /usr/home/desktop/analysis.R   TRUE   /usr/home/desktop/
+2 /usr/home/document/            TRUE   /usr/home/document/
+3 ../logs/error.log              TRUE   ../logs/
+4 ~work/manuals/usermanual.Rmd   TRUE   ~work/manuals/
+5 ./workmanuals/user manual.html TRUE   ./workmanuals/
+6 /file.csv                      TRUE   /
+```
+
+## 37 : URL名のファイル名にマッチする表現
+
+```R:R
+strings <- c("https://www.regs.com/sample.csv",
+             "https://www.regs.com/sample.csv#id=10",
+             "https://www.regs.com/sample.png",
+             "https://www.regs.com/sample.csv?param=1",
+             "https://www.regs.com/sample.csv?param=1?param=2",
+             "https://www.regs.com/",
+             "https://www.regs.com/sample.json")
+regs <- "(?<=/)(?!.*/)[a-zA-Z0-9-_\\.]+"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match(string = strings, pattern = regs)) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 7 x 3
+  strings                                         match1 match2
+  <chr>                                           <lgl>  <chr>
+1 https://www.regs.com/sample.csv                 TRUE   sample.csv
+2 https://www.regs.com/sample.csv#id=10           TRUE   sample.csv
+3 https://www.regs.com/sample.png                 TRUE   sample.png
+4 https://www.regs.com/sample.csv?param=1         TRUE   sample.csv
+5 https://www.regs.com/sample.csv?param=1?param=2 TRUE   sample.csv
+6 https://www.regs.com/                           FALSE  NA
+7 https://www.regs.com/sample.json                TRUE   sample.json
+```
+
+## 38 : 単語の境界にマッチする表現
+
+[Fails to unnest list of matrices #788](https://t.co/18Ghwjud7H?amp=1)に関連して、スクリプトがワークアラウンドされている。
+
+```R:R
+
+strings <- c("hoge@abc10.com",
+             "fuga@gmail.co.jp",
+             "piyo@yahoo.co.jp",
+             "30-example.com",
+             "dsvsfv@ezweb.ne.jp")
+
+regs <- "^\\w+([-+.]\\w+)*@\\w+([-.]\\w+)*\\.\\w+([-.]\\w+)*$"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>%
+  mutate(open = map(match2, ~ .[,1])) %>%
+  unnest(open, keep_empty = TRUE) %>%
+  select(-match2)
+
+# A tibble: 5 x 3
+  strings            match1 open
+  <chr>              <lgl>  <chr>
+1 hoge@abc10.com     TRUE   hoge@abc10.com
+2 fuga@gmail.co.jp   TRUE   fuga@gmail.co.jp
+3 piyo@yahoo.co.jp   TRUE   piyo@yahoo.co.jp
+4 30-example.com     FALSE  NA
+5 dsvsfv@ezweb.ne.jp TRUE   dsvsfv@ezweb.ne.jp
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>%
+  mutate(match2 = map(match2, ~ as_tibble(., .name_repair = "unique"))) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 5 x 6
+  strings            match1 ...1               ...2  ...3  ...4
+  <chr>              <lgl>  <chr>              <chr> <chr> <chr>
+1 hoge@abc10.com     TRUE   hoge@abc10.com     NA    NA    NA
+2 fuga@gmail.co.jp   TRUE   fuga@gmail.co.jp   NA    .co   NA
+3 piyo@yahoo.co.jp   TRUE   piyo@yahoo.co.jp   NA    .co   NA
+4 30-example.com     FALSE  NA                 NA    NA    NA
+5 dsvsfv@ezweb.ne.jp TRUE   dsvsfv@ezweb.ne.jp NA    .ne   NA   
+```
+
+## 39 : 特定の拡張子のデータ表現
+単語の境界にマッチする表現は`\b`で表現できる。`\b`は単語の境界にマッチする。
+
+```R:R
+strings <- c(
+  "tmp-sample.csv", "sample.csv",
+  "sample2-csv-specs.csv", "sample2.csv2.specs.json",
+  "sample_cars.xlsx", "sample-houses.csv",
+  "sample_Trees.csv","sample-cars.R",
+  "sample-houses.r","sample-final.json","Sample-final2.json"
+)
+
+regs <- ".*\\.(csv|json)$"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>% 
+  mutate(match2 = map(match2, ~ as_tibble(., .name_repair = "unique"))) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 11 x 4
+   strings                 match1 ...1                    ...2 
+   <chr>                   <lgl>  <chr>                   <chr>
+ 1 tmp-sample.csv          TRUE   tmp-sample.csv          csv  
+ 2 sample.csv              TRUE   sample.csv              csv  
+ 3 sample2-csv-specs.csv   TRUE   sample2-csv-specs.csv   csv  
+ 4 sample2.csv2.specs.json TRUE   sample2.csv2.specs.json json 
+ 5 sample_cars.xlsx        FALSE  NA                      NA   
+ 6 sample-houses.csv       TRUE   sample-houses.csv       csv  
+ 7 sample_Trees.csv        TRUE   sample_Trees.csv        csv  
+ 8 sample-cars.R           FALSE  NA                      NA   
+ 9 sample-houses.r         FALSE  NA                      NA   
+10 sample-final.json       TRUE   sample-final.json       json 
+11 Sample-final2.json      TRUE   Sample-final2.json      json 
+```
+
+## 40 : 大文字小文字を含むファイル名にマッチする表現
+
+```R:R
+strings <- c(
+  "tmp-sample.csv", "sample.csv",
+  "sample2-csv-specs.csv", "sample2.csv2.specs.json",
+  "sample_cars.xlsx", "sample-houses.csv",
+  "sample_Trees.csv","sample-cars.R",
+  "sample-houses.r","sample-final.json","Sample-final2.json"
+)
+
+regs <- "(S|s)ample(\\_|\\-)[a-zA-Z0-9]*\\.(csv|json)$"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>% 
+  mutate(match2 = map(match2, ~ as_tibble(., .name_repair = "unique"))) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 11 x 6
+   strings                 match1 ...1               ...2  ...3  ...4 
+   <chr>                   <lgl>  <chr>              <chr> <chr> <chr>
+ 1 tmp-sample.csv          FALSE  NA                 NA    NA    NA   
+ 2 sample.csv              FALSE  NA                 NA    NA    NA   
+ 3 sample2-csv-specs.csv   FALSE  NA                 NA    NA    NA   
+ 4 sample2.csv2.specs.json FALSE  NA                 NA    NA    NA   
+ 5 sample_cars.xlsx        FALSE  NA                 NA    NA    NA   
+ 6 sample-houses.csv       TRUE   sample-houses.csv  s     -     csv  
+ 7 sample_Trees.csv        TRUE   sample_Trees.csv   s     _     csv  
+ 8 sample-cars.R           FALSE  NA                 NA    NA    NA   
+ 9 sample-houses.r         FALSE  NA                 NA    NA    NA   
+10 sample-final.json       TRUE   sample-final.json  s     -     json 
+11 Sample-final2.json      TRUE   Sample-final2.json S     -     json 
+```
+
+## 41 : 特定の文字列から特定の文字の間にマッチする表現
+先読み、後読みを利用した正規表現を使う。先読みは`X(?=Y)`で、`X`を探すけど`Y`が続く場合にだけ一致。後読みは、`(?<=Y)X`は、Xの前にYがある場合にのみ一致。
+
+```R:R
+strings <- c(
+  "https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_a&utm_content=url01",
+  "https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_bb&utm_content=url03",
+  "https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_ca&utm_content=url02",
+  "https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_mjk&utm_content=url04")
+
+regs <- "(?<=campaign=).*?(?=&utm_content)"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>% 
+  mutate(match2 = map(match2, ~ as_tibble(., .name_repair = "unique"))) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 4 x 3
+  strings                                                                                       match1 ...1    
+  <chr>                                                                                         <lgl>  <chr>   
+1 https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_a&utm_content=url01   TRUE   camp_a  
+2 https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_bb&utm_content=url03  TRUE   camp_bb 
+3 https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_ca&utm_content=url02  TRUE   camp_ca 
+4 https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_mjk&utm_content=url04 TRUE   camp_mjk
+```
+
+## 42 : 特定の文字以降にマッチする表現
+後読みは、`(?<=Y)X`は、Xの前にYがある場合にのみ一致。
+
+```R:R
+strings <- c(
+  "https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_a&utm_content=url01",
+  "https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_bb&utm_content=url03",
+  "https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_ca&utm_content=url02",
+  "https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_mjk&utm_content=url04")
+
+regs <- "(?<=utm_content=).*$"
+
+tibble(strings) %>%
+  mutate(match1 = str_detect(string = strings, pattern = regs),
+         match2 = str_match_all(string = strings, pattern = regs)) %>% 
+  mutate(match2 = map(match2, ~ as_tibble(., .name_repair = "unique"))) %>%
+  unnest(match2, keep_empty = TRUE)
+
+# A tibble: 4 x 3
+  strings                                                                                       match1 ...1 
+  <chr>                                                                                         <lgl>  <chr>
+1 https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_a&utm_content=url01   TRUE   url01
+2 https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_bb&utm_content=url03  TRUE   url03
+3 https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_ca&utm_content=url02  TRUE   url02
+4 https://w.com/?utm_source=newsletter&utm_medium=email&utm_campaign=camp_mjk&utm_content=url04 TRUE   url04
+```
+
+## 43 : アルファベットが続かなければマッチする表現
+アルファベットが続かなければマッチして、検索クエリに文字列を直す表現。
+
+```R:R
+strings <- c(
+  "date\t20100701\tsort\t安い順\tregion\tハワイ\tcountry\tハワイ島",
+  "sort\t安い順",
+  "date\t20100701\tsort\t安い順\tregion\tハワイ\tcountry\tハワイ島"
+  )
+
+strings
+[1] "date\t20100701\tsort\t安い順\tregion\tハワイ\tcountry\tハワイ島"
+[2] "sort\t安い順"                                                   
+[3] "date\t20100701\tsort\t安い順\tregion\tハワイ\tcountry\tハワイ島"
+
+tibble(strings) %>%
+  mutate(strings = str_replace_all(strings, "\\t(?=[^\x01-\x7E])", "="),
+         strings = str_replace_all(strings, "\\t(?=[0-9])", "="),
+         strings = str_replace_all(strings, "\\t", "&"),
+         strings = str_c("?", strings))
+
+# A tibble: 3 x 1
+  strings                                                  
+  <chr>                                                    
+1 ?date=20100701&sort=安い順&region=ハワイ&country=ハワイ島
+2 ?sort=安い順                                             
+3 ?date=20100701&sort=安い順&region=ハワイ&country=ハワイ島
+
+```

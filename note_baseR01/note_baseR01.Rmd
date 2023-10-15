@@ -1,0 +1,523 @@
+---
+title: "Base Rのグラフィック(作成途中)"
+pagetitle: "Base Rのグラフィック"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここではBase Rのグラフィックの基本的な使い方をまとめておく。今更Rのグラフィックス？と思うかもしれないが、作業をしていると`ggplot2`少し手間な感じがあり、`ggplot2`使わなくてもいいようなきがしてきたので、使い方をまとめておく。決して`ggplot2`が悪いわけではなく、私が使いこなせてないだけ。
+
+説明は最小限なので、コードから内容を理解する必要あり。詳細は下記を参照。
+
+- [Base R Graphics](https://r-charts.com/base-r/)
+
+予め可視化に必要なデータは読み込んでおく。
+
+```{r}
+library(palmerpenguins)
+head(penguins)
+pen_df <- na.omit(penguins)
+```
+
+## タイトルラベル
+### 基本的な使い方
+```{r echo=TRUE}
+curve(sin, -5 , 5,
+      main = "Title here",     
+      col.main = "red",   
+      sub = "Subtitle here",   
+      col.sub = "blue",
+      xlab = "X-axis label here",
+      ylab = "Y-axis label here")
+```
+
+### タイトルの揃え位置を変更
+
+```{r echo=TRUE}
+curve(sin, -5 , 5)
+title(
+  main = "Title here",
+  sub = "Subtitle here", 
+  adj = 0,
+  line = 1.3
+  )
+```
+
+### タイトルを削除
+
+```{r echo=TRUE}
+curve(sin, -5 , 5,
+      xlab = "",
+      ylab = "")
+```
+
+## スケールラベルのカスタマイズ
+### 基本的な設定
+
+```{r echo=TRUE}
+plot(
+  x = pen_df$bill_length_mm,
+  y = pen_df$bill_depth_mm,
+  xlab = 'BILL_LENGTH',
+  ylab = 'BILL_DEPTH',
+  pch = 19,
+  axes = FALSE, # box off
+  xaxt = "n",
+  yaxt = "n",
+  tck = 1 # ティック(目盛線)の長さ。xaxt、yaxtを使うと無効。
+  # axis内のatで指定する代わりに、xaxp、yaxpも使用可能。
+  # xaxp = c(start, end, number_regions)
+  # xaxp = c(35, 60, 5)
+  # yaxp = c(10, 30, 0.5)
+  # 軸の制限はxlim, ylimを使用
+  # xlim = c(0, 4)
+  # ylim = c(0, 100))
+  )
+
+# X-axis
+axis(1, 
+     at = seq(35, 60, 1),
+     col = "blue",        # Axis line color
+     col.ticks = "blue", # Ticks color
+     col.axis = "blue")
+
+# Y-axis
+axis(2, 
+     at = seq(10, 30, 1),
+     col = "red",        # Axis line color
+     col.ticks = "red", # Ticks color
+     col.axis = "red")
+```
+
+### 連続変数のスケールに文字ラベル
+
+```{r echo=TRUE}
+plot(
+  x = pen_df$bill_length_mm,
+  y = pen_df$bill_depth_mm,
+  pch = 19,
+  axes = FALSE, # box off
+  xaxt = "n",
+  yaxt = "n",
+  )
+
+# X-axis
+axis(1, 
+     at = c(35, 38, 41, 44, 47, 50, 53, 56),
+     labels = c('P','e','n','g','u','i','n','s')
+     )
+# Y-axis
+axis(2, 
+     at = c(13, 14, 15, 16, 17, 18, 19, 20),
+     labels = c('P','e','n','g','u','i','n','s')
+     )
+
+```
+
+### スケールの数字ラベルの向き
+
+```{r echo=TRUE}
+# 0始まりで指定する
+las <- c('Parallel', 'Horizontal', 'Perpendicular', 'Vertical')
+
+n <- length(las)
+par(mfrow = c(2, 2))
+for (i in 1:n) {
+  nm <- paste0('las = ',las[i])
+  plot(x = pen_df$bill_length_mm,  y = pen_df$bill_depth_mm, main = nm, pch = 19, las = i-1)
+}
+
+```
+
+### 2軸の散布図
+
+```{r echo=TRUE}
+par(mar = c(5, 4, 4, 4) + 0.1)
+plot(
+  x = pen_df$bill_length_mm,
+  y = pen_df$bill_depth_mm,
+  col = 'royalblue',
+  pch = 19,
+  xlab = 'BILL_LENGTH',
+  ylab = 'BILL_DEPTH',
+  )
+par(new = TRUE)
+
+plot(
+  x = pen_df$bill_length_mm,
+  y = pen_df$bill_depth_mm + rnorm(length(pen_df$bill_depth_mm ), 0, 1)^2,
+  col = 'indianred',
+  pch = 19,
+  axes = FALSE, # No axes
+  bty = 'n', # No box
+  xlab = '',
+  ylab = '',
+  )
+
+# Axis label
+axis(4)
+mtext(
+  "BILL_DEPTH + RANDOM",
+  side = 4, 
+  line = 3)
+```
+
+## レジェンド(凡例)
+### 基本的な使い方
+```{r echo=TRUE}
+curve(sin, -5 , 5, col = 'red',   lty = 'solid', type = 'l')
+curve(cos, -5 , 5, col = 'blue',  lty = 'dashed', type = 'p', add = TRUE)
+curve(tan, -5 , 5, col = 'green', lty = 'twodash', type = 'h', add = TRUE)
+
+legend(
+  x = "topright", 
+  inset = 0.03, # margin
+  title = "LEGEND TITLE HERE",  # Title
+  title.adj = 0.5,    # Horizontal adjustment
+  title.col = 'orange',
+  box.lty = 2, # Box type
+  box.lwd = 2, # Box width
+  box.col = 'orange', # Box color
+  bg = rgb(1, 1, 0, alpha = 0.3),
+  cex = 1, # Legend size
+  # bty = "n", # Del legend
+  # box.lty = 0 # Del legend
+  legend = c('sin', 'cos', 'tan'),
+  lty = c('solid', 'dashed', 'twodash'),
+  col = c('red', 'blue', 'green'), 
+  lwd = 2,
+  horiz = TRUE
+  )    
+```
+
+```{r}
+par(mar = c(6, 5, 4, 6.5))
+
+barplot(table(penguins$species), 
+        col = c('red', 'blue', 'green'),
+        density = 30, 
+        angle = 45)
+legend(
+  'topright',
+  inset = c(-0.25, 0),
+  xpd = TRUE,
+  legend = names(table(penguins$species)),
+  fill = c('red', 'blue', 'green'),
+  border = 'white',
+  density = 30,
+  angle = 90
+  )
+
+# 凡例を下に持ってくる場合の設定情報の参考値
+# par(mar = c(6, 4.1, 4.1, 2.1))
+# inset = c(0, -0.35)
+# horiz = TRUE
+```
+## ボックス
+### 基本的な使い方
+```{r echo=TRUE}
+curve(sin,
+      -2*pi,
+      2*pi,
+      col = 'blue',
+      axes = FALSE)
+
+box(col = 'blue', lty = 'dashed', lwd = 2)
+box("figure", col = 'blue', lwd = 2)
+
+# Custom axis
+axis(1,
+     at = c(-2*pi, -1.5*pi,-pi, -pi/2, 0, pi/2, pi, 1.5*pi, 2*pi),
+     labels = expression(-2*pi, -1.5*pi,-pi, -pi/2, 0, pi/2, pi, 1.5*pi, 2*pi)
+     )
+axis(2, lwd = 1)
+```
+
+### ボックスの枠線
+```{r}
+par(mar = c(3, 2, 2, 2),
+    mgp = c(2, 1, 0))
+boxtype <- c('o', 'L', 'C', '7', ']', 'U', 'n')
+n <- length(boxtype)
+
+par(mfrow = c(3, 3))
+
+for (i in 1:n) {
+  nm <- paste0('bty = ',boxtype[i])
+  curve(sin, -2*pi, 2*pi, bty = boxtype[i], main = nm)
+}
+
+```
+
+
+## テキストアノテーション
+### 基本的な使い方
+```{r echo=TRUE}
+plot(
+  x = pen_df$bill_length_mm,
+  y = pen_df$bill_depth_mm,
+  pch = 20, 
+  col = 'royalblue'
+  )
+
+text(x = mean(pen_df$bill_length_mm, na.rm = TRUE), 
+     y = mean(pen_df$bill_depth_mm, na.rm = TRUE),
+     label = "Sample\n Sample",
+     col = "indianred",
+     font = 2,
+     cex = 3,
+     srt = 45)
+```
+
+### 点を文字で表現
+```{r}
+set.seed(1989)
+idx <- sample(1:300, 20)
+plot(
+  x = pen_df$bill_length_mm[idx],
+  y = pen_df$bill_depth_mm[idx],
+  pch = 20, 
+  col = 'royalblue')
+
+text(x = pen_df$bill_length_mm[idx],
+     y = pen_df$bill_depth_mm[idx],
+     label = pen_df$species[idx])
+```
+
+## ラインアノテーション
+### 領域の分割
+```{r echo=TRUE}
+v <- mean(pen_df$bill_length_mm, na.rm = TRUE)
+h <- mean(pen_df$bill_depth_mm, na.rm = TRUE)
+fit <- lm(bill_depth_mm ~ bill_length_mm, data = penguins)$coef
+a <- fit[1]
+b <- fit[2]
+
+penpch <- c(21,22,23)[unclass(pen_df$species)]
+pencol <- c('#619CFF', '#00BA38', '#F8756D')[unclass(pen_df$species)]
+
+plot(
+  x = pen_df$bill_length_mm,
+  y = pen_df$bill_depth_mm,
+  pch = penpch, # 21~25しか色がつけれない
+  bg = pencol
+  )
+
+abline(
+  v = v, 
+  h = h,
+  col = 'black'
+)
+
+abline(
+  a = a, 
+  b = b,
+  col = 'black',
+  lwd = 2,
+  lty = 2
+  )
+```
+
+### 柔軟な領域の分割
+```{r}
+plot(
+  x = pen_df$bill_length_mm,
+  y = pen_df$bill_depth_mm,
+  pch = penpch, # 21~25しか色がつけれない
+  bg = pencol
+  )
+
+segments(x0 = 40, x1 = 40,
+         y0 = 15, y1 = 20,
+         lwd = 2,
+         col = "black")
+
+segments(x0 = 41, x1 = 55,
+         y0 = 17, y1 = 17,
+         lwd = 2,
+         col = "black")
+
+arrows(x0 = 42, x1 = 55,
+       y0 = 18, y1 = 21,
+       lwd = 2,
+       col = "black",
+       length = 0.1,
+       angle = 45) 
+```
+## ポイントの形状(Plotting CHaracter: pch)
+
+### 基本的な種類
+```{r}
+grid <- expand.grid(1:5, 6:1)
+plot(grid, 
+     pch = 0:30,
+     cex = 2.5,
+     yaxt = "n",
+     xaxt = "n",
+     ann = FALSE,
+     xlim = c(0.5, 5.25),
+     ylim = c(0.5, 6.5))
+
+grid2 <- expand.grid(seq(0.6, 4.6, 1), 6:1)
+text(grid2$Var1[1:26], 
+     grid2$Var2[1:26], 
+     0:25)
+```
+### pchのサイズ
+
+```{r}
+plot(
+  x = pen_df$bill_length_mm,
+  y = pen_df$bill_depth_mm,
+  pch = penpch, # 21~25しか色がつけれない
+  bg = pencol,
+  cex = 2,      # Symbol size
+  lwd = 2      # Border width
+  )
+
+```
+## バックグラウンドカラー
+### 基本的な使い方
+
+```{r}
+par(bg = "gray")
+
+plot(
+  x = pen_df$bill_length_mm,
+  y = pen_df$bill_depth_mm,
+  pch = penpch, # 21~25しか色がつけれない
+  bg = pencol,
+  cex = 2,      # Symbol size
+  lwd = 2      # Border width
+  )
+```
+
+## グリッド
+### 基本的な使い方
+
+```{r}
+plot(
+  x = pen_df$bill_length_mm,
+  y = pen_df$bill_depth_mm,
+  pch = penpch, # 21~25しか色がつけれない
+  bg = pencol
+  )
+
+grid(nx = NULL, # NAにすれば水平線のみ
+     ny = NULL, # NAにすれば垂直線のみ
+     lty = 'dashed',
+     col = 'gray',
+     lwd = 2)   
+```
+### グリットの制御
+
+```{r}
+plot(
+  x = pen_df$bill_length_mm,
+  y = pen_df$bill_depth_mm,
+  pch = penpch, # 21~25しか色がつけれない
+  bg = pencol
+  )
+
+grid(nx = 20, 
+     ny = 5,
+     lty = 'dashed',
+     col = 'gray',
+     lwd = 2)   
+```
+
+### グリットの前面背面
+```{r}
+plot.new()
+
+grid(nx = 20, 
+     ny = 5,
+     lty = 'dashed',
+     col = 'gray',
+     lwd = 3)   
+
+par(new = TRUE)
+
+plot(
+  x = pen_df$bill_length_mm,
+  y = pen_df$bill_depth_mm,
+  pch = penpch, # 21~25しか色がつけれない
+  bg = pencol
+  )
+```
+
+## ラインの種類
+### ラインスタイル(lty)
+```{r}
+par(mar = c(3, 2, 2, 2),
+    mgp = c(2, 1, 0))
+
+linestyle <- c('blank', 'solid', 'dashed', 'dotted', 'dotdash', 'longdash', 'twodash')
+
+x <- seq(-5,5,0.5)
+n <- length(linestyle)
+par(mfrow = c(3, 3))
+for (i in 1:n) {
+  nm <- paste0('lty = ',linestyle[i])
+  plot(x, sin(x), main = nm, type = 'l', lty = linestyle[i])
+}
+```
+
+### ラインタイプ(type)
+```{r}
+par(mar = c(3, 2, 2, 2),
+    mgp = c(2, 1, 0))
+
+linetype <- c('p', 'l', 'b', 'c', 'h', 's', 'S', 'n')
+
+x <- seq(-5,5,0.5)
+n <- length(linetype)
+par(mfrow = c(3, 3))
+for (i in 1:n) {
+  nm <- paste0('type = ',linetype[i])
+  plot(x, sin(x), main = nm, type = linetype[i])
+}
+```
+
+
+### ラインの太さ(lwd)
+
+```{r}
+par(mar = c(3, 2, 2, 2),
+    mgp = c(2, 1, 0))
+
+linewidth <- 1:9
+
+x <- seq(-5,5,0.5)
+n <- length(linewidth)
+par(mfrow = c(3, 3))
+for (i in 1:n) {
+  nm <- paste0('lwd = ',linewidth[i])
+  plot(x, sin(x), main = nm, type = 'l', lwd = linewidth[i])
+}
+```
+

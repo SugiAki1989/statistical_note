@@ -1,0 +1,642 @@
+---
+title: "傾向スコアの基礎"
+pagetitle: "傾向スコアの基礎"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではRを使って因果推論に関する基礎的な理論から分析を実行するための方法をまとめている。ここでは傾向スコアについてまとめておく。
+
+## 傾向スコアの数理
+傾向スコアの数理については下記が詳しいので、ここでは扱わない。
+
+### 傾向スコア
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)のp96
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://raw.githubusercontent.com/JaehyunSong/kobe_ci/master/Slide/Slide_Day2.pdf)のp41
+- [矢内勇生 統計的因果推論入門](http://yukiyanai.github.io/jp/classes/econometrics2/contents/slides/metrics2_topic05_slides.pdf)のp1
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp136
+
+### 傾向スコアとバランシング
+- [矢内勇生 統計的因果推論入門](http://yukiyanai.github.io/jp/classes/econometrics2/contents/slides/metrics2_topic05_slides.pdf)のp50
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp166
+
+### 傾向スコアとIPW
+- [矢内勇生 統計的因果推論入門](http://yukiyanai.github.io/jp/classes/econometrics2/contents/slides/metrics2_topic05_slides.pdf)のp35
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://raw.githubusercontent.com/JaehyunSong/kobe_ci/master/Slide/Slide_Day2.pdf)のp52
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp179
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)のp140
+
+### 傾向スコアの層別解析
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp172
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)のp131
+- [医学統計セミナー第4回-傾向スコア分析-](https://waidai-csc.jp/updata/2019/05/7e3a9ea92b282ede82550e81a73c6b54.pdf)のp33
+
+### 傾向スコアとマッチング
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://raw.githubusercontent.com/JaehyunSong/kobe_ci/master/Slide/Slide_Day2.pdf)のp24
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp151
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)のp109
+
+
+## 準備
+必要なライブラリを読み込んでおく。
+
+```{r}
+library(tidyverse)
+library(broom)
+library(MatchIt)
+library(WeightIt)
+library(tableone)
+library(cobalt)
+library(lmtest)
+library(sandwich)
+```
+
+ここで使用するサンプルデータは、[できる!傾向スコア分析SPSS・Stata・Rを用いた必勝マニュアル](https://www.kanehara-shuppan.co.jp/support-top/pscore/)で利用されているサンプルデータをお借りする。ここでは、このデータをもとに、書籍では紹介されていない`MatchIt`や`WeightIt`などのパッケージを使って傾向スコアを用いた分析手法をまとめておく。
+
+```{r}
+# id: 患者ID
+# sequela_y:退院時後遺症(0/1) 
+# adl_y: 退院時ADLスコア(0-100)
+# treat: 治療薬の処置(0/1)
+# sex: 男性=1
+# age: 年齢
+# ht: 高血圧(0/1)
+# dm: 糖尿病(0/1)
+# stroke: 脳卒中の既往(0/1)
+# mi: 心筋梗塞の既往(0/1)
+df <- read_csv('~/Desktop/PSbook_data.csv', show_col_types = FALSE, locale = locale(encoding = "shift-jis")) %>% 
+  select(id,  sequela_y = sequela, adl_y = ADL_disc, treat = TreatmentX, sex, age = Age, ht = HT, dm = DM, stroke = Stroke, mi = MI) %>% 
+  mutate(sex = if_else(sex == '男', 1, 0))
+df
+```
+
+基本的な統計量を確認しておく。`tableone`パッケージの`CreateTableOne()`関数が便利。これを見る限り、`age`
+、`ht`、`dm`、`stroke`、`mi`などに差があることがわかる。この状態で比較しても、効果が交絡している状態となるので、本来知りたい処置の効果を推定できない。
+
+```{r}
+CreateTableOne(
+  data = df,
+  vars = c("sequela_y", "adl_y", "sex", "age", "ht", "dm", "stroke", "mi"),
+  factorVars = c("sequela_y", "sex", "ht", "dm", "stroke", "mi"),
+  strata = "treat",
+  test = FALSE
+)
+```
+
+何も考慮せずに処置効果を計算してみると、処置を行うことで、退院時ADLスコア`adl_y`が低下するという結果になっており、
+
+```{r}
+tidy(lm(adl_y ~ treat, data = df))[2,2]
+```
+
+退院時後遺症`sequela_y`は起こりにくいもものオッズ比が1に近い結果となっている。
+
+```{r}
+exp(tidy(glm(formula = sequela_y ~ treat, family = binomial(link = "logit"), data = df))[2,2])
+```
+
+まずは傾向スコアを計算する。`MatchIt`や`WeightIt`パッケージを使えば、傾向スコアを計算する必要はないが、ここでは勉強のために計算し、可視化しておく。
+
+傾向スコアの分布が2群で重なっていることがわかる。この重なりがない状態だと共有サポート(common surpport)を受けられず、場合に応じてはATTやATEが計算できない。共有サポートがないのであれば、比較する群に似ている個体がない状態なので、比較できず、因果推論もできない。
+
+```{r}
+formula_ps <- formula("treat ~ age + sex + ht + dm + stroke + mi" )  
+fit_ps <- glm(
+  formula = formula_ps,
+  data = df,
+  family = binomial(link = "logit")
+)
+
+df$ps <- fit_ps$fitted.values
+ggplot(df, aes(x = ps, col = factor(treat), fill = factor(treat))) +
+  geom_histogram(binwidth = 0.1, alpha = .5, position = "identity") +
+  labs(x = "傾向スコア", y = "カウント", fill = "処置") + 
+  guides(col = "none") + 
+  theme_classic()
+```
+
+処置ごとにわけて傾向スコアを可視化するとこのようになる。対照群(=0)では傾向スコアが大きい個体があまりいないことがわかる。
+
+```{r}
+ggplot(df, aes(x = ps)) +
+  geom_histogram(color = "black", binwidth = 0.1, position = "identity") +
+  facet_grid(rows = vars(treat), scales = "free_y") +
+  labs(x = "傾向スコア", y = "カウント") + 
+  theme_classic()
+```
+
+## 傾向スコアと重み付け法
+
+傾向スコアを利用した重み付けで、因果効果を推定する方法をまとめる。推定対象(estimand)がATEかATEなのかによって重みの計算式が異なるので注意。ATTを推定するために、傾向スコアは下記の通り。
+
+$$
+w_{i}^{ATT} = Z_{i} + (1 - Z_{i}) \frac{e_{i}(X)}{1 - e_{i}(X)}
+$$
+この重みは処置群(Z=1) の個体の重みは1となるので、処置群の個体には、傾向スコアに関係なく等しい重みがつけられる。一方で、処置群(Z=1)の個体の重みは傾向スコアが高いほど、大きな重みがつけられるようになる。イメージとして、傾向スコアが高く処置群に入る確率が高いにも拘らず対照群に入った個体は、処置群の比較対象として重みが大きなり、傾向スコアが低い個体は、処置群の比較対象としてあまり重要ではないので、重みが小さくなる。
+
+ATEを推定するための重みはIPW(inverse probability weighting)という方法を利用する。処置群と対照群について、その群に割り付けられる傾向スコアの逆数で重みが決まるため、それぞれの群で珍しい個体は重みが大きくなる。
+
+$$
+w_{i}^{ATE} = \frac{Z_{i}}{e_{i}(X)} + \frac{(1 - Z_{i}) }{1 - e_{i}(X)}
+$$
+
+ATTとATEの重みを計算する場合は下記の通り。処置と対照に合わせて傾向スコアを利用する。
+
+```{r}
+df_weight <- df %>% 
+  mutate(
+    weight_att = if_else(treat == 1, 1   , ps/(1-ps)),
+    weight_ate = if_else(treat == 1, 1/ps, 1/(1-ps))
+    )
+df_weight %>% 
+  select(treat, ps, weight_att, weight_ate)
+```
+
+### 処置群に対する平均処置効果ATTの推定
+
+さきほどのように手計算しなくても、`WeightIt`パッケージの`weightit()`関数で、傾向スコアと重みの計算が一気通貫でできる。また、`cobalt`パッケージの`bal.plot()`関数を合わせると、重みによる調整前後の傾向スコア分布も可視化できる。対照群の分布が調整されたことがわかる。
+
+```{r}
+weight_att <- weightit(
+  formula_ps, 
+  data = df,
+  method = "ps", 
+  estimand = "ATT"
+  )
+
+bal.plot(
+  x = weight_att,
+  var.name = "prop.score", 
+  which = "both",
+  type = "histogram", 
+  mirror = TRUE,
+  sample.names = c("pre", "post")
+  ) +
+  scale_fill_discrete(name = "処置") +
+  labs(x = "傾向スコア", title = "傾向スコア分布(ATT)")
+```
+
+各共変量がバランシングしたかどうかは、`cobalt`パッケージの`love.plot()`関数を利用する。`age`の以外の共変量は重みよって処置群と対照群のバランスが改善し、標準化平均差(standardized mean difference)の絶対値が0.1未満に収まっていることがわかる。基準としては、$|d|<0.1$や$|d|<0.25$が提案されている。
+
+標準化平均差は下記の通り計算される。
+
+$$
+d = \frac{\bar X_{Z=1} - \bar X_{Z=0}}{\sqrt{\frac{Var(\bar X_{Z=1}) + Var(\bar X_{Z=0})}{2}}}
+$$
+
+```{r}
+love.plot(weight_att, 
+          threshold = 0.1, 
+          abs = TRUE, 
+          grid = TRUE, 
+          sample.names = c("pre", "post"), title = "バランシング(ATT)") +
+  labs(x = "標準化平均差の絶対値")
+```
+
+バランシングしていなければ、因果効果は計算しても交絡の可能性が疑われるので、傾向スコアのモデルを改善するなどを行う必要がある。ここではパッケージの利用方法をまとめているので、このまま進める。この重みを利用して、退院時ADLスコア`adl_y`のATTを計算する。
+
+```{r}
+# E[Y(1)|Z=1]
+y1_att <- df_weight %>% filter(treat == 1) %>% pull(adl_y) %>% mean()
+# E[Y(0)|Z=0]を重みをつけてE[Y(0)|Z=1]とする
+y0_att <- df_weight %>% filter(treat == 0) %>% with(weighted.mean(adl_y, w = weight_att))
+
+list(
+  y1_att = y1_att,
+  y0_att = y0_att,
+  ATE = y1_att - y0_att
+)
+
+```
+
+この結果は、`lm()`関数の`weight = weight_att`とした重みづけ回帰分析でも同じ結果が得られる。
+
+```{r}
+tidy(lm(adl_y ~ treat, data = df_weight, weight = weight_att))
+```
+
+ロバスト分散を使用した効果を推定するのであれば、`lmtest`と`sandwith`パッケージを利用する。処置効果ATTとして、退院時ADLスコアは2.68[1.39-3.96]ポイント改善していることがわかる。
+
+```{r}
+fit_gaussian_att <- glm(
+  formula = adl_y ~ treat, 
+  family = gaussian(link = "identity"), 
+  data = df_weight,
+  weights = weight_att
+  )
+robust_fit_gaussian_att <- coeftest(fit_gaussian_att, vcov. = sandwich)
+
+res_robust_fit_gaussian_att <- c(
+    robust_fit_gaussian_att[2],
+    robust_fit_gaussian_att[2] - 1.96*robust_fit_gaussian_att[4],
+    robust_fit_gaussian_att[2] + 1.96*robust_fit_gaussian_att[4],
+  robust_fit_gaussian_att[8]
+  )
+names(res_robust_fit_gaussian_att) <- c("treat", "lower95CI", "upper95CI", "pvalue")
+
+# マッチングした個体のペアをクラスターとして反映させたクラスターに頑丈な標準誤差
+# coeftest(fit_gaussian_att, vcov. = vcovCL, weight = ~weight_att)
+# coefci(  fit_gaussian_att, vcov. = vcovCL, weight = ~weight_att, leverl = 0.95)
+res_robust_fit_gaussian_att
+```
+
+退院時後遺症`sequela_y`が改善したかどうかを確認するためには、ロジスティック回帰分析を行えば良い。処置効果ATTとして、退院時後遺症のオッズ比は0.63[0.48-0.84]と改善していることがわかる。
+
+```{r}
+fit_logit_att <- glm(
+  formula = sequela_y ~ treat, 
+  family = binomial(link = "logit"), 
+  data = df_weight,
+  weights = weight_att
+  )
+robust_fit_logit_att <- coeftest(fit_logit_att, vcov. = sandwich)
+
+res_robust_fit_logit_att <- c(
+  exp(c(
+    robust_fit_logit_att[2],
+    robust_fit_logit_att[2] - 1.96*robust_fit_logit_att[4],
+    robust_fit_logit_att[2] + 1.96*robust_fit_logit_att[4])),
+  robust_fit_logit_att[8]
+)
+names(res_robust_fit_logit_att) <- c("treat", "lower95CI", "upper95CI", "pvalue")
+res_robust_fit_logit_att
+```
+
+### 平均処置効果ATEの推定
+ATEも同じように計算しておく。処置群にあわせて対照群が調整されていることがわかる。
+
+```{r}
+weight_ate <- weightit(
+  formula_ps, 
+  data = df,
+  method = "ps", 
+  estimand = "ATE"
+  )
+
+bal.plot(
+  x = weight_ate,
+  var.name = "prop.score", 
+  which = "both",
+  type = "histogram", 
+  mirror = TRUE,
+  sample.names = c("pre", "post")
+  ) +
+  scale_fill_discrete(name = "処置") +
+  labs(x = "傾向スコア", title = "傾向スコア分布(ATE)")
+```
+
+各共変量がバランシングしたかどうかも確認しておく。すべての共変量は重みよって処置群と対照群のバランスが改善し、標準化平均差の絶対値が0.1未満に収まっていることがわかる。
+
+```{r}
+love.plot(weight_ate, 
+          threshold = 0.1, 
+          abs = TRUE, 
+          grid = TRUE, 
+          sample.names = c("pre", "post"), title = "バランシング(ATE)") +
+  labs(x = "標準化平均差の絶対値")
+```
+
+この重みを利用して、退院時ADLスコア`adl_y`のATEを計算する。ATEはプラスの値になっており、処置を行うことで、退院時ADLスコアが改善されたことがわかる。
+
+```{r}
+# E[Y(1)]
+y1_ate <- df_weight %>% filter(treat == 1) %>% with(weighted.mean(adl_y, w = weight_ate))
+# E[Y(0)]
+y0_ate <- df_weight %>% filter(treat == 0) %>% with(weighted.mean(adl_y, w = weight_ate))
+list(
+  y1_ate = y1_ate,
+  y1_at0 = y0_ate,
+  ATE = y1_ate - y0_ate
+)
+
+```
+
+この結果は、`lm()`関数の`weight = weight_ate`とした重みづけ回帰分析でも同じ結果が得られる。
+
+```{r}
+tidy(lm(adl_y ~ treat, data = df_weight, weight = weight_ate))
+```
+
+処置効果ATEとして、退院時ADLスコアは1.5[0.78-2.23]ポイント改善していることがわかる。ロバスト分散を使用した効果を推定する方法はこちら。
+
+```{r}
+fit_gaussian_ate <- glm(
+  formula = adl_y ~ treat, 
+  family = gaussian(link = "identity"), 
+  data = df_weight,
+  weights = weight_ate
+  )
+robust_fit_gaussian_ate <- coeftest(fit_gaussian_ate, vcov = sandwich)
+
+res_robust_fit_gaussian_ate <- c(
+    robust_fit_gaussian_ate[2],
+    robust_fit_gaussian_ate[2] - 1.96*robust_fit_gaussian_ate[4],
+    robust_fit_gaussian_ate[2] + 1.96*robust_fit_gaussian_ate[4],
+  robust_fit_gaussian_ate[8]
+  )
+names(res_robust_fit_gaussian_ate) <- c("treat", "lower95CI", "upper95CI", "pvalue")
+res_robust_fit_gaussian_ate
+```
+
+退院時後遺症`sequela_y`が改善したかどうかを確認するためには、ロジスティック回帰分析を行えば良い。処置効果ATEとして、退院時後遺症のオッズ比は0.67[0.55-0.81]と改善していることがわかる。
+
+```{r}
+fit_logit_ate <- glm(
+  formula = sequela_y ~ treat, 
+  family = binomial(link = "logit"), 
+  data = df_weight,
+  weights = weight_ate
+  )
+robust_fit_logit_ate <- coeftest(fit_logit_ate, vcov = sandwich)
+
+res_robust_fit_logit_ate <- c(
+  exp(c(
+    robust_fit_logit_ate[2],
+    robust_fit_logit_ate[2] - 1.96*robust_fit_logit_ate[4],
+    robust_fit_logit_ate[2] + 1.96*robust_fit_logit_ate[4])),
+  robust_fit_logit_ate[8]
+)
+names(res_robust_fit_logit_ate) <- c("treat", "lower95CI", "upper95CI", "pvalue")
+res_robust_fit_logit_ate
+```
+
+
+## 傾向スコアとマッチング
+
+ここでは`MatchIt`パッケージの利用方法を中心に傾向スコアマッチングの方法をまとめておく。
+
+傾向スコアマッチングの推定対象(estimand)はATTであり、ATEではない。これは処置群の個体について、対照群からマッチングする候補を傾向スコアをもとに選んでくるため、マッチング後の処置群の個体を中心に再構成されるため。層別解析や重み付け法を使えばATEもATTも計算可能になる。
+
+### 距離とマッチング方法
+
+`MatchIt`パッケージの`matchit`関数では、`distance`引数で傾向スコアを計算する方法を指定できる。デフォルトは`glm`のロジスティック回帰。
+
+- 一般家線形モデル(`glm`)
+- 一般化加法モデル(`gam`)
+- 決定木(`rpart`)
+- ランダムフォレスト(`randomforest`)
+- ニューラルネットワーク(`nnet`)
+- 共変量バランシング傾向スコア(`cbps`)
+- ベイズ加法回帰木(`bart`)
+- マハラノビス距離(`mahalanobis`)
+
+`MatchIt`パッケージの`matchit`関数では、`method`引数で傾向スコアのマッチングする方法を指定できる。デフォルトは`nearest`の最近隣法マッチング。最近隣法マッチングはわかりやすく、傾向スコアの値が近い個体をマッチングすることで個体の距離を最小化する。個別の個体距離の最小化を目指し、全体での距離最小化は目指さない。
+
+- 最近隣法マッチング(`nearest`)
+- 最適マッチング(`optimal`)
+- 遺伝的マッチング(`genetic`)
+- 厳密マッチング(`exact`)
+- 単純厳密マッチング(`cem`)
+- 層化マッチング(`subclass`)
+- 最適フルマッチング(`full`)
+
+### 処置群に対する平均処置効果ATTの推定
+
+`MatchIt`パッケージの`matchit`関数の`formula`引数にモデル式を渡す。ここでは、`replace = TRUE`で復元抽出を選択している。`match.data`関数は、マッチングしたデータフレームを作成してくれる関数。
+
+```{r}
+fit_match <- matchit(
+  formula = formula_ps,
+  data = df,
+  replace = TRUE, # 復元
+  distance = "glm",
+  method = "nearest",
+  estimand = "ATT"
+)
+fit_match
+```
+
+```{r}
+bal.plot(
+  x = fit_match,
+  var.name = "distance", 
+  which = "both",
+  type = "histogram", 
+  mirror = TRUE,
+  sample.names = c("pre", "post")
+  ) +
+  scale_fill_discrete(name = "処置") +
+  labs(x = "傾向スコア", title = "傾向スコア分布(ATT)")
+```
+
+すべての共変量はマッチングによって処置群と対照群のバランスが改善し、標準化平均差の絶対値が0.1未満に収まっていることがわかる。
+
+```{r}
+love.plot(fit_match, 
+          threshold = 0.1, 
+          abs = TRUE, 
+          grid = TRUE, 
+          sample.names = c("pre", "post"), title = "バランシング(ATT)") +
+  labs(x = "標準化平均差の絶対値")
+```
+
+マッチングしたデータを使うのであれば単純に差を計算すれば良い。ここでは、`sequela_y`はオッズ比ではなく単純な比率。
+
+```{r}
+df_matched <- match.data(fit_match)
+df_matched %>% 
+  group_by(treat) %>% 
+  summarise(
+    mean_adl_y = mean(adl_y), 
+    mean_sequela_y = mean(sequela_y)
+    ) %>% 
+  pivot_longer(.,
+               cols = c(mean_adl_y, mean_sequela_y),
+               names_to = 'outcome',
+               values_to = 'value') %>% 
+  pivot_wider(names_from = treat, names_prefix = 'Z_') %>% 
+  mutate(diff = abs(Z_1 - Z_0))
+```
+
+
+ロバスト分散を使用した効果を推定する。処置効果ATTとして、退院時ADLスコアは1.90[0.64-3.16]ポイント改善していることがわかる。
+
+```{r}
+fit_gaussian_att <- glm(
+  formula = adl_y ~ treat, 
+  family = gaussian(link = "identity"), 
+  data = df_matched,
+  weights = weights
+  )
+robust_fit_gaussian_att <- coeftest(fit_gaussian_att, vcov. = sandwich)
+
+res_robust_fit_gaussian_att <- c(
+    robust_fit_gaussian_att[2],
+    robust_fit_gaussian_att[2] - 1.96*robust_fit_gaussian_att[4],
+    robust_fit_gaussian_att[2] + 1.96*robust_fit_gaussian_att[4],
+  robust_fit_gaussian_att[8]
+  )
+names(res_robust_fit_gaussian_att) <- c("treat", "lower95CI", "upper95CI", "pvalue")
+
+# マッチングした個体のペアをクラスターとして反映させたクラスターに頑丈な標準誤差
+# coeftest(fit_gaussian_att, vcov. = vcovCL, weight = ~weight_att)
+# coefci(  fit_gaussian_att, vcov. = vcovCL, weight = ~weight_att, leverl = 0.95)
+res_robust_fit_gaussian_att
+```
+
+退院時後遺症`sequela_y`が改善したかどうかを確認するためには、ロジスティック回帰分析を行えば良い。処置効果ATTとして、退院時後遺症のオッズ比は0.50[0.28-0.88]と改善していることがわかる。
+
+```{r}
+fit_logit_att <- glm(
+  formula = sequela_y ~ treat, 
+  family = binomial(link = "logit"), 
+  data = df_matched,
+  weights = weights
+  )
+robust_fit_logit_att <- coeftest(fit_logit_att, vcov. = sandwich)
+
+res_robust_fit_logit_att <- c(
+  exp(c(
+    robust_fit_logit_att[2],
+    robust_fit_logit_att[2] - 1.96*robust_fit_logit_att[4],
+    robust_fit_logit_att[2] + 1.96*robust_fit_logit_att[4])),
+  robust_fit_logit_att[8]
+)
+names(res_robust_fit_logit_att) <- c("treat", "lower95CI", "upper95CI", "pvalue")
+res_robust_fit_logit_att
+```
+
+## 傾向スコアと層化解析
+
+傾向スコアを使った層化解析の方法をまとめておく。傾向スコアを使った層化解析では、傾向スコアが似た個体を層に分類する。下記のスライドのp33からが分かりやすい。
+
+- [医学統計セミナー第4回-傾向スコア分析-](https://waidai-csc.jp/updata/2019/05/7e3a9ea92b282ede82550e81a73c6b54.pdf)
+
+その層の中では処置以外の共変量は似たような個体が集まるため、各層ごとに平均値を計算して、加重平均を使って平均処置効果を推定する。層ごとに統合してATEを計算する方法は下記が詳しい。
+
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp174
+
+層化解析も`MatchIt`パッケージの`matchit`関数の`method`引数に`subclass`を渡すことで計算可能。バランシングは`summary()`関数でも可能だが、可視化したほうが判断しやすい。各セクションの意味は下記の通り。
+
+- `Summary of Balance for All Data`：マッチング前のバランシング
+- `Summary of Balance for Matched Data`：マッチング後のバランシング
+- `Sample Sizes`：`matched cohort`に採用された症例数
+
+各カラムの値は下記の通り。
+
+- `Means Treated`：処置群の平均
+- `Means Control`：対照群の平均
+- `Std. Mean Diff`：群間の標準化平均差(SMD)。0に近いほどバランシングされている。
+- `Var. Ratio`：群間の分散比。連続変数に対してのみ計算される。バランシングされていると1に近く。
+- `eCDF Mean`：群間でeCDFの平均乖離度合い(経験的累積分布関数 empirical cumulative distribution function: eCDF)
+- `eCDF Max`：群間でeCDFが最大乖離度合い
+
+```{r}
+n_subclass <- 10
+fit_subclass <- matchit(
+  formula = formula_ps,
+  data = df,
+  method = "subclass",
+  subclass = n_subclass,
+  estimand = "ATE"
+)
+summary(fit_subclass)
+```
+
+共変量のバランシングは`stroke`のバランシングが少し悪いが今回はこのまま進める。
+
+```{r}
+# plot(fit_subclass, type = "density")
+# plot(fit_subclass, type = "jitter")
+love.plot(
+  fit_subclass, 
+  stats = "m",    # 平均差
+  binary = "std", # 標準化
+  abs = TRUE,     # 絶対値
+  disp.subclass = TRUE,
+  threshold = 0.1, 
+  grid = TRUE,
+  title = "共変量のバランス") +
+  labs(x = "標準化平均差の絶対値")
+```
+
+傾向スコアを使った層化解析からATEを計算するためには少し工夫がいる。ここでは、下記の書籍を参考にしている。
+
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp175
+
+```{r}
+coef_subclass <- NULL
+samplesize_subclass <- NULL
+robust_var <- NULL
+
+df_subclass <- match.data(fit_subclass)
+for (i in 1:n_subclass) {
+  # 各層のデータを抽出
+  dataps <- df_subclass[df_subclass$subclass == i, ]
+  # 各層のデータでモデリング
+  fit <- lm(adl_y ~ treat + age + sex + ht + dm + stroke + mi, data = dataps)
+  # 回帰モデルの処置効果の偏回帰係数を取得
+  coef_subclass[i] <- summary(fit)$coefficients[2,1]
+  # 各層のデータサイズを取得
+  samplesize_subclass[i] <- nrow(dataps)
+  # クラスタに頑丈な標準誤差を計算
+  robust_var[i] <- coeftest(fit, vcov. = vcovCL, cluster = ~weights)[2,2]
+}
+
+list(
+  coef_subclass = coef_subclass,
+  samplesize_subclass = samplesize_subclass,
+  robust_var = robust_var
+)
+```
+
+処置効果ATEとして、退院時ADLスコアは1.57[1.51-1.64]ポイント改善していることがわかる。
+
+```{r}
+# 層化する前のサンプルサイズを取得
+samplesize <- nrow(df)
+# 偏回帰係数を加重平均で計算(p174 12.1 12.2)
+tau_hat <- sum((samplesize_subclass/samplesize) * coef_subclass)
+# ロバスト分散を加重平均で計算(p174 12.1 12.2)
+robust_var_tau <- sum((samplesize_subclass/samplesize)^2 * robust_var)
+# ロバスト標準誤差を計算
+robust_se_tau <- sqrt(robust_var_tau)
+# ここでのモデルの推定パラメタは8。t分布を使って95％信頼区間を計算
+tval <- qt(0.975, samplesize - 8)
+upper95CI <- tau_hat + tval * robust_se_tau
+lower95CI <- tau_hat - tval * robust_se_tau
+list(
+  tau_hat = tau_hat,
+  lower95CI = lower95CI,
+  upper95CI = upper95CI,
+  robust_se_tau = robust_se_tau
+)
+```
+
+## 参考文献および参考資料
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)
+- [星野匡郎,田中久稔(2016)Rによる実証分析 オーム社](https://shop.ohmsha.co.jp/shopdetail/000000004800/)
+- [安井翔太(2020) 効果検証入門 技術評論社](https://gihyo.jp/book/2020/978-4-297-11117-5)
+- [矢内勇生 統計的因果推論入門](https://yukiyanai.github.io/econometrics2/)
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://github.com/JaehyunSong/kobe_ci)
+- [Masahiko Asano 30.重回帰分析13(傾向スコア)](http://www.ner.takushoku-u.ac.jp/masano/class_material/waseda/keiryo/R30_reg13_propensity.html#72_%E5%B1%A4%E5%8C%96%E8%A7%A3%E6%9E%90%E6%B3%95)
+- [医学統計セミナー第4回-傾向スコア分析-](https://waidai-csc.jp/updata/2019/05/7e3a9ea92b282ede82550e81a73c6b54.pdf)
+- [ 笹渕裕介,山名隼人,康永秀生,道端伸明(2018) できる!傾向スコア分析SPSS・Stata・Rを用いた必勝マニュアル 金原出版](https://www.kanehara-shuppan.co.jp/support-top/pscore/)

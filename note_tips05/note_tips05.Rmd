@@ -1,0 +1,93 @@
+---
+title: "フーリエ級数による曲線あてはめ"
+pagetitle: "フーリエ級数による曲線あてはめ"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここでは、タイトル通りフーリエ級数による曲線あてはめをRで行う。ちょっと調べる必要があって、フーリエ級数とか細かい話忘れていたので、おさらい。数式は手書きです… LaTeXで書くのが面倒だったので。ごめんなさい。
+
+## フーリエ級数
+フーリエ級数は下記の三角関数の式のこと。赤枠がフーリエ係数。フーリエ級数は、複雑な周期をもつ関数であっても、単純な周期関数の無限の和によって表現できるとかいうスグレモノ。画像にある通り区間[a,b]で、データが`2m+1`個であれば、画像の2個目の式で近似できる。画像はiとnを書き間違えている。
+
+![](/Users/aki/Documents/statistical_note/note_tips05/Fourier1.jpg)
+
+ということで[入門はじめての時系列分析](http://www.tokyo-tosho.co.jp/books/ISBN978-4-489-02125-1.html)のp52のサンプルデータを使ってRで再現する。この書籍はEXCELで再現する方法はのっているが、Rはないので、Rでやっておく。
+
+```{r}
+df <- data.frame(y = c(2,3,5,6,7,7,6),
+                 x = c(1,2,3,4,5,6,7))
+
+plot(df$x, df$y)
+```
+
+このサンプルデータの場合、サイズは7、つまり`2*3+1`となり`m=3`で近似できる。また、フーリエ係数は、下記の画像の通り、行列の形で表現すると、線形回帰と同様に、逆行列を用いて、フーリエ係数を計算できる。
+
+![](/Users/aki/Documents/statistical_note/note_tips05/Fourier2.jpg)
+
+このサンプルデータから計算すると、このような式が得られる。画像はiとnを書き間違えている。
+
+![](/Users/aki/Documents/statistical_note/note_tips05/Fourier3.jpg)
+
+Rでも推定しておく。同じ結果が得られる。
+
+```{r}
+n <- 1/8
+fit <- lm(y ~ 
+            cos(2*pi*n*x) + sin(2*pi*n*x) + 
+            cos(4*pi*n*x) + sin(4*pi*n*x) +  
+            cos(6*pi*n*x) + sin(6*pi*n*x),
+          data = df)
+
+fit
+```
+
+この係数を使って、さきほどの散布図に曲線を当てはめる。
+
+```{r}
+pred <- function(x){
+  res <- fit$coefficients[[1]] + #a
+    fit$coefficients[[2]] * cos(2*pi*n*x) +
+    fit$coefficients[[3]] * sin(2*pi*n*x) + 
+    fit$coefficients[[4]] * cos(4*pi*n*x) + 
+    fit$coefficients[[5]] * sin(4*pi*n*x) + 
+    fit$coefficients[[6]] * cos(6*pi*n*x) + 
+    fit$coefficients[[7]] * sin(6*pi*n*x)
+
+  return(res)  
+}
+
+xx <- seq(0,8,0.1)
+plot(df$x, df$y)
+lines(x = xx, y = pred(x = xx), col = "red")
+```
+
+以上でおしまい。
+
+## 参考サイト
+- [入門はじめての時系列分析](http://www.tokyo-tosho.co.jp/books/ISBN978-4-489-02125-1.html)
+- [STAT248/lab04_part2](https://www.stat.berkeley.edu/~arturof/Teaching/STAT248/lab04_part2.html)

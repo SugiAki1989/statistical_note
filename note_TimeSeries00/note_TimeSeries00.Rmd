@@ -1,0 +1,694 @@
+---
+title: "時系列分析の道具立て"
+pagetitle: "時系列分析の道具立て"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 1280,
+                      out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+時系列分析の道具立てということで、時系列データを扱う際に役に立つ基本的な処理方法、モデリング、検定などをまとめておく。数理的な側面はまとめておらず、使い方と結果の見方を中心にまとめている。基本的には、下記の書籍を参考にしているので、数理面は下記の書籍を参照に願います。
+
+- [実証のための計量時系列分析](http://www.yuhikaku.co.jp/books/detail/9784641165489)
+- [経済・ファイナンスデータの計量時系列分析](https://www.asakura.co.jp/detail.php?book_code=12792)
+- [時系列分析と状態空間モデルの基礎: RとStanで学ぶ理論と実装](http://www.pleiades-publishing.co.jp/pdf/pdf08.html)
+- [基礎からわかる時系列分析―Rで実践するカルマンフィルタ・MCMC・粒子フィルタ―](https://gihyo.jp/book/2018/978-4-7741-9646-6)
+- [入門はじめての時系列分析](http://www.tokyo-tosho.co.jp/books/ISBN978-4-489-02125-1.html)
+- [RとStanではじめる 心理学のための時系列分析入門](https://bookclub.kodansha.co.jp/product?item=0000365877)
+- [Rによる時系列分析入門](https://www.amazon.co.jp/R%E3%81%AB%E3%82%88%E3%82%8B%E6%99%82%E7%B3%BB%E5%88%97%E5%88%86%E6%9E%90%E5%85%A5%E9%96%80-%E7%94%B0%E4%B8%AD-%E5%AD%9D%E6%96%87/dp/4916092910/ref=sr_1_1?__mk_ja_JP=%E3%82%AB%E3%82%BF%E3%82%AB%E3%83%8A&crid=300P19BS47VMD&keywords=R%E3%81%AB%E3%82%88%E3%82%8B%E6%99%82%E7%B3%BB%E5%88%97%E5%88%86%E6%9E%90%E5%85%A5%E9%96%80&qid=1673165751&sprefix=r%E3%81%AB%E3%82%88%E3%82%8B%E6%99%82%E7%B3%BB%E5%88%97%E5%88%86%E6%9E%90%E5%85%A5%E9%96%80%2Caps%2C170&sr=8-1)
+- [Rによる時系列モデリング入門](https://www.iwanami.co.jp/book/b548849.html)
+- [Rで学ぶVAR実証分析: 時系列分析の基礎から予測まで](https://www.ohmsha.co.jp/book/9784274224775/)
+
+## 準備
+
+必要なパッケージを読み込んでおく。
+
+```{r}
+library(tidyverse)
+library(glue)
+library(patchwork)
+library(lubridate)
+
+library(dtw)
+library(feasts)
+library(forecast)
+library(slider)
+library(scales)
+library(TSSS)
+library(lmtest)
+```
+
+データは、時間とともに分散が拡大する非定常な系列や、単純な定常な系列など、組み込みのデータを利用する。
+
+```{r}
+# 1949〜1960における航空会社の国際線の顧客の月別総乗客数
+df_airpassengers <- tibble(
+  dt = seq(as.Date("1949-01-01"), as.Date("1960-12-01"), "months"),
+  y = as.vector(AirPassengers)
+) %>% 
+  mutate(rownum = row_number())
+
+# セールスの主要指標のデータ
+df_bjsales <- tibble(
+  dt = 1:150,
+  y = as.vector(BJsales),
+  y_lead = as.vector(BJsales.lead)
+) %>% 
+  mutate(rownum = row_number())
+
+# 1969年1月〜1984年12月のイギリスにおけるドライバーの死傷者数
+# 1983年1月31日にシートベルトが義務化
+df_seatbelts <- tibble(
+  dt = seq(as.Date("1969-01-01"), as.Date("1984-12-01"), "months"),
+  y = Seatbelts[,2],
+  x_petrolprice = Seatbelts[,6],
+  x_law = Seatbelts[,8]
+) %>% 
+  mutate(rownum = row_number())
+
+# ノッティンガム城の20年間の平均気温(華氏)
+df_nottem <- tibble(
+  dt = seq(as.Date("1920-01-01"), as.Date("1939-12-01"), "months"),
+  y = as.vector(nottem)
+) %>% 
+  mutate(rownum = row_number())
+
+# 1973年〜1978年のアメリカにおける月別の交通事故死者数
+df_usaccdeaths <- tibble(
+    dt = seq(as.Date("1973-01-01"), as.Date("1978-12-01"), "months"),
+    y = as.vector(USAccDeaths)
+  ) %>% 
+  mutate(rownum = row_number())
+
+map(
+  .x = c("df_airpassengers", "df_bjsales", "df_nottem", "df_seatbelts", "df_usaccdeaths"),
+  .f = function(x){
+    ## eval(parse(text = x))でもよいと思われる
+    ggplot(data = rlang::eval_tidy(rlang::parse_expr(x)), aes(dt, y, group = 1)) +
+      geom_line() + 
+      geom_smooth(method = "loess", formula = "y ~ x") + 
+      labs(title = glue("Data: {x}")) + 
+      theme_bw()
+  }
+) %>%
+  reduce(`+`)
+```
+
+## 時系列データ構造
+
+時系列データは下記の要素に分解でき、各要素が組み合わさってできているとされる。必ずしもすべての要素が含まれるわけではない。
+
+- トレンド(長期的な傾向)
+- 季節・周期性(年周期、月周期、週周期)
+- 外因性(突発的な要素)
+- ホワイトノイズ(誤差的な変動)
+
+擬似的にデータを作成してみると、それっぽい時系列データが作成されることがわかる。下記のように加法的なものもあれば、乗法的に要素が組み合わされる場合もある。
+
+```{r}
+set.seed(1989)
+t <- 1:52
+trend <- 2 * t
+seasonal <- 10 * sin(t/4) * cos(t/5)
+noise <- 10 * rnorm(52, 0,1)
+y <- trend + seasonal + noise
+
+ggplot(tibble(t, y), aes(t, y, group = 1)) +
+      geom_line() + 
+      geom_smooth(method = "loess", formula = "y ~ x") + 
+      theme_bw()
+```
+
+## 移動平均(Moving Average)
+
+移動平均は、現系列から季節周期やホワイトノイズを取り除くために利用される。ウインドのサイズを大きくすればするほど、滑らかな系列が得られる。
+
+移動平均を計算する際は、`stats`パッケージの`filter`関数や`RcppRoll`パッケージの`roll_mean`関数、`RcppRoll`パッケージの`roll_mean`関数、`zoo`パッケージの`rollmean`関数などを利用できるが、ここでは`slider`パッケージの`slide_dbl`関数を利用する。`slide`関数は下記の通り、ベクトルを前後のウインドウサイズに合わせて、値を取得して計算することができる。
+
+```{r}
+slide(1:15, ~.x, .before = 11)
+```
+
+`df_airpassengers`は年周期のデータなのでウインドのサイズを11にして、12ヶ月移動平均を計算してトレンドを抽出する。現系列が一番薄く、ウインドのサイズが大きくなるにつれて濃くなるようにしている。
+
+```{r}
+df_airpassengers %>% 
+  # .completeはウインドサイズが足りない場合にNAを返す
+  mutate(
+    ma12 = slider::slide_dbl(.x = y, .f = function(x){mean(x, na.rm = TRUE)}, .before = 11, .after = 0L, .complete = TRUE),
+    ma08 = slider::slide_dbl(.x = y, .f = function(x){mean(x, na.rm = TRUE)}, .before =  7, .after = 0L, .complete = TRUE),
+    ma04 = slider::slide_dbl(.x = y, .f = function(x){mean(x, na.rm = TRUE)}, .before =  3, .after = 0L, .complete = TRUE)
+         ) %>% 
+  pivot_longer(names_to = "type", 
+               names_ptypes = list("type" = factor(levels = c("y", "ma04", "ma08", "ma12"))),
+               cols = c(y, ma12, ma08, ma04), 
+               values_to = "y" 
+               ) %>% 
+  ggplot(., aes(dt, y, col = type)) +
+  geom_line() + 
+  scale_x_date(limits = c(min(df_airpassengers$dt), max(df_airpassengers$dt)),
+                         labels = date_format("%Y/%m"),
+                         breaks = "6 month") + 
+  scale_color_grey(start = 0.8, end = 0.2) +
+  theme_bw() + theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
+```
+
+
+## トレンド抽出
+
+時系列データではできうる限り正しく各要素の規則性を理解する必要がある。原系列を要素に分解でき、各要素を理解することによって、予測精度の向上が見込める。
+
+トレンドは移動平均で抜き出すこともできるが、直線的なトレンドが観測できるのであれば、線形モデルを当てはめる方法もある。
+
+```{r}
+tibble(
+  dt = df_airpassengers$dt,
+  y = df_airpassengers$y,
+  trend = df_airpassengers$y - lm(y ~ rownum, df_airpassengers)$residuals,
+  other = lm(y ~ rownum, df_airpassengers)$residuals
+) %>% 
+  pivot_longer(names_to = "type", 
+               names_ptypes = list("type" = factor(levels = c("y", "trend", "other"))),
+               cols = c(y, trend, other), 
+               values_to = "y" 
+               ) %>% 
+  ggplot(., aes(dt, y, col = type)) +
+  geom_line() + 
+  scale_x_date(limits = c(min(df_airpassengers$dt), max(df_airpassengers$dt)),
+                         labels = date_format("%Y/%m"),
+                         breaks = "6 month") + 
+  scale_color_grey(start = 0.8, end = 0.2) +
+  theme_bw() + theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
+```
+
+他にも多項式を使ってトレンドを推定する方法もある。`TSSS`パッケージの`polreg`関数が便利。`TSSS`パッケージは統計数理研究所で開発されているパッケージ。`polreg`関数は、AICが最小の多項式を利用して、トレンドを推定してくれる。AICが最小の次数は`$order.maice`でわかる。
+
+```{r}
+df_airpassengers_polreg <- polreg(df_airpassengers$y, order = 15)
+df_airpassengers_polreg
+```
+
+推定されてトレンドを利用して、各系列を可視化しておく。
+
+```{r}
+tibble(
+  dt = df_airpassengers$dt,
+  y = df_airpassengers$y,
+  trend = df_airpassengers_polreg$trend,
+  other = df_airpassengers$y - df_airpassengers_polreg$trend
+) %>% 
+  pivot_longer(names_to = "type", 
+               names_ptypes = list("type" = factor(levels = c("y", "trend", "other"))),
+               cols = c(y, trend, other), 
+               values_to = "y" 
+               ) %>% 
+  ggplot(., aes(dt, y, col = type)) +
+  geom_line() + 
+  scale_x_date(limits = c(min(df_airpassengers$dt), max(df_airpassengers$dt)),
+                         labels = date_format("%Y/%m"),
+                         breaks = "6 month") + 
+  scale_color_grey(start = 0.8, end = 0.2) +
+  theme_bw() + theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
+```
+## 季節成分抽出
+
+トレンドと同様、現系列の各要素を理解することによって、予測精度の向上が見込める。例えば、飛行機の乗客数であれば、休みが重なる8月や12月などは毎年増加する。時系列の変化を見る上で、繰り返されるパターンを除いたほうが実勢を把握しやすい。
+
+12ヶ月周期であれば、12ヶ月移動平均を計算することで、周期を取り除くことができる。季節変動を理解する方法と季節変動を抽出する方法をまとめる。
+
+まずは、季節変動を理解する方法まとめる。`forecast`パッケージの`ggsubseriesplot`関数を使えば、月ごとにグループ化して可視化できる。12月に向かって値が増加することがわかる。
+
+```{r}
+df_seatbelts_ts <- ts(df_seatbelts$y, start = c(1969, 1), frequency = 12)
+ggsubseriesplot(df_seatbelts_ts) + theme_bw()
+```
+
+`ggsubseriesplot`関数は`ts`クラスを渡す必要があるので、クラス変換が必要なので、類似的なプロットであれば簡単に作成できる。
+
+```{r}
+df_seatbelts %>% 
+  mutate(month = as.factor(month(dt))) %>% 
+  ggplot(., aes(month, y, fill = month)) + 
+  geom_boxplot() + 
+  theme_bw()
+```
+
+次に季節変動を抽出する方法をまとめる。季節変動を抽出する方法は季節調整の計算過程で取り出すこともできる。季節調整は様々な方法があるが、移動平均を計算してトレンドを抜き出し、現系列から移動平均、つまりトレンドを引くことで、季節周期とランダム要素が残るので、そこから平均的な季節性を取り除けば、ランダム要素だけにできる、というような感じで季節性調整は行われる。詳細は下記の書籍の第6章を参照。
+
+- [Rによる時系列分析入門](https://www.amazon.co.jp/R%E3%81%AB%E3%82%88%E3%82%8B%E6%99%82%E7%B3%BB%E5%88%97%E5%88%86%E6%9E%90%E5%85%A5%E9%96%80-%E7%94%B0%E4%B8%AD-%E5%AD%9D%E6%96%87/dp/4916092910/ref=sr_1_1?__mk_ja_JP=%E3%82%AB%E3%82%BF%E3%82%AB%E3%83%8A&crid=300P19BS47VMD&keywords=R%E3%81%AB%E3%82%88%E3%82%8B%E6%99%82%E7%B3%BB%E5%88%97%E5%88%86%E6%9E%90%E5%85%A5%E9%96%80&qid=1673165751&sprefix=r%E3%81%AB%E3%82%88%E3%82%8B%E6%99%82%E7%B3%BB%E5%88%97%E5%88%86%E6%9E%90%E5%85%A5%E9%96%80%2Caps%2C170&sr=8-1)
+
+ここでは`feasts`パッケージの`classical_decomposition`関数を利用する。この関数は原系列をトレンド、季節性、ランダム項に分解することができる。同様の関数として、`stats`パッケージの`decompose`関数もある。
+
+```{r}
+df_seatbelts_ts_decompose <- df_seatbelts_ts %>% 
+  as_tsibble() %>% 
+  model(classical_decomposition(value, type = "additive")) %>% 
+  components() # %>% autoplot()で可視化できるが、ここでは自作する。
+
+df_seatbelts_ts_decompose %>% 
+  bind_cols(dt = df_seatbelts$dt) %>% 
+  select(dt, value, trend, seasonal, random) %>% 
+  pivot_longer(names_to = "type", 
+               names_ptypes = list("type" = factor(levels = c("value", "trend", "seasonal", "random"))),
+               cols = c(value, trend, seasonal, random), 
+               values_to = "y" 
+               ) %>% 
+  ggplot(., aes(dt, y, col = type)) +
+  geom_line() + 
+  scale_x_date(limits = c(min(df_seatbelts$dt), max(df_seatbelts$dt)),
+                         labels = date_format("%Y/%m"),
+                         breaks = "6 month") + 
+  theme_bw() + theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
+```
+他にもSTL分解という方法もある。STL分解はLOESS回帰に基づいて、分解する季節調整法のこと。LOESS回帰は局所重み付け回帰のことで、ウインドウを用意し、そのウインドウをずらしながら、各ウインドウ内でフィッティングして、離れているデータを重み付けしながら、滑らかな曲線を計算していく手法。
+
+```{r}
+df_seatbelts_ts %>% 
+  as_tsibble() %>% 
+  model(STL(value ~ trend(window = 12))) %>% 
+  components() %>% 
+  autoplot() + 
+  theme_bw()
+```
+
+`TSSS`パッケージの`season`関数は状態空間モデルを利用した季節調整を行なう関数。トレンドモデルや季節成分モデルの次数を設定できたり、対数変換や外れ値の設定などができる。調整方法については、下記の書籍の第12章を参照。
+
+- [Rによる時系列モデリング入門](https://www.iwanami.co.jp/book/b548849.html)
+
+```{r}
+season(
+  y = df_seatbelts$y,
+  trend.order = 2,
+  seasonal.order = 1,
+  period = 12,
+  log = FALSE
+  )
+```
+
+## 対数系列
+
+原系列に対して対数変換を行なうことで、ばらつきを小さくすることができ、ばらつきの幅を一様にできる。また、対数変換することで、トレンドを直線的になるため、扱いやすくなる。対数の性質により、積`AB`を`log(AB)=logA + logB`のように和にすることできるため、変動を緩やかにできる。0より大きくないと変換できないので注意。
+
+下記のデータでは、時間経過とともにばらつきが大きくなっていることがわかるが、対数変換した対数系列では、時間が経過しても変動がほとんど一定に保たれていることがわかる。もとに戻すときは指数変換すればよい。
+
+```{r}
+df_airpassengers %>% 
+  mutate(logy = log(y)) %>% 
+  pivot_longer(names_to = "type", 
+               names_ptypes = list("type" = factor(levels = c("y", "logy"))),
+               cols = c(y, logy), 
+               values_to = "y" 
+               )  %>% 
+  ggplot(., aes(dt, y, group = 1)) +
+  geom_line() + 
+  scale_x_date(limits = c(min(df_airpassengers$dt), max(df_airpassengers$dt)),
+                         labels = date_format("%Y/%m"),
+                         breaks = "1 year") + 
+  theme_bw() + theme(axis.text.x = element_text(angle = 45, vjust = 0.5)) + 
+  facet_wrap( ~ type, scales = "free_y", nrow = 2)
+```
+
+## 差分系列
+
+原系列に対して差分をとることで、非定常な系列を定常な系列に変換できる。つまり、差分をとることでトレンドを除去できる。下記のように1期の差を計算した系列は、1階の差分系列と呼ばれる。
+
+$$
+\Delta y_{t} = y_{t} - y_{t-1}
+$$
+1階の差分系列にもう一度階差をとったものは2階の差分系列と呼ばれる。他の章でも扱うが、非定常過程に差分をとったときに定常過程になる系列のことを単位根過程という。
+
+対数系列に差分を取ると対数差分系列を作ることができ、系列のばらつきも一様にすることで、より扱いやすくできる。
+
+```{r}
+df_airpassengers %>% 
+  mutate(diffy = y - lag(y,1),
+         difflogy = log(y) - lag(log(y),1)) %>% 
+  pivot_longer(names_to = "type", 
+               names_ptypes = list("type" = factor(levels = c("y", "diffy", "difflogy"))),
+               cols = c(y, diffy,difflogy), 
+               values_to = "y" 
+               )  %>% 
+  ggplot(., aes(dt, y, group = 1)) +
+  geom_line() + 
+  scale_x_date(limits = c(min(df_airpassengers$dt), max(df_airpassengers$dt)),
+                         labels = date_format("%Y/%m"),
+                         breaks = "1 year") + 
+  theme_bw() + theme(axis.text.x = element_text(angle = 45, vjust = 0.5)) + 
+  facet_wrap( ~ type, scales = "free_y", nrow = 3)
+
+```
+
+モデリングしてから予測値を計算したあとに、差分系列をもとに戻す場合は初期値と累計を使ってもとに戻すことができる。
+
+```{r}
+data.frame(y = c(10,15,25,26,30)) %>% 
+  mutate(
+    diffy = y - lag(y,1), 
+    diffy_mod = if_else(is.na(diffy), y, diffy),
+    reversey = cumsum(diffy_mod)
+  )
+```
+
+対数変換後に差分をとっている対数差分系列をもとに戻す場合は、同じ用にすればよい。手順としては、下記のとおり。
+
+- 原系列を対数変換して対数系列を作る
+- 対数系列から差分をとって対数差分系列を作る
+- 対数差分系列でモデリングして予測する
+- 対数差分系列を対数系列にもどす
+- 対数系列を指数変換して原系列にもどす
+
+```{r}
+data.frame(y = c(10,15,25,26,30),
+           logy = log(c(10,15,25,26,30))) %>% 
+  mutate(
+    logdiffy = logy - lag(logy,1), 
+    logdiffy_mod = if_else(is.na(logdiffy), logy, logdiffy),
+    logreversey = exp(cumsum(logdiffy_mod))
+  )
+```
+
+## ランダムウォーク(Random Walk)
+
+ホワイトノイズの累積和はランダムウォーク系列になる。ホワイトノイズは下記の通り、期待値は0で、分散は一様、自己共分散は0という性質を持つ。
+
+$$
+\begin{eqnarray}
+E[\epsilon_{t}] &=& \mu \\
+
+Cov(\epsilon_{t}, \epsilon_{t-k}) 
+ &=&
+  \begin{cases}
+    \sigma^2 & k=0 \\
+    0 & k \neq 0
+  \end{cases} \\
+\end{eqnarray}
+$$
+
+実際には正規分布に従うランダムノイズを仮定することが多い。このホワイトノイズを累積すると、ランダムウォーク系列が作られる。
+
+```{r}
+set.seed(1989)
+t <- 1:500
+noise <- rnorm(length(t), 0, 1)
+randomwalk <- cumsum(noise)
+
+df_randomwalk <- tibble(
+  t, noise, randomwalk
+)
+
+df_randomwalk %>% 
+  pivot_longer(
+    cols = c(noise, randomwalk),
+    names_to = "type",
+    values_to = "y"
+  ) %>% 
+  ggplot(., aes(t, y, col = type)) +
+  geom_line() + 
+  scale_color_manual(values = c("#DFD7D9", "tomato")) +
+  scale_x_continuous(breaks = seq(1, 501, 50)) + 
+  theme_bw()
+```
+
+
+## 定常性(Stationarity)
+
+詳しくは扱わないが、時系列データの時点1の値は複数取得することはできず、そもそも平均や分散が計算できない。そのために前提を設ける必要がある。時系列データは確率過程の実現値であり、時系列は時間$t$、根元事象$\omega$より$X(t,\omega)$という確率変数として考えることができる。また、時系列分析は$X(t,\omega)$の分布を知ることが目的の1つとして考えられる。
+
+しかし、問題が1つあり、時間$t$において、$\omega$は1回しかサンプリングできない。つまり、同一条件下での無限回の繰り返し実験に基づく観測ができないことを意味する。時間$t$において、$\omega$は1個しかないため、平均も分散も計算のしようがない。これを解消するために、下記の前提を置く必要がある。
+
+任意の$t$と$k$に対して、下記が成立する場合、過程は弱定常過程となる。この前提を置くことで、時系列データから平均や分散を計算できるようにする。
+
+$$
+\begin{eqnarray}
+E[y_{t}] &=& \mu \\
+V[y_{t}] &=& \sigma^{2} \\
+Cov(y_{t}, y_{t-k}) &=& E[(y_{t} - \mu)(y_{t-k} - \mu)] = \gamma_{k} \\
+\end{eqnarray}
+$$
+
+1つ目は、トレンドをもって増加、減少することはなく、長期的には$\mu$の周りにばらつくことを意味している。2つ目は、区間ごとにばらつきが小さくなったり、大きくなったりしない。ほぼ一定の値で変動することを意味する。3つ目は、自己共分散は$t$に依存せず$k$にだけ依存する…と説明されることが多いが、私にとっては自己共分散の数式の意味がイメージしづらい。
+
+実際に数字を当ててみると少し見通しが良くなる。2点間が$k=1$の時、例えば「時点1と時点2」「時点11と時点12」などを考えることができ、時点1と時点2の値の自己相関と、時点11と時点12の値の自己相関の強さは同じであり、2点間が$k=5$の時、例えば「時点1と時点6」「時点11と時点16」などを考えることができ、時点1と時点6の値の自己相関と、時点11と時点16の値の自己相関の強さは同じ、ということを意味している。
+
+弱定常過程をイメージしやすいように可視化する。100本の時系列データを得られたとして、それらを重ねると、時間方向に対して、一定の平均と分散をもっていることがわかる。黒帯は四分位範囲を計算している。定常であるならば、時点のどこをみても値の出方が同じ、つまり、$y_{t}=y_{t_k}$のように考えることができる。
+
+```{r}
+t_len <- 1:100
+tmp <- vector(mode = "list", length = length(t_len))
+map_dfc(
+  .x = t_len,
+  .f = function(x){tmp[[x]] <- arima.sim(n = length(t_len), list(ar = 0.3))}
+) %>% 
+  set_names(paste0("line", t_len)) %>% 
+  bind_cols(time = t_len) %>% 
+  pivot_longer(
+    cols = -time,
+    values_to = "y",
+    names_to = "lines"
+  ) %>% 
+  group_by(time) %>% 
+  mutate(miny = quantile(y, probs = 0.25), maxy = quantile(y,probs = 0.75)) %>% 
+  ungroup() %>% 
+  ggplot(.) + 
+    geom_line(aes(time, y, group = lines), alpha = 0.1) +
+    geom_ribbon(aes(time, y, ymin = miny, ymax = maxy), alpha = 0.5) +
+  theme_bw()
+```
+
+## 自己共分散・自己相関(Autocovariance, Autocorrelation)
+
+定常時系列の自己共分散はラグ$k$の関数として下記のように表される。$k$はラグと呼ばれ、$k=0$のとき分散になる。
+
+$$
+\gamma_{kt} = Cov(y_{t},y_{t-k}) = E[(y_{t} - \mu_{t})(y_{t-k} - \mu_{t-k})]
+$$
+
+例えば、$k=1$のとき1時の自己共分散となる。この値のイメージとしては、自己共分散がプラスの時、$t$時点の値が期待値よりも大きい時、$t-1$時点の値も期待値よりも大きい値になりやすい。ただ、スケールに依存するので、自己共分散を標準化した自己相関が利用される。自己相関はラグ$k$の自己相関関数として下記のように表される。自己相関関数をグラフ化したものをコレログラムという。
+
+$$
+Corr(y_{t},y_{t-k}) = \frac{Cov(y_{t},y_{t-k})}{\sqrt{Var(y_{t})Var(y_{t-k})}} = \ \frac{\gamma_{kt}}{\sqrt{\gamma_{0t}, \gamma_{0,t-k}}} = \frac{\gamma_{k}}{\gamma_{0}} = \rho_{k}
+$$
+
+実際には、標本平均、標本自己共分散、標本自己相関を計算することになる。`stats`パッケージの`acf`関数でも計算できるが、ここでは`feasts`パッケージの`ACF`関数で計算する。ラグが12、24、36、48で自己相関が強いことがわかる。
+
+```{r}
+# yyy-mm-dd形式の日付をtsibble::yearmonthでyyyy MMMに変換してからas_tsibbleを利用
+# こうしないと、tsibbleクラスのオブジェクトが月単位ではなく、日単位として認識される
+df_seatbelts %>% 
+  mutate(dt = tsibble::yearmonth(as.character(dt))) %>%
+  as_tsibble(index = dt) %>% 
+  ACF(y, lag_max = 52) %>% 
+  autoplot() +
+  theme_bw()
+```
+
+## Ljung-Box検定(Ljung-Box Test)
+
+時系列データの自己相関を検定する関数として、`stats`パッケージの`Box.test`関数がある。Ljung-Box検定の帰無仮説は「自己相関がない」である。検定の結果をみると、帰無仮説を棄却して、対立仮説を採択することになるので、この系列は自己相関がある、ということになる。
+
+```{r}
+Box.test(df_seatbelts$y, type = "Ljung-Box")
+```
+
+## 偏自己相関(Partial Autocorrelation)
+
+自己相関は、単純な時点間の相関を表しているわけではない。AR(1)過程のデータであれば、
+
+$$
+\begin{eqnarray}
+y_{t} &=& \phi y_{t-1} \\
+&=& \phi (\phi y_{t-2})\\
+&=& \phi (\phi (\phi y_{t-3})\\
+&=& ... \\
+&=& \phi^{k} y_{t-k} \\
+\end{eqnarray}
+$$
+
+というように1時点前との関係には2時点前の関係があるように見えてしまう。そのため、1時点前の関係性を取り除いて、2時点前との関係性を計算するのが偏自己相関。回帰分析の偏回帰係数と同じで、説明できる部分とできない部分にわけて、説明できない部分を使って、相関を計算する。
+
+`stats`パッケージの`acf`関数でも計算できるが、ここでは`feasts`パッケージの`PACF`関数で計算する。もちろん`stats`パッケージの`pacf`関数でも計算できる。ラグが12、24、36、48で自己相関が強よかったが、偏自己相関では11、12、13、14あたりとの関係が強いことがわかる。
+
+```{r}
+df_seatbelts %>% 
+  mutate(dt = tsibble::yearmonth(as.character(dt))) %>%
+  as_tsibble(index = dt) %>% 
+  PACF(y, lag_max = 52) %>% 
+  autoplot() +
+  theme_bw()
+```
+
+## 交差相関(Cross Correlation)
+
+自己相関は、1つの時系列の時点をずらすことで相関を計算するが、交差相関は、2つの時系列を用いて、片方の系列をずらしながら相関を求める。これが交差相関。つまり、片方の系列をずらした際に相関が大きくなるのであれば、片方の系列は先行指標とし利用できる。$x$に変化が起こった時、$y$に変化が起こる、という感じ。
+
+下記の書籍の第11章がわかりやすい。こちらの書籍の数値例をお借りして、少しだけ数値を調整する。
+
+- [入門はじめての時系列分析](http://www.tokyo-tosho.co.jp/books/ISBN978-4-489-02125-1.html)
+
+$y$を固定して$x$をずらすということは、下記のようにラグをとることになる。
+
+```{r}
+df_crosscor <- 
+  tibble(
+    dt = 1:10,
+    y = c(20, 11, 5, -7, -43, -6, -11, 7, -33, -5),
+    x = c(9, -45, 12, 28, -5, -23, 44, 38, 10, 22)
+  )
+
+df_crosscor %>% 
+  mutate(
+    lag1x = lag(x, 1),
+    lag2x = lag(x, 2),
+    lag3x = lag(x, 3)
+  )
+```
+
+ずらしたものを可視化すると、意味がわかりやすい。$y$と$x$には相関はなさそうだが、ラグをずらしていくと、$y$と$lag3x$とは相関がありそうである。つまり、$x$に変化が起こった時、$y$に変化が起こるまで、ラグが3時点存在することがわかる。ということは、$x$は$y$の3期先行している指標とも言える。
+
+```{r}
+df_crosscor %>% 
+  mutate(
+    lag1x = lag(x, 1),
+    lag2x = lag(x, 2),
+    lag3x = lag(x, 3)
+  ) %>% 
+  pivot_longer(
+    cols = c(x, y, lag1x, lag2x, lag3x),
+    names_to = "type",
+    names_ptypes = list("type" = factor(levels = c("y", "x", "lag1x", "lag2x", "lag3x"))),
+    values_to = "y"
+  ) %>% 
+  ggplot(., aes(dt, y, col = type)) +
+  geom_line() + 
+  scale_color_manual(values = c("tomato", "#DFD7D9", "#DCCCCE", "#C898A0", "#8F123E")) +
+  scale_x_continuous(breaks = seq(1,10,1)) + 
+  theme_bw()
+```
+
+ここでは`feasts`パッケージの`CCF`関数で計算する。もちろん`stats`パッケージの`ccf`関数でも計算できる。ラグが-3時点の関係が強いことがわかる。
+
+```{r}
+df_crosscor %>% 
+  as_tsibble(index = dt) %>% 
+  CCF(x = x, y = y, lag_max = 10) %>% 
+  print(n = 20)
+```
+-3時点の交差相関が高いということは、$y$基準で考えると、$y$に対して、$x$は3時点前(`lag(x,3)`)と関係している。つまり、$x$基準で考えると、$x$は$y$の3期先行ということになる。
+
+```{r}
+df_crosscor %>% 
+  as_tsibble(index = dt) %>% 
+  CCF(y = y, x = x) %>% 
+  autoplot() +
+  theme_bw()
+```
+
+別の例として[医学と統計(48)](https://blog.goo.ne.jp/k-stat/e/adf7353c0af88c6f5363eeabadaec44b)のサイトの数値例をお借りする。末梢血中好塩基球数(`x_Ba`)と血清IgE値(`y_IgE`)の関係を調べる。医学の知識はないので、詳しいことはわからない。
+
+`IgE`基準で考えると、`IgE`に対して、`Ba`は2時点前(`lag(x,2)`)と関係している。つまり、`Ba`に変化が起こった時、`IgE`に変化が起こるまで、ラグが2時点存在することがわかる。ということは、`Ba`は`IgE`の2期先行している指標とも言える。
+
+```{r}
+dt <- 1:23
+y_IgE <- c(-0.8, -1.0, -1.0, -1.0, -0.7,
+       -1.0, -1.1, -0.0, -1.7, -0.5,
+       -0.5, 1.1, 1.0, 0.7, 1.2,
+       0.7, 0.7, 0.6, 0.3, 0.9,
+       0.9, 0.9, 1.0)
+x_Ba <- c(-1.9, -0.5, -0.8, -0.9, -1.7,
+       -0.5, -1.1, 0.0, 0.6, 0.7,
+       0.0, 0.2, 0.3, 0.1, -0.3,
+       0.9, -0.1, -0.7, 0.1, 0.7,
+       1.5, 2.0, 1.3)
+
+df_corsscor2 <- tibble(dt, y_IgE, x_Ba)
+df_corsscor2 %>% 
+  as_tsibble(index = dt) %>% 
+  CCF(x = x_Ba, y = y_IgE, lag_max = 25) %>% 
+  autoplot() +
+  theme_bw()
+```
+
+2時点ずらした関係を可視化しておく。
+
+```{r}
+df_corsscor2 %>% 
+  mutate(
+    lag2x = lag(x_Ba, 2),
+  ) %>% 
+  pivot_longer(
+    cols = c(x_Ba, y_IgE, lag2x),
+    names_to = "type",
+    names_ptypes = list("type" = factor(levels = c("y_IgE", "x_Ba", "lag2x"))),
+    values_to = "y"
+  ) %>% 
+  ggplot(., aes(dt, y, col = type)) +
+  geom_line() + 
+  scale_color_manual(values = c("tomato", "#DFD7D9", "#8F123E")) +
+  scale_x_continuous(breaks = seq(1,25,1)) + 
+  theme_bw()
+```
+## DTW(Dynamic Time Warping)
+
+DTWは動的時間伸縮法とも呼ばれるもので、系列の類似度を数値化できる。異なる長さの系列も比較することができる。各系列の時点を最小になるように距離を計算することで類似度を計算するため、値は小さい方が類似していることになる。。
+
+下記の系列の類似度を比較してみる。1つは系列の先行指標になるような系列で、もう1つはランダムに並び替えて類似しないようにした系列。
+
+```{r}
+set.seed(1989)
+df_bjsales_random <- scale(df_bjsales$y_lead[sample(1:length(df_bjsales$y_lead))])
+
+df_bjsales_scale <- df_bjsales %>% 
+  mutate(
+    y = scale(y),
+    y_lead = scale(y_lead)
+  ) %>% 
+  bind_cols(y_random = df_bjsales_random)
+
+df_bjsales_scale %>% 
+  pivot_longer(
+    cols = c(y, y_lead, y_random),
+    values_to = "y",
+    names_to = "type"
+  ) %>% 
+  ggplot(., aes(dt, y, col = type)) +
+  geom_line() + 
+  scale_color_manual(values = c("tomato", "#8F123E", "#DFD7D9")) + 
+  scale_x_continuous(breaks = seq(1,150,10)) + 
+  theme_bw()
+```
+
+`dtw`パッケージの`dtw`関数で系列間の距離を計算できる。対応する時点間の時間差にウインドのサイズを設定することもできる。
+
+```{r}
+dtw_distance <- dtw(x = df_bjsales_scale$y_lead,
+                    y = df_bjsales_scale$y)
+dtw_distance2 <- dtw(x = df_bjsales_scale$y_random,
+                     y = df_bjsales_scale$y)
+
+list(lead = dtw_distance$distance,
+     random = dtw_distance2$distance)
+```

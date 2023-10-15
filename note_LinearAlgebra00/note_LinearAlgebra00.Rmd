@@ -1,0 +1,355 @@
+---
+title: "LinearAlgebraの基本的な事柄"
+pagetitle: "LinearAlgebra00"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: TRUE
+    code_folding: "show"
+    highlight: "zenburn"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+::: {.update-right}
+UPDATE: `r Sys.time()`
+:::
+
+# はじめに
+
+LATEXの記述の練習。内容の正確さは知らない。
+
+# 基本的な行列の事柄
+
+下記は2行2列の行列。
+
+$$
+\begin{pmatrix}
+a & b \\
+c & d
+\end{pmatrix}
+$$
+
+行列の要素には行番号、列番号をつけて各要素が1つに定まるようになっている。
+
+$$
+\begin{eqnarray}
+A = \left(
+  \begin{array}{cccc}
+    a_{ 11 } & a_{ 12 } & \ldots & a_{ 1n } \\
+    a_{ 21 } & a_{ 22 } & \ldots & a_{ 2n } \\
+    \vdots & \vdots & \ddots & \vdots \\
+    a_{ m1 } & a_{ m2 } & \ldots & a_{ mn }
+  \end{array}
+\right)
+\end{eqnarray}
+$$
+
+# 転置
+
+行列の転置をする場合、行列の右肩に$T$をつける。左肩に$T$をつけたり、右肩に$'$をつけて表記する場合もある。基本的には、列ベクトルで表記される。
+
+$$
+\begin{eqnarray}
+\boldsymbol{ x }
+=\left(
+   \begin{array}{c}
+     x_{ 1 } \\
+     x_{ 2 } \\
+     \vdots \\
+     x_{ n }
+   \end{array}
+ \right)
+=( \underbrace{ x_{ 1 }, x_{ 2 }, \ldots, x_{ n } }_{ n } )^{ \mathrm{ T }}
+\end{eqnarray}
+$$
+
+# 行列式
+
+$$
+\begin{eqnarray}
+\mathrm{ det }A
+ = | A |
+ = \begin{vmatrix} a & b \\ c & d \end{vmatrix}
+ = ad - bc
+\end{eqnarray}
+$$
+
+# 和と差
+
+$$
+\begin{pmatrix}
+  a & b & c \\
+  d & e & f \\
+  g & h & i
+\end{pmatrix}
++
+\begin{pmatrix}
+  a & b & c \\
+  d & e & f \\
+  g & h & i
+\end{pmatrix}
+=
+\begin{pmatrix}
+  a \pm a & b \pm b & c \pm c \\
+  d \pm d & e \pm e & f \pm f \\
+  g \pm g & h \pm h & i \pm i
+\end{pmatrix}
+$$
+
+# 内積
+
+
+$$
+{\begin{align}
+\mathbf{a}^T \cdot \mathbf{b} & =
+\left(
+\begin{matrix}
+a_1 & a_2 & \cdots & a_n
+\end{matrix}
+\right)^ T \cdot
+\left(
+\begin{matrix}
+b_1 \\\
+b_2 \\\
+\vdots \\\
+b_n
+\end{matrix}
+\right) \\\
+& = a_1 b_1 + a_2 b_2 + \cdots + a_n b_n
+\end{align}
+}
+$$
+
+# 行列とベクトルと微分
+## ベクトルでの微分
+
+$$
+\frac
+{ \partial }
+{ \partial \boldsymbol{x} }
+\boldsymbol{x} 
+= \left(
+\begin{matrix}
+x_1 \\\
+x_2 \\\
+\vdots \\\
+x_n
+\end{matrix}
+\right)
+= \boldsymbol{I} \\
+$$
+
+$$
+\frac
+{ \partial \boldsymbol{a}^T\boldsymbol{x}}
+{ \partial \boldsymbol{x} }
+= \left(
+\begin{matrix}
+a_1 \\\
+a_2 \\\
+\vdots \\\
+a_n
+\end{matrix}
+\right)
+= \boldsymbol{a} \\
+$$
+
+$$
+\frac
+{ \partial \boldsymbol{x}^T \boldsymbol{a}}
+{ \partial \boldsymbol{x} }
+= \left(
+\begin{matrix}
+a_1 \\\
+a_2 \\\
+\vdots \\\
+a_n
+\end{matrix}
+\right)
+= \boldsymbol{a} \\
+$$
+
+
+$$
+\frac
+{ \partial \boldsymbol{x}^T \boldsymbol{x}}
+{ \partial \boldsymbol{x} }
+= \left(
+\begin{matrix}
+2x_1 \\\
+2x_2 \\\
+\vdots \\\
+2x_n
+\end{matrix}
+\right)
+= 2 \boldsymbol{x} \\
+$$
+
+
+## 2次形式の微分
+
+
+$$
+\begin{eqnarray}
+\frac
+{ \partial }
+{ \partial \boldsymbol{x} }
+\boldsymbol{x}^T \boldsymbol{A} \boldsymbol{x}
+&=& (\boldsymbol{A} + \boldsymbol{A}^T) \boldsymbol{x} \\
+(if \ \boldsymbol{A} \ is \ Symmetric \ Matrix )
+&=& 2 \boldsymbol{A} \boldsymbol{x} \\
+\end{eqnarray}
+$$
+
+
+$$
+\frac
+{ \partial }
+{ \partial \boldsymbol{x} }
+(\boldsymbol{x} - \boldsymbol{a})^T (\boldsymbol{x} - \boldsymbol{a})
+= 2 (\boldsymbol{x} - \boldsymbol{a}) \\
+$$
+
+
+$$
+\frac
+{ \partial }
+{ \partial \boldsymbol{x} }
+(\boldsymbol{Ax} - \boldsymbol{b})^T (\boldsymbol{Ax} - \boldsymbol{b})
+= 2 \boldsymbol{A}^T  (\boldsymbol{Ax} - \boldsymbol{b}) \\
+$$
+
+$$
+\frac
+{ \partial }
+{ \partial \boldsymbol{x} }
+(\boldsymbol{Ax} - \boldsymbol{b})^T \boldsymbol{C}  (\boldsymbol{Ax} - \boldsymbol{b})
+= \boldsymbol{A}^T  (\boldsymbol{C} + \boldsymbol{C}^T)(\boldsymbol{Ax} - \boldsymbol{b}) \\
+$$
+
+
+
+$$
+{\frac{ \partial f }{ \partial \boldsymbol{x} } = 
+\left(
+\begin{array}{ccccc}
+\frac{ \partial f }{ \partial {x}_{1} }, & \cdots &
+
+\frac{ \partial f }{ \partial {x}_{i} }, & \cdots &
+\frac{ \partial f }{ \partial {x}_{n} }\
+\end{array}
+\right) ^T}
+$$
+
+
+$$
+\begin{eqnarray}
+\frac{ \partial f }{ \partial \boldsymbol{x} } = 
+\left(
+   \begin{array}{c}
+     \frac{ \partial f }{ \partial {x}_{1} } \\
+     \frac{ \partial f }{ \partial {x}_{2} } \\
+     \vdots \\
+     \frac{ \partial f }{ \partial {x}_{n} }
+   \end{array}
+ \right)
+\end{eqnarray}
+$$
+
+
+$$
+\boldsymbol A = \left(
+  \begin{array}{cccc}
+    a_{ 11 } & a_{ 12 } \\
+    a_{ 21 } & a_{ 22 } \\
+  \end{array}
+\right), 
+\boldsymbol{x} =  
+\left(
+\begin{matrix}
+x_1 \\\
+x_2
+\end{matrix}
+\right)\\
+\frac
+{ \partial \boldsymbol{A}\boldsymbol{x}}
+{ \partial \boldsymbol{x} }
+= 
+\left(
+  \begin{array}{cccc}
+    \displaystyle \frac { \partial (a_{ 11 } x_{ 1 } + a_{ 12 } x_{ 2 })} { \partial x_{1}} & \displaystyle \frac { \partial (a_{ 21 } x_{ 1 } + a_{ 22 } x_{ 2 })} { \partial x_{1}} \\
+    \displaystyle \frac { \partial (a_{ 11 } x_{ 1 } + a_{ 12 } x_{ 2 })} { \partial x_{2}} & \displaystyle \frac { \partial (a_{ 21 } x_{ 1 } + a_{ 22 } x_{ 2 })} { \partial x_{2}} \\
+  \end{array}
+\right)
+=
+\left(
+  \begin{array}{cccc}
+    a_{ 11 } & a_{ 21 } \\
+    a_{ 12 } & a_{ 22 } \\
+  \end{array}
+\right)
+=
+\boldsymbol{A}^T \\
+$$
+
+$$
+{\frac{ \partial \boldsymbol{y} }{ \partial \boldsymbol{x} } = 
+\left(
+\begin{array}{ccccc}
+\frac{ \partial {y}_{1} }{ \partial {x}_{1} } & \cdots & 
+\frac{ \partial {y}_{j} }{ \partial {x}_{1} } & \cdots & 
+\frac{ \partial {y}_{m} }{ \partial {x}_{1} }\\
+\vdots & \ddots & & & \vdots \\
+\frac{ \partial {y}_{1} }{ \partial {x}_{i} } & & 
+\frac{ \partial {y}_{j} }{ \partial {x}_{i} } & & 
+\frac{ \partial {y}_{m} }{ \partial {x}_{i} } \\
+\vdots & & & \ddots & \vdots \\
+\frac{ \partial {y}_{1} }{ \partial {x}_{n} } & \cdots & 
+\frac{ \partial {y}_{j} }{ \partial {x}_{n} } & \cdots & 
+\frac{ \partial {y}_{m} }{ \partial {x}_{n} }\end{array}
+\right)
+}
+$$
+
+
+$$
+{\frac{ \partial f }{ \partial A } = 
+\left(
+\begin{array}{ccccc}
+\frac{ \partial f }{ \partial {A}_{11} } & \cdots & 
+\frac{ \partial f }{ \partial {A}_{1j} } & \cdots & 
+\frac{ \partial f }{ \partial {A}_{1m} }\\
+\vdots & \ddots & & & \vdots \\
+\frac{ \partial f }{ \partial {A}_{i1} } & & 
+\frac{ \partial f }{ \partial {A}_{ij} } & & 
+\frac{ \partial f }{ \partial {A}_{im} } \\
+\vdots & & & \ddots & \vdots \\
+\frac{ \partial f }{ \partial {A}_{n1} } & \cdots & 
+\frac{ \partial f }{ \partial {A}_{nj} } & \cdots & 
+\frac{ \partial f }{ \partial {A}_{nm} }
+\end{array}\right)
+}
+$$
+
+$$
+
+# セッション情報
+
+```{r}
+sessionInfo()
+```

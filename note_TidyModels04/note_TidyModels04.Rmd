@@ -1,0 +1,235 @@
+---
+title: "TidyModels: workflowsパッケージ"
+pagetitle: "TidyModels: workflowsパッケージ"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+`tidymodels`パッケージの使い方をいくつかのノートに分けてまとめている。`tidymodels`パッケージは、統計モデルや機械学習モデルを構築するために必要なパッケージをコレクションしているパッケージで、非常に色んなパッケージがある。ここでは、今回は`workflows`というパッケージの使い方をまとめていく。モデルの数理的な側面や機械学習の用語などは、このノートでは扱わない。
+
+下記の公式ドキュメントや`tidymodels`パッケージに関する書籍を参考にしている。
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+## `workflows`パッケージの目的
+
+`workflows`パッケージのワークフローを利用することで、前処理、モデリング、後処理をまとめることができる。基本的には、`recipe`パッケージや`parsnip`パッケージを組み合わせて、ワークフローを作成することになる。公式ドキュメントはこちら。
+
+- [workflows](https://workflows.tidymodels.org/)
+
+## `workflows`パッケージの実行例
+
+`workflows`パッケージの基本的な利用方法を見る前に必要なオブジェクトを定義しておく。関数の使い方をまとめているので、ここでは動けば良い程度にレシピを作成しておく。
+
+```{r}
+library(tidymodels)
+library(tidyverse)
+df_past <- read_csv("https://raw.githubusercontent.com/SugiAki1989/statistical_note/main/note_TidyModels00/df_past.csv")
+set.seed(1989)
+
+# rsample
+df_initial <- df_past %>% initial_split(prop = 0.8, strata = "Status")
+df_train <- df_initial %>% training()
+df_test <- df_initial %>% testing()
+
+# parsnip
+model1 <- rand_forest(mtry = 5, trees = 1000) %>%
+  set_engine("ranger", importance = "permutation") %>%
+  set_mode("classification")
+
+# recipes
+recipe1 <- recipe(Status ~ ., data = df_train) %>% 
+  step_impute_bag(Income, impute_with = imp_vars(Marital, Expenses)) %>% 
+  step_impute_bag(Assets, impute_with = imp_vars(Marital, Expenses, Income)) %>% 
+  step_impute_bag(Debt, impute_with = imp_vars(Marital, Expenses, Income)) %>% 
+  step_impute_bag(Home, impute_with = imp_vars(Marital, Expenses, Income)) %>% 
+  step_impute_bag(Marital, impute_with = imp_vars(Marital, Expenses, Income)) %>% 
+  step_impute_bag(Job, impute_with = imp_vars(Marital, Expenses, Income))
+```
+
+`workflow`関数で、前処理、モデリングの情報をまとめておく。ワークフローには、レシピの内容、モデルの設定がまとめられていることがわかる。そのため、ワークフローを使えば、データに対して、どのような前処理を行うのか、そして、どのようなモデルを適用するのかがわかるので、訓練用、テスト用データを変えてもワークフローを使い回すことで、同じ処理を双方のデータに適用できる。
+
+```{r}
+workflow1 <- workflow() %>% 
+  add_recipe(recipe1) %>% 
+  add_model(model1)
+
+workflow1
+```
+
+訓練データでモデルを学習するときは、ワークフローオブジェクトを`fit`関数に渡せば良い。
+
+```{r}
+model_trained_workflow <- 
+  workflow1 %>% 
+    fit(data = df_train)
+model_trained_workflow
+```
+
+テストデータでモデルの予測値を計算する場合は、ワークフローオブジェクトを`predict`関数に渡せば良い。
+
+```{r}
+model_predicted_workflow <- 
+  model_trained_workflow %>% 
+    predict(df_test)
+model_predicted_workflow
+```
+
+これが基本的な`workflow`パッケージの使い方である。モデルとレシピをワークフローが束ねることで、モデルの訓練からモデルの予測までを効率よく行うことができる。
+
+先程はクロスバリデーションを行わず、とりあえず`workflow`パッケージの使い方をまとめていたが、ここからはクロスバリデーションを行った場合にワークフローがどのように機能するのかまとめておく。データに分割を行い、先程と同じく、レシピとモデルを作成しておく。
+
+```{r}
+set.seed(1989)
+df_train_stratified_splits <- 
+  vfold_cv(df_train, v = 5, strata = "Status")
+
+model2 <- rand_forest(mtry = 5, trees = 500, min_n = 10) %>%
+  set_engine("ranger", importance = "permutation") %>%
+  set_mode("classification")
+
+recipe2 <- recipe(Status ~ ., data = df_train) %>% 
+  step_impute_bag(Income, impute_with = imp_vars(Marital, Expenses)) %>% 
+  step_impute_bag(Assets, impute_with = imp_vars(Marital, Expenses, Income)) %>% 
+  step_impute_bag(Debt, impute_with = imp_vars(Marital, Expenses, Income, Assets)) %>% 
+  step_impute_bag(Home, impute_with = imp_vars(Marital, Expenses, Income, Assets, Debt)) %>% 
+  step_impute_bag(Marital, impute_with = imp_vars(Marital, Expenses, Income, Assets, Debt, Home)) %>% 
+  step_impute_bag(Job, impute_with = imp_vars(Marital, Expenses, Income, Assets, Debt, Home, Marital))
+
+workflow2 <- workflow() %>% 
+  add_recipe(recipe2) %>% 
+  add_model(model2)
+
+workflow2
+```
+
+データを分割しているので、先程のようにそのままワークフローを適用できない。`tune`パッケージの`fit_resamples`関数を使う必要がある。`tune`パッケージは次回ノートにまとめるので、ここでは特に説明はしない。また、`metric_set`関数は`yardstick`パッケージの関数なので、同じく説明は他のノートでまとめる。
+
+処理内容としては、分割されたデータが複数あるので、それらに対してワークフローで管理しているレシピとモデル内容を使って、評価指標は`accuracy`で、計算に使用した予測値は残す、ということをしている。このステップでは、クロスバリデーションしてもモデルを評価しているので、処理時間がかかる。これまでの部分は何をするかを決めていただけで、実際に手は動かしていない。
+
+`tune`パッケージを使用している事がわかるようにオブジェクトにはわかりやすいように`tuned`とつかておく。
+
+```{r}
+workflow_tuned <- 
+workflow2 %>% 
+  fit_resamples(
+    resamples = df_train_stratified_splits,
+    metrics = metric_set(accuracy),
+    control = control_resamples(save_pred = TRUE)
+  )
+```
+
+中身を確認すると、いくつかのカラムができており、内容は下記の通り。
+
+- `splits`: クロスバリデーションのために分割されたデータ
+- `id`: 分割されたデータのフォールド番号
+- `.metrics`: 評価指標の値
+- `.notes`: エラー、ワーニングなどの情報
+- `.predictions`: 評価指標を計算するために利用したデータの観測値とモデルの予測値
+
+```{r}
+workflow_tuned
+```
+
+`splits`の中身は、訓練データの分割情報が記録されている。
+
+```{r}
+workflow_tuned %>% 
+  pluck("splits", 1)
+```
+
+`.metrics`の中身は、モデルの分割データに対する評価情報が記録されている。この例だと、`accuracy`が0.79ということになる。
+
+```{r}
+workflow_tuned %>% 
+  pluck(".metrics", 1)
+```
+
+`.predictions`の中身は、予測値`.pred_class`、行番号`.row`、観測値`Status`、何番目のフォールドのモデルなのか`.config`が記録されている。
+
+```{r}
+workflow_tuned %>% 
+  pluck(".predictions", 1)
+```
+
+`collect_metrics`関数を使うことで、クロスバリデーションの結果を集計して表示してくれる。今回であれば、データを5つに分割しており、その各フォールドの結果がまとめられている。
+
+```{r}
+workflow_tuned %>%
+  collect_metrics()
+```
+
+今回はパラメタチューニングを行っていないが、ここではパラメタチューニングの結果からこのモデルが良いモデルとなったと仮定する。ワークフローを使って学習データを再学習し、モデルを構築する。そして、モデルの予測値を計算する。
+
+```{r}
+model_trained_workflow2 <- 
+  workflow2 %>% 
+    fit(df_train)
+
+model_predicted_workflow2 <- 
+  model_trained_workflow2 %>% 
+    predict(df_test)
+```
+
+
+テストの観測値とモデルの予測値を計算したいのであれば、下記の通り、`yardstick`パッケージの`accuracy`関数に渡せば良い。`df_test`の`Status`の型が文字型なので、予測値の因子型にそろえてから評価している。
+
+```{r}
+tibble(
+  obs = factor(df_test$Status, c(levels(model_predicted_workflow2$.pred_class))),
+  pred = model_predicted_workflow2$.pred_class
+  ) %>% 
+  yardstick::accuracy(truth = obs, estimate = pred)
+```
+
+下記はおまけ。最終的なモデルの変数重要度を可視化している。
+
+```{r}
+library(vip)
+
+imp_model <- model2 %>%
+  finalize_model(select_best(workflow_tuned)) %>%
+  set_engine("ranger", importance = "permutation")
+
+workflow() %>%
+  add_recipe(recipe2) %>%
+  add_model(imp_model) %>%
+  fit(df_train) %>%
+  extract_fit_parsnip() %>%
+  vip(aesthetics = list(alpha = 0.8, fill = "#006E4F")) + theme_bw()
+
+```
+
+## 参考文献
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+

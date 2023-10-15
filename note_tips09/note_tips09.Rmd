@@ -1,0 +1,371 @@
+---
+title: "funneljoinパッケージについて"
+pagetitle: "funneljoinパッケージについて"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+funneljoinパッケージについて、パッケージのGithubと開発者のブログで紹介されている内容、使い方をまとめておく。funneljoinパッケージの目的は、人がどのように動いたのか、何を行ったのか、という行動ファネルを分析するのを手助けするためのパッケージ。下記を参考にしている。今度のOsakaRのネタにしようかどうか悩み中。
+
+- [robinsones/funneljoin](https://github.com/robinsones/funneljoin)
+- [Introducing the funneljoin package](https://hookedondata.org/introducing-the-funneljoin-package/)
+
+
+```{r}
+# library(remotes)
+# install_github("robinsones/funneljoin")
+
+library(tidyverse)
+library(funneljoin)
+```
+
+パッケージのGithubにある下記の訪問履歴と登録履歴のデータをお借りして説明する。
+
+```{r}
+landed <- landed %>%
+  rename(landed_at = timestamp, user_id_x = user_id)
+ 
+registered <- registered %>%
+  rename(registered_at = timestamp, user_id_y = user_id)
+
+list(
+landed,
+registered
+)
+```
+
+## after_join関数
+dplyrパッケージのjoin関数と同じで`after_left_join()`や`after_inner_join()`などがあり、`type`を変更することで紐付け方を変更する。引数は下記の通り。
+
+|引数|内容|
+|:---|:---|
+|`by_time`|各テーブルの時間カラムを指定。datetime型のまたはdate型のカラム。時間yが時間xの後、または時間xと同じかどうかなど、フィルタリングするために使用される。|
+|`by_user`|各テーブルのユーザまたはID列を指定。一致する行のペアは同一でなければならない。|
+|`type`|"first-first"、"last-first"、"any-firstafter "など、イベントペアを区別するために使用されるファネルのタイプを指定。|
+|`suffix`|dplyrのjoin関数と同様に、両方のテーブルにあるカラム名にサフィックスを指定。|
+
+`type`は下記を指定できる。基本的には先なのか、後なのか、全部なのかなどを`first`、`last`、`any`で指定する。下記のタイプが一般的。
+
+- `first-first`: 参加前の各ユーザーの最も古い`x`と`y`を紐付ける。例えば、実験があったとして、最初の「参加」以降に、最初に「登録」した時を取得したい場合はこのタイプを利用する。この場合、登録して、実験に参加し、再び登録した場合は紐付かない。
+- `first-firstafter`: これは参加前の各ユーザーの最も古い`x`と`y`を紐付ける。例えば、実験があったとして、最初の「参加」以降に、最初に「登録」した時を取得したい場合はこのタイプを利用する。
+- `lastbefore-firstafter`: 例えば、ラストクリック型の広告アトリビューションなんかで役に立つ。最初のCVの前で、最後にクリックした広告が必要なとき。
+- `any-firstafter`: すべての`x`以降で最初の`y`が続くものを取る。例えば、誰かがホームページを訪問した回数と、その後に訪問した最初の製品ページをすべて取得したい場合など。
+- `any-any`:  すべての`x`以降ですべての`y`が続くものを取る。例えば、誰かがホームページを訪問した回数と、その後に見たすべての製品ページを表示する。
+
+文字でみてもよくわからんので、上記の5タイプを実際に動かしていく。理解をすすめるために、私が作った画像をアップしているが、作った過程で誤りがあればごめんなさい。画像のタイトルにタイプを表記しているが、意図的に括弧をつけている。これは、`lastbefore-firstafter`なんかは`before`が前のアクションのデータで、`after`がアクション後のデータと考えると、「アクション前の最後とアクション後の最初」を紐付けるタイプと解釈できるので、このようにしており、実際のタイプに無いものは空括弧にしている。
+
+また、挙動を確認するために、簡単なサンプルのデータを作っている。
+
+```{r}
+df_x <- tibble::tibble(user_id_x = 1,
+                       landed_at = seq(as.Date("2020-05-05"), by = "day", length.out = 2)
+                       )
+
+df_y <- tibble::tibble(user_id_y = 1,
+                       registered_at = seq(as.Date("2020-05-01"), by = "day", length.out = 9)
+                       )
+
+list(df_x,df_y)
+```
+
+### `first-first`
+おさらいすると、これは参加前の各ユーザーの最も古い`x`と`y`を紐付ける。例えば、実験があったとして、最初の「参加」以降に、最初に「登録」した時を取得したい場合はこのタイプを利用する。この場合、登録して、実験に参加し、再び登録した場合は紐付かない、というもの。
+
+![](/Users/aki/Documents/statistical_note/note_tips09/1firstfirst.png)
+
+```{r}
+landed %>%
+  after_left_join(registered, 
+                   by_user = c("user_id_x" = "user_id_y"),
+                   by_time = c("landed_at" = "registered_at"),
+                   type = "first-first") %>% 
+  arrange(user_id_x)
+
+```
+サンプルデータで確認してみる。
+
+```{r}
+df_x %>%
+   after_left_join(df_y, 
+                   by_user = c("user_id_x" = "user_id_y"),
+                   by_time = c("landed_at" = "registered_at"),
+                   type = "first-first")
+
+
+```
+
+### `first-firstafter`
+おさらいすると、これは参加前の各ユーザーの最も古い`x`と`y`を紐付ける。例えば、実験があったとして、最初の「参加」以降に、最初に「登録」した時を取得したい場合はこのタイプを利用する、というもの。
+
+
+![](/Users/aki/Documents/statistical_note/note_tips09/2firstfirstafter.png)
+
+```{r}
+landed %>%
+  after_left_join(registered, 
+                  by_user = c("user_id_x" = "user_id_y"),
+                  by_time = c("landed_at" = "registered_at"),
+                  type = "first-firstafter") %>% 
+  arrange(user_id_x)
+
+```
+
+サンプルデータで確認してみる。
+
+```{r}
+df_x %>%
+   after_left_join(df_y, 
+                   by_user = c("user_id_x" = "user_id_y"),
+                   by_time = c("landed_at" = "registered_at"),
+                   type = "first-firstafter")
+ 
+
+```
+
+### `lastbefore-firstafter`
+おさらいすると、これは、例えば、ラストクリック型の広告アトリビューションなんかで役に立つ。最初のCVの前で、最後にクリックした広告が必要なとき、というもの。
+
+
+![](/Users/aki/Documents/statistical_note/note_tips09/3lastbeforefirstafter.png)
+
+
+
+```{r}
+landed %>%
+  after_left_join(registered, 
+                  by_user = c("user_id_x" = "user_id_y"),
+                  by_time = c("landed_at" = "registered_at"),
+                  type = "lastbefore-firstafter") %>% 
+  arrange(user_id_x)
+
+```
+
+サンプルデータで確認してみる。このような5日と6日の場合、6日のみ6日と紐づくと思ったが、5日と6日の間に5日があるので、5日と5日が紐づく。
+
+```{r}
+df_x %>%
+   after_left_join(df_y, 
+                   by_user = c("user_id_x" = "user_id_y"),
+                   by_time = c("landed_at" = "registered_at"),
+                   type = "lastbefore-firstafter")
+
+
+```
+
+パッケージののサンプルデータでidが6だけで検証してみると、思ったとおりに動く。
+
+```{r}
+df_x2 <- tibble::tibble(user_id_x = 1,
+                       landed_at = as.Date(c("2020-07-07", "2020-07-8"))
+                       )
+
+df_y2 <- tibble::tibble(user_id_y = 1,
+                       registered_at = as.Date(c("2020-07-07", "2020-07-10")))
+
+df_x2 %>%
+  after_left_join(df_y2, 
+                  by_user = c("user_id_x" = "user_id_y"),
+                  by_time = c("landed_at" = "registered_at"),
+                  type = "lastbefore-firstafter")
+```
+
+
+```{r}
+# 8日だと7日は紐付かず、8日が8日と紐づく。
+df_x3 <- tibble::tibble(user_id_x = 1,
+                        landed_at = as.Date(c("2020-07-07", "2020-07-8"))
+                        )
+df_y3 <- tibble::tibble(user_id_y = 1,
+                        registered_at = as.Date(c("2020-07-08", "2020-07-10")))
+df_x3 %>%
+   after_left_join(df_y3, 
+                   by_user = c("user_id_x" = "user_id_y"),
+                   by_time = c("landed_at" = "registered_at"),
+                   type = "lastbefore-firstafter")
+
+```
+
+### `any-firstafter`
+おさらいすると、これは、すべての`x`以降で最初の`y`が続くものを取る。例えば、誰かがホームページを訪問した回数と、その後に訪問した最初の製品ページをすべて取得したい場合などに役立つ、というもの。
+
+![](/Users/aki/Documents/statistical_note/note_tips09/4anyfirstafter.png)
+
+```{r}
+landed %>%
+  after_left_join(registered, 
+                  by_user = c("user_id_x" = "user_id_y"),
+                  by_time = c("landed_at" = "registered_at"),
+                  type = "any-firstafter") %>% 
+  arrange(user_id_x)
+
+```
+
+サンプルデータで確認してみる。
+
+```{r}
+df_x %>%
+   after_left_join(df_y, 
+                   by_user = c("user_id_x" = "user_id_y"),
+                   by_time = c("landed_at" = "registered_at"),
+                   type = "any-firstafter")
+```
+
+### `any-any`
+おさらいすると、これはすべての`x`以降ですべての`y`が続くものを取る。例えば、誰かがホームページを訪問した回数と、その後に見たすべての製品ページを表示する、というもの。
+
+![](/Users/aki/Documents/statistical_note/note_tips09/5anyany.png)
+
+```{r}
+landed %>%
+  after_left_join(registered, 
+                  by_user = c("user_id_x" = "user_id_y"),
+                  by_time = c("landed_at" = "registered_at"),
+                  type = "any-any") %>% 
+  arrange(user_id_x)
+
+```
+
+サンプルデータで確認してみる。
+
+```{r}
+df_x %>%
+   after_left_join(df_y, 
+                   by_user = c("user_id_x" = "user_id_y"),
+                   by_time = c("landed_at" = "registered_at"),
+                   type = "any-any")
+
+```
+
+## ファネル分析
+funneljoinパッケージにはjoin関数以外にもファネル分析に特化した関数がいくつかある。サンプルデータは下記の通り。
+
+```{r}
+activity <- tibble::tribble(
+  ~ "user_id", ~ "event", ~ "timestamp",
+  1, "landing", "2019-07-01",
+  1, "registration", "2019-07-02",
+  1, "purchase", "2019-07-07",
+  1, "purchase", "2019-07-10",
+  2, "landing", "2019-08-01",
+  2, "registration", "2019-08-15",
+  3, "landing", "2019-05-01",
+  3, "registration", "2019-06-01",
+  3, "purchase", "2019-06-04",
+  4, "landing", "2019-06-13"
+)
+
+activity
+```
+
+
+`funnel_start()`は下記の引数をとる。
+
+
+|引数|内容|
+|:---|:---|
+|`tbl`| イベントのテーブル|
+|`moment_type`| ファネルにおける最初のイベント|
+|`moment`| moment_typeを示すカラム名|
+|`tstamp`| モーメントのタイムスタンプを持つカラムの名前|
+|`user`| そのモーメントを行ったユーザーを示すカラムの名前。|
+
+`funnel_start()`は、`user_ids`と`timestamp_{evrnt}`を持つテーブルを返す。
+
+```{r}
+activity %>%
+   funnel_start(moment_type = "landing", 
+                moment = "event", 
+                tstamp = "timestamp", 
+                user = "user_id")
+
+```
+
+ファネルに更にモーメントを追加するには、`funnel_step()`を使う。`funnel_start()`で各パートに使用するカラムを指定したので、必要なのは`moment_type`と`after_join()`のタイプ。`after_join()`を理解していると、わかり良い。1つのテーブルを条件ごとにテーブルを内部的に分け、`after_join()`で結合する。
+
+```{r}
+activity %>%
+   funnel_start(moment_type = "landing", 
+                moment = "event", 
+                tstamp = "timestamp", 
+                user = "user_id") %>%
+   funnel_step(moment_type = "registration",
+               type = "first-firstafter")
+
+```
+
+ファネルに更にモーメントを追加するには、再度`funnel_step()`を使う。
+
+```{r}
+activity %>%
+     funnel_start(moment_type = "landing", 
+                  moment = "event", 
+                  tstamp = "timestamp", 
+                  user = "user_id") %>%
+     funnel_step(moment_type = "registration",
+                 type = "first-firstafter") %>%
+     funnel_step(moment_type = "purchase",
+                 type = "first-any")
+
+```
+
+`funnel_step()`はモーメントをまとめて指定でき、`summarize_funnel()`を使うことでファネル分析の結果が得られる。最後に、`summaryize_funnel()`を使って、ファネルの各次のステップに何人の人が通過したのか、何％の人が通過したのかを理解することが可能。`funnel_steps()`に切り替えてコードを少し短くすることもできる。各ステップの`type`を順に与える。
+
+```{r}
+activity %>%
+     funnel_start(moment_type = "landing", 
+                  moment = "event", 
+                  tstamp = "timestamp", 
+                  user = "user_id") %>%
+     funnel_steps(moment_types = c("registration", "purchase"),
+                  type = "first-firstafter") %>%
+     summarize_funnel()
+
+```
+
+また、`first-any`のように、ユーザーに対して1つのタイプの複数のモーメントを紐付けるタイプを使用した場合、より多くの行をユーザーごとに取得することが可能。例えば、ユーザー1は2回の購入をしているので、2行を持つことになる。`timestamp_landing`と`timestamp_registration`はどちらの行も同じで、異なる`timestamp_purchase`を持つ。のべカウントか、ユニークカウントの違いに似ている。
+
+```{r}
+activity %>%
+  funnel_start(moment_type = "landing", 
+               moment = "event", 
+               tstamp = "timestamp", 
+               user = "user_id") %>%
+  funnel_steps(moment_types = c("registration", "purchase"),
+               type = "first-any")
+```
+
+```{r}
+activity %>%
+   funnel_start(moment_type = "landing", 
+                moment = "event", 
+                tstamp = "timestamp", 
+                user = "user_id") %>%
+   funnel_steps(moment_types = c("registration", "purchase"),
+                type = "first-firstafter")
+```
+
+以上で、funneljoinパッケージのまとめは終わり。ファネル分析に特化したパッケージではあるが、使い方によっては、時間経過をもつ履歴データであれば、前処理の部分で役立てることができるだし、fuzzyjoinパッケージを使って、不等号を使ってコネコネ結合していたものが、この関数で代替できる部分もあるかもしれない。

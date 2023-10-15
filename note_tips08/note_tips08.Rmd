@@ -1,0 +1,76 @@
+---
+title: "winsorization変換について"
+pagetitle: "winsorization変換について"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここではWinsorizationという変換の方法についてまとめる。
+
+## Winsorization変換
+データ分析をしていると、外れ値はやっかななわけです。外れ値の影響を大きく受けて、平均が大きくずれることもしばしば。典型的な戦略は、外れ値に該当するレコードを除外するとかですが、Winsorization変換では、指定したパーセンタイルで上限下限を設定し、外れ値を上限下限に丸める変換を行う。たとえば、90％のWinsorization変換では、5パーセンタイルより下のすべてのデータと、95パーセンタイルより上のデータが、上限下限に丸められます。
+
+## Rでやってみる
+サンプルデータとして、コーシー分布から生成される乱数を利用する。コーシー分布から乱数を生成すれば突然、極端に大きな値をとってくれるので、winsorization変換のサンプル例としてありがたい。正規分布でももちろん良い。緑の点が、90％のWinsorization変換での外れ値。
+
+```{r}
+library(tidyverse)
+set.seed(1989)
+df <- tibble(x = rcauchy(n = 500, location = 0, scale = 0.5),
+             id = 1:500) %>% 
+  mutate(outlier = if_else(x < quantile(x, probs = c(0.05, 0.95))[1] |
+                           x > quantile(x, probs = c(0.05, 0.95))[2],
+                           T,F))
+
+ggplot(df, aes(id, x, col = outlier)) + geom_point()
+```
+
+これを90％のWinsorization変換を行うと、外れ値である緑の点が上限下限に変換される。これがwinsorization変換。
+```{r}
+winsor <- function (x, probs = c(0.05, 0.95)){
+  limit <- quantile(x, probs = probs)
+  
+  x[x < limit[1]] <- limit[1]
+  x[x > limit[2]] <- limit[2]
+  x
+}
+
+df <- df %>% 
+  mutate(x_winsored = winsor(x))
+
+ggplot(df, aes(id, x_winsored, col = outlier)) + geom_point()
+```
+
+このwinsorization変換を使って、ユーザーをスコアリングしたりする。AppやHP上での各アクションにスコアをつけ、そのアクションを直近nヶ月以内に実行した回数と掛け合わせて、各ユーザーのスコアリングを行う。こうすることで、極端にスコアが低い(高い顧客)を除くことができる。今回はここまで。
+
+## 参照サイト
+
+- [Winsorizing](https://en.wikipedia.org/wiki/Winsorizing)
+- [winsorization](https://www.r-bloggers.com/winsorization/)
+
+
+

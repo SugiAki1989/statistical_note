@@ -1,0 +1,435 @@
+---
+title: "TidyModels: tune/dialsパッケージ"
+pagetitle: "TidyModels: tune/dialsパッケージ"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+`tidymodels`パッケージの使い方をいくつかのノートに分けてまとめている。`tidymodels`パッケージは、統計モデルや機械学習モデルを構築するために必要なパッケージをコレクションしているパッケージで、非常に色んなパッケージがある。ここでは、今回は`tune/dials`というパッケージの使い方をまとめていく。モデルの数理的な側面や機械学習の用語などは、このノートでは扱わない。
+
+下記の公式ドキュメントや`tidymodels`パッケージに関する書籍を参考にしている。
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+## `tune`と`dials`パッケージの目的
+
+`tune`パッケージは、`tidymodels`パッケージを利用したモデリングにおいて、ハイパーパラメーターのチューニングを効率よく実行するためのパッケージで、`dials`パッケージは、同じくチューニングパラメーターの値を作成および管理することを目的としている。`tidymodels`パッケージでモデリングする際は、これらのパッケージを利用することで効率よくハイパーパラメーターのチューニングを行える。
+
+公式ドキュメントは下記の通り。
+
+- [tune](https://tune.tidymodels.org/)
+- [dials](https://dials.tidymodels.org/)
+
+パッケージやモデリングの作業と関連づけるために色々してたせいで、変数名がワケワカメなのはご愛嬌…。
+
+## `tune/dials`パッケージの実行例
+
+`tune/dials`パッケージの基本的な利用方法を確認する前に、必要なオブジェクトを定義しておく。関数の使い方をまとめることが目的なので、ここでは動けば良い程度にレシピを作成しておく。
+
+```{r}
+library(tidymodels)
+library(tidyverse)
+df_past <- read_csv("https://raw.githubusercontent.com/SugiAki1989/statistical_note/main/note_TidyModels00/df_past.csv")
+
+# rsample
+set.seed(1989)
+df_initial <- df_past %>% initial_split(prop = 0.8, strata = "Status")
+df_train <- df_initial %>% training()
+df_test <- df_initial %>% testing()
+
+set.seed(1989)
+df_train_stratified_splits <- 
+  vfold_cv(df_train, v = 5, strata = "Status")
+
+# recipes
+recipe <- recipe(Status ~ ., data = df_train) %>% 
+  step_impute_bag(Income, impute_with = imp_vars(Marital, Expenses)) %>% 
+  step_impute_bag(Assets, impute_with = imp_vars(Marital, Expenses, Income)) %>% 
+  step_impute_bag(Debt, impute_with = imp_vars(Marital, Expenses, Income, Assets)) %>% 
+  step_impute_bag(Home, impute_with = imp_vars(Marital, Expenses, Income, Assets, Debt)) %>% 
+  step_impute_bag(Marital, impute_with = imp_vars(Marital, Expenses, Income, Assets, Debt, Home)) %>% 
+  step_impute_bag(Job, impute_with = imp_vars(Marital, Expenses, Income, Assets, Debt, Home, Marital))
+```
+
+ハイパーパラメータのチューニングを行う場合、モデルの設定段階で、パラメタを定数で設定するのではなく、`tune`関数を利用してモデル設定を行う必要がある。ランダムフォレストの各パラメタの簡単な説明は下記のとおり。
+
+- `mtry`: 各決定木が使用する特徴量の数を指定する。ランダムフォレストでは、各決定木を作成する際に、特徴量をランダムに選択して使用するため、`mtry`で指定された数の中から、ランダムに選択される特徴量の数を決定する。
+
+- `min_n`: 各決定木が分割する前に保持する最小サンプルサイズを指定する。`min_n`を小さくすることで、各決定木の複雑度を増やすことができる一方で、`min_n`を小さくすると、各決定木が少ないサンプルで訓練されるため、過学習の可能性が増える。
+
+- `trees`: ランダムフォレストに含まれる決定木の数を指定する。`trees`を増やすことで、ランダムフォレストの汎化性能を高めることができる一方で、`trees`を増やすと、訓練時間が長くなる。
+
+```{r}
+# parsnip
+model <- rand_forest(mtry = tune(), trees = tune(), min_n = tune()) %>%
+  set_engine("ranger", importance = "permutation") %>%
+  set_mode("classification")
+
+workflow <- workflow() %>% 
+  add_recipe(recipe) %>% 
+  add_model(model)
+```
+
+次は探索グリッドを作成する。ワークフローをモデル設定とレシピを利用して作成し、追加でパラメタ関連の設定を行なうが、モデルに対してデフォルトで探索範囲が決まっていることもある。`extract_parameter_set_dials`関数で確認できる。
+
+```{r}
+workflow %>% 
+  extract_parameter_set_dials()
+```
+
+3つのパラメタがチューニング対象になっており、`object`列を見ると、`?`や`+`が表示されている。各詳細を確認するためには、`extract_parameter_dials`関数でパラメタ名を指定する。
+
+`mtry`は`[1,?]`となっており、各決定木が使用する特徴量の数の上限が決まっていないことを表している。他のパラメタは下限と上限がデフォルトで定まっている。つまり、`mtry`の上限はデータセットの内容に応じて変化するので、デフォルトでは設定されていない。
+
+```{r}
+map(
+  .x = c("mtry", "trees", "min_n"),
+  .f = function(x){
+    workflow %>% 
+      extract_parameter_set_dials() %>% 
+      extract_parameter_dials(x)
+  }
+)
+```
+
+デフォルトで設定されていないパラメタの範囲を決める必要がある。パラメタの範囲を更新する際は`update`関数を利用すればよい。
+
+```{r}
+map(
+  .x = c("mtry", "trees", "min_n"),
+  .f = function(x){
+  workflow %>% 
+    extract_parameter_set_dials() %>% 
+    update(
+      mtry = mtry(range = c(5, 10)),
+      trees = trees(range = c(500, 1000)),
+      min_n = min_n(range = c(50, 100)),
+      ) %>%
+    extract_parameter_dials(x)}
+)
+
+```
+
+今回の`mtry`のようなデータに合わせてパラメタを設定したいときは、`finalize`関数と訓練データを渡すことで、よしなに設定してくれる。
+
+`finalize`関数の中の部分では、ターゲットの目的変数を除外して、レシピで設定している前処理を実行して、カラム数を確定させている。ここではカラム数だけわかればよいので、`slice`関数でレコードを減らしている。前処理が重たいと、`bake`関数の処理に時間がかかることを避けるために行った(1行とかにすると、前処理で使用している関数によっては警告やエラーが出るかも)。
+
+```{r}
+map(
+  .x = c("mtry", "trees", "min_n"),
+  .f = function(x){
+  workflow %>% 
+    extract_parameter_set_dials() %>% 
+    update(
+      trees = trees(range = c(500, 1000)),
+      min_n = min_n(range = c(50, 100)),
+      ) %>%
+    finalize(
+      recipe %>% 
+        prep() %>% 
+        bake(df_train %>% select(-Status) %>% dplyr::slice(1:3))
+    ) %>% 
+    extract_parameter_dials(x)}
+)
+
+```
+
+パラメタグリッドを作成するときは、`grid_regular`関数を利用する。`levels`引数は各パラメタが取れる値の数を決めるもので、今回の場合であれば、パラメタが3つで、取れるレベルが2つなので、`2^3=8`のグリッド作成される。
+
+```{r}
+workflow %>% 
+  extract_parameter_set_dials() %>% 
+  update(
+    mtry = mtry(range = c(5, 10)),
+    trees = trees(range = c(500, 1000)),
+    min_n = min_n(range = c(50, 100)),
+    ) %>% 
+  grid_regular(levels = 2)
+```
+
+グリッドの作成方法を変える場合は下記の関数を利用できる。
+
+- ランダムグリッド: `grid_random(size = n)`関数
+- ラテンハイパーキューブ: `grid_latin_hypercube(size = n)`関数
+- 最大エントロピー: `grid_max_entropy(size = n)`関数
+
+ではグリッドを作成してハイパーパラメータのチューニングを行う。モデルとレシピがまとまっているワークフローを利用して、モデル情報を使ってグリッドを作成する。
+
+```{r}
+set.seed(1989)
+hyper_parameter_grid <- workflow %>% 
+  extract_parameter_set_dials() %>% 
+  update(
+    mtry = mtry(range = c(5, 10)),
+    trees = trees(range = c(500, 1000)),
+    min_n = min_n(range = c(50, 100)),
+    ) %>% 
+  grid_regular(levels = 2)
+hyper_parameter_grid
+```
+
+前回までのようにパラメタが固定されていれば、`fit_resamples`関数でクロスバリデーションを行うことができたが、今回はモデル設定でパラメタには`tune`関数を指定しているため、`fit_resamples`関数を使うことはできない。
+
+```{r, eval=FALSE}
+workflow %>% 
+  fit_resamples(
+    resamples = df_train_stratified_splits,
+    metrics = metric_set(accuracy),
+    control = control_resamples(save_pred = TRUE)
+  )
+
+Error:
+! 3 arguments have been tagged for tuning in these components: model_spec. 
+Please use one of the tuning functions (e.g. `tune_grid()`) to optimize them.
+Run `rlang::last_error()` to see where the error occurred.
+```
+
+そのため、エラー文にもあるように、`tune_grid`関数を利用する。
+
+```{r}
+workflow_tuned <- 
+  workflow %>% 
+    tune_grid(
+      resamples = df_train_stratified_splits,
+      grid = hyper_parameter_grid,
+      metrics = metric_set(accuracy),
+      control = control_resamples(
+        extract = extract_model, # 出力の.extractsに対応
+        save_pred = TRUE         # 出力の.predictionsに対応
+        )
+    )
+```
+
+中身を確認すると、いくつかのカラムができており、内容は下記の通り。
+
+- `splits`: クロスバリデーションのために分割されたデータ
+- `id`: 分割されたデータのフォールド番号
+- `.metrics`: 評価指標の値
+- `.notes`: エラー、ワーニングなどの情報
+- `.extracts`: 各パラメタのグリッドに応じたモデルの情報
+- `.predictions`: 評価指標を計算するために利用したデータの観測値とモデルの予測値
+
+ハイパーパラメータチューニング(`grid = 8`)のグリッド数と5フォールドクロスバリデーション(`cv = 5`)を利用しているので少し出力が複雑ではあるが、合計40行が出力されることになる。
+
+つまり、1つのパラメタの組み合わせを5つのフォールドに対して行なうため、評価指標は5レコード分作成される。これをパラメタの組み合わせ分として8回繰り返す。`pluck(".metrics", 1)`で表示されるのは8つのパラメタ組み合わせの1つ目のフォールの評価結果。
+
+```{r}
+workflow_tuned %>% 
+  pluck(".metrics", 1)
+```
+
+`.extracts`にはモデルの情報が格納されている。
+
+```{r}
+workflow_tuned %>% 
+  pluck(".extracts", 1)
+```
+
+`.predictions`の中身は、予測結果が記録されている。`.predictions`の中身は、予測値`.pred_class`、行番号`.row`、観測値`Status`、何番目のフォールドのモデルなのか`.config`が記録されている。
+
+5136行あるのは、1つのフォールドの評価データは642行だが、8つのパラメタの組み合わせ分が計算されているので、`642 × 8 = 5136`レコードとなる。
+
+```{r}
+workflow_tuned %>% 
+  pluck(".predictions", 1)
+```
+
+評価結果をまとめると、さきほほどの話はわかりよい。
+
+```{r}
+map_dfr(
+  .x = 1:nrow(df_train_stratified_splits),
+  .f = function(x){workflow_tuned %>% pluck(".metrics", x)}
+  ) %>% 
+  arrange(.config) %>% 
+  print(n = 50)
+```
+
+この評価データを平均すれば、各パラメタで学習したモデルの評価が得られる。
+
+```{r}
+map_dfr(
+  .x = 1:nrow(df_train_stratified_splits),
+  .f = function(x){workflow_tuned %>% pluck(".metrics", x)}
+  ) %>% 
+  # .configだけでもよいが、パラメタの数字を明示するために下記を利用
+  group_by(.config, mtry, trees, min_n) %>% 
+  summarise(mean_accuracy = mean(.estimate), n = n())
+```
+
+手計算しなくても`collect_metrics`関数を使うことで、各パラメタのクロスバリデーションの結果を集計して表示してくれる。今回であれば、データを5つに分割しており、その各フォールドの結果がまとめられている。結果を見ると`Preprocessor1_Model4`の`accuracy`が高いので、ベターなパラメタの組み合わせは`mtry = 10 & trees = 1000	& min_n = 50`である。
+
+```{r}
+workflow_tuned %>%
+  collect_metrics() %>% 
+  arrange(desc(mean))
+```
+
+自分で並び替えずとも、`show_best`関数を利用すると集計後の結果を上位順で表示してくれる。
+
+```{r}
+workflow_tuned %>% 
+  show_best(n = 5, metric = "accuracy")
+```
+
+パラメタチューニングの結果を可視化したいときは、`autoplot`関数を利用する。自分で作成せず、`autoplot`関数で作成するので、ぱっと見てもよくわからないが、縦軸は`accuracy`、横軸は`mtry`である。まずは色分けに着目する。緑が`trees = 1000`の場合で、赤が`trees = 500`の場合なので、これは緑のほうが良い。左の赤線をのぞいて、`mtry`は高いほうが良い。一方で、`min_n`が小さく、`trees`も少ないが、`mtry`を大きくすると、性能が悪くなることがわかる。
+
+```{r}
+autoplot(workflow_tuned) + theme_bw()
+```
+
+良き評価指標のモデルを取り出すには`select_best`関数を利用する。ベターなパラメタの組み合わせである`mtry = 10 & trees = 1000	& min_n = 50`が取り出されている。
+
+```{r}
+better_paramters <- workflow_tuned %>% 
+  select_best(metric = "accuracy")
+better_paramters
+```
+
+パラメタチューニングまで終わったので、ここではベターなモデルで訓練データ全体を使って学習し直す方法でモデルを再学習する。先程のパラメタを使ってモデル設計をし直す必要はなく、`finalize_workflow`関数をすれば、ベターモデルでワークフローを更新できる。
+
+```{r}
+better_workflow <- workflow %>% 
+  finalize_workflow(parameters = better_paramters)
+
+better_workflow
+```
+
+ワークフローでは、1つのパラメタに固定値を2つ以上設定することはできないので、複数のモデルからアンサンブルする場合などはワークフローに別々のパラメタを設定する必要がある。
+
+```{r, eval=FALSE}
+workflow %>% 
+  finalize_workflow(
+    parameters = workflow_tuned %>% show_best(n = 2, metric = "accuracy") %>% select(mtry, trees, min_n)
+    )
+
+Error in `check_final_param()`:
+! The parameter tibble should have a single row.
+Backtrace:
+ 1. workflow %>% ...
+ 2. tune::finalize_workflow(...)
+ 3. tune:::check_final_param(parameters)
+```
+
+ベターなパラメタを用いてワークフローを更新したので、そのワークフローで訓練データを使って再学習を行なう。
+
+```{r}
+set.seed(1989)
+model_trained_better_workflow <- 
+  better_workflow %>% 
+  fit(df_train)
+
+model_trained_better_workflow
+```
+
+再学習されたモデルでテストデータの値を予測する。ここでは予測クラスと予測確率を計算する。
+
+```{r}
+model_predicted_better_workflow <- 
+  tibble(
+    model_trained_better_workflow %>% predict(df_test, type = "class"),
+    model_trained_better_workflow %>% predict(df_test, type = "prob")
+    ) %>% 
+  bind_cols(obs = factor(df_test$Status, c(levels(.$.pred_class))))
+
+model_predicted_better_workflow
+```
+
+最終的なテストデータに対する、`accuracy`の数値は下記の通り。
+
+```{r}
+model_predicted_better_workflow %>% 
+  yardstick::accuracy(truth = obs, estimate = .pred_class)
+```
+
+再学習したモデルの変数重要度はこちら。
+
+```{r}
+library(vip)
+model_trained_better_workflow %>%
+  extract_fit_parsnip() %>%
+  vip(aesthetics = list(alpha = 0.8, fill = "#006E4F")) + theme_bw()
+```
+
+## グリッドがない場合の挙動
+
+ここまでの例では、下記の通りパラメタグリッドを用意してからチューニングを行っていたが、グリッドを用意しない場合、どのようになるのか。
+
+```{r}
+hyper_parameter_grid
+```
+
+現状のワークフローは、`mtry`は上限がきまってなく、`trees`と`min_n`は下限、上限が決まっている状態。
+
+```{r}
+map(
+  .x = c("mtry", "trees", "min_n"),
+  .f = function(x){
+    workflow %>% 
+      extract_parameter_set_dials() %>% 
+      extract_parameter_dials(x)
+  }
+)
+```
+
+ドキュメントによると、どうやらグリッドが提供されない場合、ラテンハイパーキューブによってグリッドが作成されるとのこと。
+
+> A data frame of tuning combinations or a positive integer. The data frame should have columns for each parameter being tuned and rows for tuning parameter candidates. An integer denotes the number of candidate parameter sets to be created automatically.
+チューニングの組み合わせのデータフレーム、または正の整数。データフレームは，調整中の各パラメータの列と，調整パラメータ候補の行を持つ必要がある。整数は，自動的に作成されるパラメータセット候補の数を表す．
+
+> Parameter Grids
+If no tuning grid is provided, a semi-random grid (via dials::grid_latin_hypercube()) is created with 10 candidate parameter combinations.
+調整用グリッドが提供されない場合、半ランダムグリッド (dials::grid_latin_hypercube() による) が、10個のパラメータ候補の組み合わせで作成されます。
+
+```{r}
+set.seed(1989)
+workflow_tuned_no_grid <- 
+  workflow %>% 
+    tune_grid(
+      resamples = df_train_stratified_splits,
+      metrics = metric_set(accuracy),
+      grid = 10,
+      control = control_resamples(
+        extract = extract_model, # 出力の.extractsに対応
+        save_pred = TRUE         # 出力の.predictionsに対応
+        )
+    )
+
+workflow_tuned_no_grid %>%
+  pluck(".extracts", 1) %>% 
+  arrange(mtry)
+```
+
+## 参考文献
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+

@@ -1,0 +1,100 @@
+---
+title: "ロジスティク回帰と最尤法"
+pagetitle: "ロジスティク回帰と最尤法"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではロジスティク回帰モデルのパラメタを最尤法で計算する方法についてまとめておく。この記事は以前ブログに書いたものを転記しただけで追記も何もしていない。
+
+## ロジスティク回帰モデル
+
+数理部分は、下記を参照しました。パラメタを推定するところは`、optim()`を使いました。
+
+- [機械学習のエッセンス実装しながら学ぶPython、数学、アルゴリズム](https://www.sbcr.jp/product/4797393965/)
+
+```{r}
+library(tidyverse)
+set.seed(1989)
+df <-  tibble(y = sample(c(0, 1), 10, replace = TRUE),
+              x1 = rnorm(10),
+              x2 = rnorm(10))
+
+X <- df %>% select(starts_with("x"))
+y <- df %>% select(y)
+
+
+# Sigmoid function
+sigmoid <- function(x) {
+  1.0 / (1.0 + exp(-x))
+}
+
+# Cost function
+cost_func <- function(theta, X, y){
+  h <- sigmoid(X %*% theta)
+  cost <- -1*(t(y) %*% log(h) + t(1-y) %*% log(1-h)) 
+  cost
+}
+
+# Gradient function
+gradient <- function(theta, X, y){
+  h <- sigmoid(X %*% theta)
+  grad <- (t(X) %*% (h - y)) 
+  grad
+}
+
+log_reg <- function(X, y){
+  # Add intercept and convert matrix
+  X <- X %>% mutate(alpha = 1) %>% select(alpha, everything()) %>% as.matrix()
+  y <- y %>% as.matrix()
+  # Initialize parms
+  theta <- matrix(rep(0, ncol(X)), nrow = ncol(X))
+  # Optimize by BFGS(準ニュートン法)
+  res_opt <- optim(par = theta, fn = cost_func, gr = gradient, X = X, y = y, method = "BFGS")
+  # Get parms
+  return(res_opt$par)
+}
+```
+
+実行結果はこちら。
+
+```{r}
+log_reg(X = X, y = y)
+```
+
+`glm()`の結果と一緒みたいなのでOKでしょう。
+
+```{r}
+g <- glm(y ~ x1 + x2, data = df, family = binomial(link = "logit"))
+g$coefficients %>% as.matrix()
+```
+
+
+## 参考文献
+
+- [機械学習のエッセンス実装しながら学ぶPython、数学、アルゴリズム](https://www.sbcr.jp/product/4797393965/)

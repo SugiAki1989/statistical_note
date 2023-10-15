@@ -1,0 +1,157 @@
+---
+title: "生存時間アウトカムとサンプルサイズ設計"
+pagetitle: "生存時間アウトカムとサンプルサイズ設計"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、生存時間アウトカムに応じたサンプルサイズ設計の方法をまとめている。基本的には、下記の書籍を参考にまとめている。
+
+- [医学のためのサンプルサイズ設計](https://www.kyoto-up.or.jp/9784814003822.html)のp149
+
+また、サンプルサイズ設計の基本となるサンプルサイズの計算式や基本的な事項は、[このあたり](https://github.com/SugiAki1989/statistical_note#%E7%B5%B1%E8%A8%88%E5%AD%A6)か、下記を参照のこと。
+
+- [α と β と n の話](https://sugiaki1989.github.io/statistical_note/note_pvalue03/note_pvalue03.html)
+- [サンプルサイズの大きさの決め方](https://sugiaki1989.github.io/statistical_note/note_pvalue05/note_pvalue05.html)
+
+## 生存時間アウトカムのサンプルサイズ設計
+
+生存時間アウトカムとは、名前の通り生存している時間にイベントが発生するかどうかを目的としているアウトカムのこと。グループの比較でアウトカムを記述する際は、瞬間的なイベント発生率の比であるハザード比が利用される。ハザード比=1の帰無仮説をログランク検定やCox比例ハザードモデルで検討することが一般的。
+
+生存時間のデータは打ち切りがあることが一般的なので、必要なイベント数$E$を求めるために、必要な対象者数$N$を決めることになる。観察終了日を固定するのではなく、$N$人を選び、必要なイベント数$E$を観察するまで続ける。そのデータをもとに、死亡率であるハザード比が等しいという帰無仮説、生存曲線でのログランク検定やCox比例ハザードモデルで検討する。
+
+関心のあるイベントが1つで、2つの介入($S, T$)があり、各生存分布は瞬間的に死亡が生じる発生率は異なるが、一定の$\lambda_{S}, \lambda_{T}$を持つと仮定する。
+
+瞬間死亡率は単位時間あたりの死亡の確率であり、ハザードと呼ばれる。生存時間の分布は指数分布やワイブル分布などが仮定されることが多い。指数分布を仮定すると、時間$t$におけるハザードが$\lambda_{S}$であるような介入$S$の生存関数は、
+
+$$
+S_{s}(t) = \exp(-\lambda_{S}t) \quad \lambda_{S} > 0, t \ge 0
+$$
+
+であり、ハザード$\lambda_{S}$、ある時点$\tau$における生存割合$\pi_{S}(\tau)$、生存時間中央値$M_{S}$の関係は下記のようになる。介入$T$でも同様である。生存期間中央値(Median Survival Time:MS)とは、その集団の50％の観察対象者にイベントが起こるまでの期間を示す。例えば100人が対象で、50人目にイベントが発生した時点が生存期間中央値であり、MSTが12ヶ月というと、12ヶ月経過時点で半分はイベントが発生していることを意味する。
+
+$$
+\lambda_{S} = \frac{- log \pi_{S}(\tau)}{\tau} = \frac{-log(0.5)}{M_{S}}
+$$
+
+ハザード比は、
+
+$$
+HarzardRatio = \frac{\lambda_{T}}{\lambda_{S}} = \frac{log(\pi_{T})}{log(\pi_{S})} = \color{red}{\frac{M_{S}}{M_{T}}}
+$$
+
+であり、指数分布を仮定すると、$\frac{log(\pi_{T})}{log(\pi_{S})}$の比はどの時点でも等しく、時間要素$\tau$がなくなる。分子分母の$S,T$が反対になるので注意。
+
+- $\lambda_{S} > \lambda_{T}$のとき$HR < 1$
+- $\lambda_{S} < \lambda_{T}$のとき$HR > 1$
+
+つまり、サンプルサイズ設計には$\lambda_{S}, \lambda_{T}, \pi_{S}, \pi_{T}$または$M_{S}, M_{T}$の想定値が必要になる。$\pi_{S}$から$ \pi_{T}$を計算することも可能。
+
+$$
+ \pi_{T} = \exp(HR log × \pi_{S})
+$$
+
+
+試験に参加した対象者が2つの介入のうち、1つを$1:\varphi$の比でランダムに受けると仮定し、$HR_{plan}$、両側有意水準$\alpha$、検出力$1-\beta$を想定すると、イベント数を見積れる。Schoenfeldの方法は
+
+$$
+E = \frac{(1 + \varphi)^{2}}{\varphi} \frac{(z_{1-\alpha/2} + z_{1-\beta})^{2}}{(logHR_{plan})^{2}}
+$$
+
+であり、Freedmanの方法は
+
+$$
+E = \frac{1}{\varphi} \left(\frac{1 + \varphi HR_{plan}}{1 - HR_{plan}}\right)^{2}(z_{1-\alpha/2} + z_{1-\beta})^{2}
+$$
+
+である。ここから、対象者数を計算することになる。上記の式は、効果の大きさ$HR_{plan}$しか含まないので、これを決めることができればイベント数$E$を計算できる。ただ、$\pi_{S},\pi_{T}$の想定値が必要になるが、これは時間経過とともに変化しうるので、適当な時点を分析者が選ぶ必要がある。$\psi_{plan}$はイベントを経験するであろう想定の割合。
+
+$$
+\begin{eqnarray}\
+N &=& \frac{(1 + \varphi) E}{\psi_{plan}} \\
+\psi_{plan} &=& (1- \pi_{S}) + \varphi(1 - \pi_{T})
+\end{eqnarray}
+$$
+
+## サンプルサイズの計算
+
+[医学のためのサンプルサイズ設計](https://www.kyoto-up.or.jp/9784814003822.html)のp165の「2型糖尿病発症の予防を目的とした研究」の数値をお借りして、実際にサンプルサイズを計算する。
+
+RM群が介入群でプラセボ群がコントロール群としている。生存期間中央値が必要になるが、書籍ではRM群は`HR=0.545`だけ遅れると記載されているため、プラセボ群の$M_{S}=6.25$逆算して`6.25/0.545=11.46789`として、$M_{T}=11.46789$としている。
+
+- $M_{S}=6.25$
+- $M_{T}=11.46789$
+- $\alpha=0.05$
+- $1-\beta=0.80$
+- $\varphi=1$
+- $\pi_{S}=0.5$
+- $\pi_{T}=0.68$
+
+サンプルサイズを得るためには生存割合$\pi_{S}, \pi_{T}$を示す必要があり、プラセボ群における中央値$M_{S}=6.25$での生存が想定される対象者の生存割合を設定する必要があり、プラセボ群では$\pi_{S}=0.5$となる。必要な数値は出揃ったので、サンプルサイズを計算する。
+
+```{r}
+# 標準治療群
+med_s <- 6.25
+# 試験治療群
+med_t <- 11.46789
+# 生存時間中央値を利用
+hr <- med_s/med_t
+# 標準治療群に対する試験治療群の割付比	
+phi <- 1
+
+# 両側有意水準、検出力
+alpha <- 0.05
+beta <- 0.20
+za <- qnorm(1 - alpha/2, 0, 1)
+zb <- qnorm(1 - beta, 0, 1)
+
+# イベント数
+n_event <- 1/phi * ((1 + phi*hr)/(1 - hr))^2 * (za + zb)^2
+ceiling(n_event)
+```
+
+糖尿病を発症する期待患者数は91人となった。ここから必要なサンプルサイズを計算すると、必要な患者数は224人となる。
+
+```{r}
+pi_s <- 0.5
+pi_t <- exp(hr * log(pi_s))
+psi <- (1 - pi_s) + phi * (1 - pi_t)
+n_total <- ((1 + phi) * ceiling(n_event)) / psi
+ceiling(n_total)
+```
+
+各群に均等に割り付けると、各群で112人がランダムに割り付けられる必要がある。
+
+```{r}
+n_each <- n_total/2
+ceiling(n_each)
+```
+
+## 参考文献
+
+- [医学のためのサンプルサイズ設計](https://www.kyoto-up.or.jp/9784814003822.html)

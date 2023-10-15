@@ -1,0 +1,155 @@
+---
+title: "信頼区間推定とモデルの依存度に関するまとめ"
+pagetitle: "信頼区間推定とモデルの依存度に関するまとめ"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+黒木先生の下記のノートが勉強になったので、ノートを参考に自分でも試してみた。
+モデルや仮定を今以上に意識しないといけない・・・自戒。
+
+- [母平均の仮説検定と区間推定](https://nbviewer.jupyter.org/github/genkuroki/Statistics/blob/master/Hypothesis%20test%20and%20interval%20estimation%20for%20population%20mean.ipynb#%E6%AF%8D%E5%B9%B3%E5%9D%87%E3%81%AE%E4%BF%A1%E9%A0%BC%E5%8C%BA%E9%96%93)
+
+下記では、標準正規分布から乱数を発生させて信頼区間を確認、二峰性分布から乱数を発生させて 正規分布モデルに基いた区間推定が破綻するかを確認している。
+
+サンプルサイズは100で、シミュレーション回数は1000としている。二峰性分布の設定は、母集団のうち95%は標準正規分布に、残りの5%は平均50、分散1の正規分布に従っているとした。
+
+```{r}
+library(tidyverse)
+# Set parameter
+N   <- 100
+M1  <- 0
+S1  <- 1
+M2  <- 50
+S2 <- 1
+P1 <- 0.95
+P2 <- 0.05
+M <- M1*P1 + M2*P2
+sim_n <- 1:1000
+```
+
+## 標準正規分布を使ったシミュレーション
+一般的に言われる、100回信頼区間を計算したら95回は$\mu$を含むというよう説明に合う結果が得られている。
+
+```{r}
+# Simulation 1: y ~ nromal(mu = 0, sd = 1)
+res_mean <- res_ci_lwr <- res_ci_upr <- vector(mode = 'numeric', length = length(sim_n))
+for (i in seq_along(sim_n)) {
+  set.seed(i)
+  data <- rnorm(n = N, mean = M1, sd = S1)
+  res_test <- t.test(data, conf.level = 0.95)
+  res_mean[[i]]   <- res_test$estimate[[1]]
+  res_ci_lwr[[i]] <- res_test$conf.int[[1]]
+  res_ci_upr[[i]] <- res_test$conf.int[[2]]
+}
+
+# Make data frame
+df <- tibble::tibble(id = sim_n,
+           mean = res_mean,
+           ci_lwr = res_ci_lwr,
+           ci_upr = res_ci_upr) %>% 
+  dplyr::mutate(is_in = if_else(M1 >= ci_lwr & M1 <= ci_upr, 'in', 'out'))
+
+# Count intervals which is in teh range
+df %>% 
+  dplyr::count(is_in) %>%
+  dplyr::mutate(ratio = n / sum(n))
+```
+
+シミュレーションを可視化しておく。
+
+```{r}
+# Plot simulation
+ggplot(df, aes(id, mean, col = is_in)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = ci_lwr, ymax = ci_upr)) + 
+  geom_hline(yintercept = M1) +
+  theme_classic()
+```
+
+
+## 二峰性分布を使ったシミュレーション
+二峰性分布を可視化しておく。
+
+```{r}
+# Bimodal distribution
+x1 <- rnorm(n = 100, mean = M1, sd = S1)
+x2 <- rnorm(n = 100, mean = M2, sd = S2)
+w  <- rbinom(n = 100, size = 1, prob = P1)
+x  <- w * x1 + (1 - w) * x2
+
+ggplot(data = tibble(x = x), aes(x, y = ..density.., col = 1, fill = 1)) + 
+  geom_histogram(position = 'identity', binwidth = 0.5, alpha = 1/2) + 
+  geom_density(alpha = 1/2) + 
+  theme_classic() +
+  theme(legend.position = 'none') +
+  xlim(c(-5, 60)) + 
+  ggtitle('Normal Mixture')
+```
+
+
+サンプルサイズを100にしているので、82/1000という割合ではあるが、サンプルサイズが少なくなると、小さな外れ値のような分布の値が含まれず、信頼区間が\\( \mu \\)を含まない割合が多くなる。
+
+```{r}
+# Simulation 2: y ~ Bimodal distribution
+res_mean <- res_ci_lwr <- res_ci_upr <- vector(mode = 'numeric', length = length(sim_n))
+for (i in seq_along(sim_n)) {
+  set.seed(i)
+  x1 <- rnorm(n = N, mean = M1, sd = S1)
+  x2 <- rnorm(n = N, mean = M2, sd = S2)
+  w  <- rbinom(n = N, size = 1, prob = P1)
+  data  <- w * x1 + (1-w) * x2
+  res_test <- t.test(data, conf.level = 0.95)
+  res_mean[[i]]   <- res_test$estimate[[1]]
+  res_ci_lwr[[i]] <- res_test$conf.int[[1]]
+  res_ci_upr[[i]] <- res_test$conf.int[[2]]
+}
+
+# Make dataframe
+df_bimodal <- tibble::tibble(id = sim_n,
+                     mean = res_mean,
+                     ci_lwr = res_ci_lwr,
+                     ci_upr = res_ci_upr) %>% 
+  dplyr::mutate(is_in = if_else(M >= ci_lwr & M <= ci_upr, 'in', 'out'))
+
+# Count intervals which is in teh range
+df_bimodal %>% 
+  dplyr::count(is_in) %>%
+  dplyr::mutate(ratio = n / sum(n))
+
+```
+
+なるほど、面白い。たしかに、データがどのような母集団から生成されているのを無視して、正規分布を仮定するモデルを使用するのは危険である。
+
+```{r}
+# Plot simulation
+ggplot(df_bimodal, aes(id, mean, col = is_in)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = ci_lwr, ymax = ci_upr), width = .1) + 
+  geom_hline(yintercept = M) +
+  theme_classic()
+```

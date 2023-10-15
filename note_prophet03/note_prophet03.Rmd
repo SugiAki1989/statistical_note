@@ -1,0 +1,257 @@
+---
+title: "prophetの変化点"
+pagetitle: "prophet03"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: TRUE
+    code_folding: "show"
+    highlight: "zenburn"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、下記のドキュメントを参考に、`prophet`パッケージの基本的な使い方をおさらいすることを目的としています。ゆくゆくは外部予測変数を追加したモデルやクロスバリデーション、パラメタチューニングなどなど、モデルを発展させながら使用方法をまとめていきます。
+
+- [Prophet | Forecasting at scale](https://facebook.github.io/prophet/docs/quick_start.html#r-api)
+
+モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。非常にわかりやすいです。
+
+- [Forecasting at scale](https://peerj.com/preprints/3190/)
+- [Prophet入門【理論編】Facebookの時系列予測ツール](https://www.slideshare.net/hoxo_m/prophetfacebook)
+- [Prophetのモデル式を1から理解する](https://devblog.thebase.in/entry/2019/12/20/110000_1)
+- [fb Prophetの解剖で学ぶベイズ時系列モデリング](https://ill-identified.hatenablog.com/entry/2018/05/28/020224)
+
+# ライブラリと関数の読み込み
+
+```{r}
+library(prophet)
+library(tidyverse)
+library(patchwork)
+
+head_tail <- function(data, n = 5){
+  stopifnot(is.data.frame(data))
+  head(data, n = n) %>% print()
+  cat(paste(rep("-", 100), collapse = ""), "\n")
+  tail(data, n = n) %>% print()
+}
+```
+
+# prophetの変化点
+
+Prophetではどのように変化点を検知しているのか、今回はその点について見ていきます。デフォルト設定では、自動的に変化点を検知するようになっていますが、データに過学習しているとき、変化を捉えられていないときなど、新製品の発売日やイベントなどの既知の日付を使用して設定することで変化点を調整することが可能です。
+
+$$
+g(t) = \frac{C_{t}}{ 1 + exp(-(k + \boldsymbol{a}(t) \cdot \boldsymbol{\delta^{ \mathrm{T}}}) (t - (m + \boldsymbol{a}(t) \cdot \boldsymbol{\gamma^{ \mathrm{T}}}))}
+$$
+
+論文で説明されている内容を読むと、Prophetの変化点の自動検知は、大量の潜在的な変化点を可能な範囲で検知することから始まり、上記の式の変化率$\delta_{j}$に、スパース事前分布(ラプラス分布)を設定することで行われると説明されています。数年の時系列データであれば、1か月に1回程度で変化点を検知するとも書かれています。
+
+$$
+\delta_{j} \sim Laplace(0, \tau)
+$$
+
+パラメタ$\tau$ を調整することで、モデルの柔軟性を直接制御できるようになります。ラプラス分布は事前分布を用いることで、L1正則化と同様に機能し、パラメタ$\delta$が0になるように制約がかかります。これはラプラス分布を可視化するとわかりよいので、ラプラス分布を可視化してみます。ラプラス分布は$\mu$と$\tau$をパラメタに持ちます($\tau$は$\sigma$と表記されていたりします)。
+
+$$
+f(x | \mu, \tau) =  \frac{1}{2 \tau} exp\left(- \frac{ |x - \mu| }{ \tau } \right)
+$$
+
+Rには、デフォルトでは関数が用意されていないので、確率密度関数を書いて可視化することにします。
+
+```{r}
+drlaplace <- function(x, mu, tau){
+  f <- 1/(2 * tau) * exp(-1 * (abs(x - mu)) / tau)
+  return(f)
+}
+
+x <- seq(-10, 10, 0.1)
+mu <- 0
+tau <- c(0.1, 1:5)
+
+pattern <- paste0('mu = ', mu, ', tau = ', tau)
+df_plt <- tibble::tibble(x)
+for (i in 1:length(tau)) {
+  y <- drlaplace(x, mu, tau[[i]])
+  df_plt <- cbind(df_plt, y)
+}
+names(df_plt) <- c('x', pattern)
+
+df_plt %>% 
+  tidyr::pivot_longer(cols = -x, names_to = 'patterns') %>% 
+  dplyr::arrange(patterns, x) %>% 
+  ggplot(., aes(x, value, col = patterns, fill = patterns)) + 
+  geom_line() + 
+  facet_wrap( ~ patterns, scales = "free") 
+```
+
+$\tau$が小さくなるほど、ほとんど0しか返さない確率密度関数であるため、それがスパースな分布と呼ばれる所以になっています。つまり、Prophetでは多めに潜在的な変化を検出するものの、変化率$\delta_{j}$にラプラス分布を設定していると、多くの変化点の変更率$\delta_{j}$はほとんど0になることが期待されます。
+
+`Prophet()`では、`changepoint_prior_scale`で設定することができます。ドキュメントにも記載されていますが、値を大きくすると、多くの変化点が許容され、値が小さいと変化点が少なくなります。
+
+# Prophetの変化点自動検知
+
+デフォルト設定でProphetの変化点の自動検知機能を動かしていきます。ドキュメントで使用されているWikipediaのページビューデータの期間を2年分に絞って動かしていきます。
+
+```{r}
+# Githubのprophetのリポジトリからサンプルデータをインポート
+base_url <- 'https://raw.githubusercontent.com/facebook/prophet/master/examples/'
+data_path <- paste0(base_url, 'example_wp_log_peyton_manning.csv')
+df <- readr::read_csv(data_path) %>%
+  dplyr::filter(ds >= "2011-01-01" & ds <= "2012-12-31")
+
+# 先頭と末尾のデータを表示
+head_tail(df, n = 5)
+```
+
+`changepoint_prior_scale`を変化させながら複数のモデルを構築するとわかり良いですが、`changepoint_prior_scale`が大きくなるにつれて(ラプラス分布の裾が広がる)、多くの変化点が許容され、値が小さくなるにつれて(ラプラス分布の裾が狭くなる)、変化点が少なくなります。変化点は`add_changepoints_to_plot()`を利用することで可視化できます。
+
+
+```{r}
+# changepoint_prior_scaleを変化させてモデルを作成
+scale_vec <- c(0.05, 0.1, 0.5, 1.0)
+n_vec <- length(scale_vec)
+plt_list <- vector(mode = "list", length = n_vec)
+
+for (i in 1:n_vec) {
+  m <- prophet(df = df, changepoint.prior.scale = scale_vec[[i]])
+  future_df <- make_future_dataframe(m, periods = 30)
+  forecast_df <- predict(m, future_df)
+  plt_title <- paste0("changepoint.prior.scale = ", scale_vec[[i]])
+  plt_list[[i]] <- plot(m, forecast_df) + add_changepoints_to_plot(m) + 
+    labs(title = plt_title)
+}
+
+
+plt_list[[1]] + plt_list[[2]] + plt_list[[3]] + plt_list[[4]]
+```
+
+# 未来の変化点のシュミレーション
+
+実際の観測値に対して、変化点を捉える方法はわかりましたが、Prophetでは、未来の変化点をどのように扱っているでしょうか。その点も論文に記載されており、
+
+論文の内容をざっくりとまとめると、モデルが外挿されて予測が行われる場合、予測トレンドの不確実性をモデルで推定するとのこと。トレンドの生成モデルは、$T$個時系列データに$S$個の変化点があり、それぞれに変化率$\delta_{j} \sim Laplace(0, \tau)$があるというもので、$\tau$をデータから推測される分散に置き換えることにより、過去の変化率を模倣する将来の変化率をシミュレートします。
+
+ラプラス分布の分散$\tau$をベイズ推定を行った事後分布から得るか、$\lambda = \frac{1}{S} \sum_{j=1}^{S} |  \delta_{j}|$を最尤法で推定します。この$\lambda$は過去の変化率$\delta_{j}$の絶対値の平均です。
+
+将来の変化点は、変化点の平均頻度が過去のデータ内の頻度と一致するように、下記に従ってランダムにサンプリングされます。
+
+$$
+\begin{eqnarray}
+\forall j \gt T, 
+=
+  \begin{cases}
+  \delta_{j} = 0 \ w.p. \frac{T-S}{T}, \\
+  \delta_{j} \sim Laplace(0, \lambda)\ w.p. \frac{S}{T}
+  \end{cases}
+\end{eqnarray}
+$$
+
+意味合いとしては、$T$よりも未来の変化点$\delta_{j}$は、確率$\frac{T-S}{T}$で$\delta_{j}$が0か、確率$\frac{S}{T}$で$\delta_{j}$がラプラス分布に従う乱数によって生成されるかが決められ、ラプラス分布の乱数の場合、平均0、分散$\lambda$で変化率$\delta_{j}$となる乱数が生成されることなります。
+
+下記の再現コードは、前回同様、下記のブログを参考にさせていただきました。Pythonのコードを交えながら非常にわかりやすく、解説されているブログです。
+
+- [Prophetのモデル式を1から理解する](https://devblog.thebase.in/entry/2019/12/20/110000_1)
+
+自分の練習がてら、Rで再現コードを書いていますが、実装が誤っている場合、参考元ブログの誤りではなく、おそらく私の誤りである可能性が高いため、予めお断りさせていただきます。加え、次回以降の記事ではProphetパッケージのトレンドや未来の変化点の計算部分をスクリプトに沿って深ぼっているので、Rのスクリプトを勉強したいということであれば、そっちを見たほうが正確かつスクリプトも綺麗です。
+
+
+```{r}
+g3 <- function(t, C = 1, k = 1, m = 0,  S, d){
+  a <- matrix(0, nrow = length(t), ncol = length(S))
+  for (i in 1:length(t)) {
+    for (j in 1:length(S)) {
+      a[i, j] <- ifelse(S[[j]] < t[[i]], 1, 0) 
+    }
+  }
+  
+  gamma <- vector(mode = "numeric", length = length(S))
+  for (j in 1:length(gamma)) {
+    gamma[j] = (S[j] - m - sum(gamma[0:(j-1)])) * (1 - ((k + sum(d[0:(j-1)])) / (k + sum(d[0:j]))))
+  }
+  
+  y <- C / (1 + exp(-(k + (a %*% d)) * (t - (m + (a %*% gamma)))))
+  
+  return(
+    list(data = data.frame(t, y),
+         gamma = gamma)
+  )
+}
+
+t <- seq(1 ,100, length.out = 100)
+S <- c(20, 60, 80) # change point time
+delta <- c(-0.03, 0.01, 0.02) # change rate for growth rate
+
+d <- g3(
+  t = t, # time
+  C = 1, # capacity
+  k = 0.01, # growth rate
+  m = 0, # offset
+  S = S, # change point
+  d = delta  # change rate for growth rate
+)
+
+freq <- length(S) / length(t)
+mu_delta <- mean(abs(delta))
+
+# Base様のブログの乱数で実行
+# set.seed(5)
+# occurrence <- rbinom(n = length(t), p = freq, size = 1)
+occurrence <- c(0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0)
+generated_s <- which(occurrence == 1) + (length(t))
+# Base様のブログの乱数で実行
+# generated_delta <- extraDistr::rlaplace(n = length(generated_s), mu = 0, sigma = mu_delta)
+generated_delta <- c(0.00053214, 0.00810678, -0.03104065)
+
+# 上記のパラメタを使って、未来の変化点をシュミレーション
+f <- g3(
+  t = seq(max(t), length.out = length(t)), # time
+  C = 1, # capacity
+  k = 0.01, # growth rate
+  m = d$gamma[length(d$gamma)],
+  S = generated_s, # change point
+  d = generated_delta  # change rate for growth rate
+)
+
+d$data$label <- "pre"
+f$data$label <- "post"
+ggplot(rbind(d$data, f$data), aes(t, y, col = label)) + 
+  geom_line() + 
+  geom_vline(xintercept = c(S, generated_s), col = "black", linetype = "dashed") + 
+  scale_color_manual(values = c("#8BADCC", "#E56A73")) + 
+  scale_y_continuous(breaks = seq(0.3, 0.7, 0.05), limits = c(0.3, 0.7)) + 
+  scale_x_continuous(breaks = seq(0, 200, 10))
+```
+
+ここまでのおさらいで、周期性や祝日効果、外部予測変数を除いて、Prophetがトレンドをどのように計算し、どのように変化点を見つけ、未来の予測において、どのように振る舞うのか、概要が把握できました。次回は`predict()`を実行した際に、どのような計算が行われていくのかを見ていきます。
+
+# セッション情報
+
+```{r}
+sessionInfo()
+```
+
+
+

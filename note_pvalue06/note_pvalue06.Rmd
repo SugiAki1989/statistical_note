@@ -1,0 +1,75 @@
+---
+title: "ブートストラップ信頼区間(パーセンタイル法)"
+pagetitle: "ブートストラップ信頼区間(パーセンタイル法)"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ブートストラップ信頼区間(パーセンタイル法)を書くことがあったので、その備忘録。今回の例では、ワイブル分布 (Weibull distribution) を例にする。この分布は、サバイバル分析などで出てくるように、人の死亡確率をモデリングする際に役立つ。人の死亡確率というと角が立ちそうだが、ECサイトの会員の離脱率なんかをイメージすると良いかもしれない。つまり、観測している期間において死亡確率は一定というよりも、死亡確率は時間と共に高くなり、変化するという仮定を起きたい時に便利。この反対もしかり。その事象が発生するまでの時間を確率変数と考えると、その確率変数が従う分布はワイブル分布となる。
+
+## ブートストラップ
+ブートストラップサンプリングとは、得られたサンプルデータから、リサンプリングを行うこと。そこから、リサンプルデータから統計量を求め、推測を行う方法のことをブートストラップ〇〇とか言う。ブートストラップ信頼区間(パーセンタイル法)ではリサンプリングされた値を使ってパーセンタイルを計算すると、その値が取りうる信頼区間が得られる。これを各値で計算していくことで得られる。
+
+`{fitdistrplus}`パッケージを使っている。`{fitdistrplus}`パッケージの詳細は[こちら](https://cran.r-project.org/web/packages/fitdistrplus/fitdistrplus.pdf)。
+
+```{r}
+library(fitdistrplus)
+library(tidyverse)
+
+set.seed(123)
+n <- 100
+df_prob <- rweibull(n = n, shape = 2, scale = 10)
+x <- seq(0.1, 30, len = n)
+
+
+loops <- 100
+booted_df <- map_dfc(1:loops, function(i) {
+  xi <- sample(df_prob, size = length(df_prob), replace = TRUE)
+  MLE_est <- suppressWarnings(fitdist(xi, distr = "weibull",method = "mle"))  
+  dweibull(x, shape = MLE_est$estimate["shape"],  scale = MLE_est$estimate["scale"])
+})
+
+dat1 <- booted_df %>% 
+  bind_cols(x %>% as_tibble() %>% rename(x = value)) %>% 
+  gather(key = boot_ind, val = y, -x)
+
+dat2 <- booted_df %>% 
+  array_tree(., 1) %>% 
+  map_dfc(., quantile, c(0.025, 0.5, 0.975)) %>% 
+  t() %>% as_tibble() %>%
+  bind_cols(x %>% as_tibble()) %>%
+  setNames(c("2.5%", "50%", "97.5%", "x")) %>%
+  gather(key = quantile, val = y, -x)
+
+ggplot() +
+  geom_line(data = dat1, aes(x, y, group = boot_ind), col = "#006E4F", alpha = 0.2, size = 0.25) +
+  geom_line(data = dat2, aes(x, y, group = quantile), col = "#006E4F", size = 0.5, linetype = "longdash") +
+  theme_classic() + xlab("x") + ylab("Probability density") + 
+  ggtitle("Weibull Probability Distribution")
+```
+
+

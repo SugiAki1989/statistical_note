@@ -1,0 +1,279 @@
+---
+title: "RのTidy evaluation_01"
+pagetitle: "RのTidy evaluation_01"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+## はじめに
+この記事は[Tidy evaluation](https://tidyeval.tidyverse.org/)をもとにTidy evaluationについて学習した内容を自分の備忘録としてまとめたものです。
+
+### dplyr
+とにかく`dplyr`のおかげでRライフは、非常に豊かなものになったのですが、`dplyr`や`ggplot`はとくに、これまでの文法とは大きく異なり、独特な感じがします。つまり、データマスキングなどの考え方が取り入れられているので、個人的にはすごくありがたいけど、どんな風に実装されているのかはすごく気になるところ。そこを深掘りできればと思います。
+
+### データマスキング
+何も気にせず変数名を打ち込んで計算できる、それを裏で支えているのがデータマスキング。つまり、データフレームの内容が一時的にファーストチョイスのオブジェクトとして利用できるとき、データがワークスペースを隠すと言うそうで、言い方を変えると、それはデータがマスクされているといえます。
+
+下記のデータマスキングの例では、とくに意識することなくフィルタしたい変数名と条件を記述して実行するだけで、期待通りに動いています。
+
+```R:R
+library("dplyr")
+
+starwars %>% filter(
+  height < 100,
+  gender == "male"
+)
+
+# A tibble: 4 x 13
+  name  height  mass hair_color skin_color eye_color birth_year gender
+  <chr>  <int> <dbl> <chr>      <chr>      <chr>          <dbl> <chr> 
+1 Yoda      66    17 white      green      brown            896 male  
+2 Wick…     88    20 brown      brown      brown              8 male  
+3 Dud …     94    45 none       blue, grey yellow            NA male  
+4 Ratt…     79    15 none       grey, blue unknown           NA male  
+# … with 5 more variables: homeworld <chr>, species <chr>, films <list>,
+#   vehicles <list>, starships <list>
+```
+
+`dplyr`がない時代は`starwars[starwars$height < 200 & starwars$gender == "male", ]`のように`starwars$**`とすることで、明示的に`starwars`というデータフレームの環境をRに教える必要があった。下記のように、`height`や`gender`はグローバル環境にないので、定義しない限り、エラーを出し続けますが、`dplyr`では定義しているわけでもなく、自然と利用できています。
+
+```
+cond1 <- height < 100,
+ エラー:  予想外の ',' です  in "cond1 <- height < 100,"
+
+cond2 <- gender == "male"
+ エラー:  オブジェクト 'gender' がありません 
+```
+
+`dplyr`では、ユーザが引数として提供したコードを**クオート**します。**クオート**は、コードの結果ではなく引用されたコード自身の結果を得て、評価を後のデータフレームのコンテキストで再開させます。
+
+```
+starwars %>% summarise_at(vars(ends_with("color")), n_distinct)
+# A tibble: 1 x 3
+  hair_color skin_color eye_color
+       <int>      <int>     <int>
+1         13         31        15
+
+```
+
+例えば、この例では`vars`が`ends_with("color")`というものを評価して、該当する列が計算対象となっています。`vars(ends_with("color"))`というものをみてみると、`quosure`というものが生成されています。`quosure`は、`quote`と`closure`の造語で、表現を評価れないままにしつつ、評価されるべき環境を覚えさせる、という内容のものです。`ends_with("color")`という表現式を捕捉しつつも評価されない状態に保って、`env: global`で評価されるようにしています。
+
+```
+vars(ends_with("color"))
+<list_of<quosure>>
+
+[[1]]
+<quosure>
+expr: ^ends_with("color")
+env:  global
+
+vars("color")
+<list_of<quosure>>
+
+[[1]]
+<quosure>
+expr: ^"color"
+env:  empty
+```
+
+この例では、表現を評価されないままにしつつ、評価されるべき環境(`0x10ad90298`という環境)を覚えさせていることになります。
+
+```
+starwars %>% vars(., height:mass)
+<list_of<quosure>>
+
+[[1]]
+<quosure>
+expr: ^.
+env:  0x10ad90298
+
+[[2]]
+<quosure>
+expr: ^height:mass
+env:  0x10ad90298
+```
+
+下記の例を考えます。`vars(height / 100)`はさきほど同様に、`quosure`を生成します。それを`eval_tidy()`を使って、評価しようとしたら、エラーが返されています。`global`という環境で、`height / 100`を評価しようとしたため、`height`が定義されていないのでエラーが返されています。これを`eval_tidy()`に評価するべき環境を教えることで、その環境内で`height / 100`が評価されて、結果が出力されています。
+
+```
+exprs <- vars(height / 100)
+exprs
+<list_of<quosure>>
+
+[[1]]
+<quosure>
+expr: ^height / 100
+env:  global
+
+rlang::eval_tidy(exprs[[1]])
+rlang::eval_tidy(exprs[[1]]) でエラー: オブジェクト 'height' がありません 
+
+rlang::eval_tidy(exprs[[1]], data = starwars)
+ [1] 1.72 1.67 0.96 2.02 1.50 1.78 1.65 0.97 1.83 1.82 1.88 1.80 2.28 1.80
+[15] 1.73 1.75 1.70 1.80 0.66 1.70 1.83 2.00 1.90 1.77 1.75 1.80 1.50   NA
+[29] 0.88 1.60 1.93 1.91 1.70 1.96 2.24 2.06 1.83 1.37 1.12 1.83 1.63 1.75
+[43] 1.80 1.78 0.94 1.22 1.63 1.88 1.98 1.96 1.71 1.84 1.88 2.64 1.88 1.96
+[57] 1.85 1.57 1.83 1.83 1.70 1.66 1.65 1.93 1.91 1.83 1.68 1.98 2.29 2.13
+[71] 1.67 0.79 0.96 1.93 1.91 1.78 2.16 2.34 1.88 1.78 2.06   NA   NA   NA
+[85]   NA   NA 1.65
+```
+
+データマスキングは、評価を然るべき環境で再開させますが、コードの評価を遅らせるデータマスキングで列名を代用するのは困難とのこと。どういうことなのでしょうか。例を通じて見ていきます。
+
+ここでは、`mean(height, na.rm = TRUE)`を計算したく、`starwars`をパイプで流し、`summarise()`を使って計算しています。次の例では、`mean(height, na.rm = TRUE)`の部分を`value`という変数に格納し、それを使って計算しようとしていますが、うまくいきません。
+
+```R:R
+starwars %>% summarise(avg = mean(height, na.rm = TRUE))
+# A tibble: 1 x 1
+    avg
+  <dbl>
+1  174.
+
+value <- mean(height, na.rm = TRUE)
+mean(height, na.rm = TRUE) でエラー: オブジェクト 'height' がありません 
+
+starwars %>% summarise(avg = value)
+エラー:  オブジェクト 'value' がありません 
+```
+
+文字列にしてもうまくいくことはありません。
+
+```
+value <- "mean(height, na.rm = TRUE)"
+starwars %>% summarise(avg = value)
+# A tibble: 1 x 1
+  avg                       
+  <chr>                     
+1 mean(height, na.rm = TRUE)
+```
+
+`vars()`や`quo()`と`eval_tidy()`を組み合わせれば可能です。つまり、`mean(height, na.rm = TRUE)`という表現式を捕捉して評価はされないままにとどめ、`eval_tidy()`で評価環境を教えることで評価させます。
+
+```
+value <- vars(mean(height, na.rm = TRUE))[[1]]
+starwars %>% summarise(avg = eval_tidy(value, data = .))
+# A tibble: 1 x 1
+    avg
+  <dbl>
+1  174.
+
+value <- quo(mean(height, na.rm = TRUE))
+starwars %>% summarise(avg = eval_tidy(value, data = .))
+# A tibble: 1 x 1
+    avg
+  <dbl>
+1  174.
+
+value
+<quosure>
+expr: ^mean(height, na.rm = TRUE)
+env:  global
+```
+
+このようなことをしなくても、列名を変数に格納したり、関数の引数として渡したりするには、`!!`を使うことで解決できます。`qq_show()`という処理過程を可視化できる関数とともに使ってみます。
+
+1つ目では、`value`がそのまま`value`となっていますが、2つ目は`^mean(height, na.rm = TRUE)`になっています。`!!`は一時的にクオートを外すことができる演算子です。
+
+```
+value <- quo(mean(height, na.rm = TRUE))
+
+rlang::qq_show(
+  starwars %>% summarise(avg = value)
+)
+starwars %>% summarise(avg = value)
+
+rlang::qq_show(
+  starwars %>% summarise(avg = !!value)
+)
+starwars %>% summarise(avg = ^mean(height, na.rm = TRUE))
+
+```
+
+その結果、1つ目はエラーが返されますが、2つ目は期待通りに計算されています。
+
+```
+starwars %>% summarise(avg = value)
+ エラー: Column `avg` must be length 1 (a summary value), not 2
+
+starwars %>% summarise(avg = !!value)
+# A tibble: 1 x 1
+    avg
+  <dbl>
+1  174.
+```
+
+ちなみに` Column avg must be length 1 (a summary value), not 2`という意味は、`value`の長さが2だからです。
+
+```
+value
+<quosure>
+expr: ^mean(height, na.rm = TRUE)
+env:  global
+
+length(value)
+[1] 2
+```
+
+`!!`を使うことで一時的にクオートを外すことができるのであれば、こんなこともできそうです。
+
+```
+col <- quo(Species)
+col
+<quosure>
+expr: ^Species
+env:  global
+
+iris %>% 
+  group_by(!!col) %>% 
+  summarise_all(mean)
+
+# A tibble: 3 x 5
+  Species    Sepal.Length Sepal.Width Petal.Length Petal.Width
+  <fct>             <dbl>       <dbl>        <dbl>       <dbl>
+1 setosa             5.01        3.43         1.46       0.246
+2 versicolor         5.94        2.77         4.26       1.33 
+3 virginica          6.59        2.97         5.55       2.03 
+
+col <- sym("Species")
+iris %>% 
+  group_by(!!col) %>% 
+  summarise_all(mean)
+
+# A tibble: 3 x 5
+  Species    Sepal.Length Sepal.Width Petal.Length Petal.Width
+  <fct>             <dbl>       <dbl>        <dbl>       <dbl>
+1 setosa             5.01        3.43         1.46       0.246
+2 versicolor         5.94        2.77         4.26       1.33 
+3 virginica          6.59        2.97         5.55       2.03 
+```
+
+ここまではグローバルな環境でいじってきましたが、関数化する場合は`enquo()`を使うと便利です。
+
+- `quo()`:入力を引用符で囲み、現在の環境をキャプチャし、それらをクオートします。
+- `enquo()`:関数の引数を参照するシンボルを取り、この引数に与えられたRコードをクオートし、関数が呼び出された場所（コードが入力された場所）の環境を取り込み、それらをクオートする。
+

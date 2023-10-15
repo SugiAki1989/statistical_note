@@ -1,0 +1,281 @@
+---
+title: ""
+pagetitle: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+Marketing Mix Modeling(MMM)のシリーズでは、Meta社(Facebook)が開発したRobynパッケージのドキュメントをなぞりながら、MMMを理解するために必要な知識を整理し、RでMMMを実行するまでをまとめている。基本的には下記の公式ドキュメントを参考にしている。
+
+- [Robyn](https://facebookexperimental.github.io/Robyn)
+
+ここでは、AdstockとDiminishing returns(Saturation)への理解を進めていく。Diminishing returnsはcarryoverとも呼ばれるとのこと。
+
+## Adstock
+
+AdstockはTVCMをもとに考えるとわかりやすい。TVCMは見たからと言って、すぐに購買につながるわけではなく、数日後、数週間後、数カ月後に再想起することで購買につなげる力があったりする。この性質があると仮定できそうなのに、データ上、支出の数字と購買金額は、同じ日に記録されるわけでもなく、別の日の売上に含まれてしまう。つまり、このようなデータ生成過程を考慮せず、モデリングを行うと、精度が高いモデルが構築できない。そのため、TVCMの支出を引き伸ばす、つまりAdstockすることで、変数を変換し、モデルの精度向上を目指す変換の方法。一番シンプルなGeometric Simple Decay Modelは下記の方法で変換する。
+
+
+$$
+y_{t} = x_{t} + \lambda y_{t-1}
+$$
+他にも、Geometric Log Decay ModelやDelayed Simple Decay Modelなどもある。詳しくは[こちらの記事](https://medium.com/@kyliefu/implementation-of-the-advertising-adstock-theory-in-r-62c2cc4b82fd)が参考になる。Robynでは基本的なAdstock変換だけではなく、ワイブル分布を利用したAdstock変換も利用できるため、広告の性質に合わせて、Adstock変換を行うことで、より現実に沿ったモデル構築ができる。
+
+## Diminishing returns(Saturation)
+
+広告の出稿量を増やすと、広告が到達するユーザーは増加して、需要も伴って増加しそうだが、広告の露出と売上は比例しない、という概念がDiminishing returns。広告を出せば出すだけ売上があがるわけでもなく、いつかは飽和するということ。
+
+この関係を表すために、Adstock変換された値にパラメタを乗じることで、飽和する様子を表すことができる。Robynでの変換方法はドキュメントをみるとわかるが、もう少し複雑なので、下記の式ではなく、Hill関数を利用している。
+
+$$
+DiminishingReturns_{t} = Adstock \ y_{t}^{\gamma}
+$$
+
+Adstock変換とDiminishing returnsを利用すると、下記のようなイメージになる。元の`y`は`x`の増加とともに比例して増加しているが、変換された`y_adstock_and_dim`は頭打ちになっていることがわかる。
+
+```{r}
+library(tidyverse)
+set.seed(1989)
+x <- 1:100
+y <- 1.1 * x + rnorm(n = length(x))
+
+
+GeometricAdstock_and_DiminishingReturn <- function(x, lambda, gamma){
+  res <- vector(mode = 'numeric', length = length(x))
+  res[1] <- x[1]
+  for (i in 2:length(x)) {
+    res[i] <- (res[i-1]*lambda + x[i])^gamma
+  }
+  
+  return(res)
+}
+
+y_adstock_and_dim <- GeometricAdstock_and_DiminishingReturn(y, 0.3, 0.8)
+tibble(x, y, y_adstock_and_dim) %>% 
+  pivot_longer(
+    cols = -x,
+    names_to = 'type',
+    values_to = 'y'
+  ) %>% 
+  ggplot(aes(x, y, col = type)) + 
+  geom_line() + 
+  theme_classic()
+```
+
+RobynではspendとExposureの関係性を表現する際に、Hill equationによって変換が行われる。
+
+$$
+x_{saturated_{i,j}} = \frac{x_{adstocked_{i,j}}^{\alpha}}{x_{adstocked_{i,j}}^{\alpha} + \gamma^{\alpha}}
+$$
+
+![Diminishing returns](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/diminishingreturns3.png)
+
+これは「TVCM支出(spend)とGRP(Exposure)」、「Facebook支出(spend)とインプレッション(Exposure)」などの支出と露出の関係を表現するためのもので、支出すれば最初はインプレッションがでやすいが、支出し続けると、インプレッションが頭打ちになるという関係を表している。
+
+Robynを実行すると、Michaelis-Menten変換を行ったという旨の警告がでる。これはおそらくだが、Hillの式にはHill係数が含まれており、Hill係数が1の場合、Hillの式はMichaelis–Menten式に一致するからだと思われる。ただ、細かい部分の実装までは追えていないので、誤っている可能性がある。Hill equationやMichaelis-Mentenについては、下記を参考にした。
+
+- [Hill Equation - Interactive Graph](https://www.physiologyweb.com/calculators/hill_equation_interactive_graph.html)
+
+> If the Hill coefficient is equal to 1 (n = 1), the Hill equation is reduced to its simpler form known as the Michaelis-Menten equation.
+
+- [http://enzyme13.bt.a.u-tokyo.ac.jp/enzyme-kinetics-by-R.html](http://enzyme13.bt.a.u-tokyo.ac.jp/enzyme-kinetics-by-R.html)
+
+## モデリング
+
+ここからは、簡単ではあるが変換を行うと回帰モデルのR2乗が増加するかを確認する。あてはまりの良さを表すR2乗で良いのか、という疑問を持つかもしれないが、簡単に調べるだけなので良しとする。本来であれば、時系列クロスバリデーション、Ridge回帰、Nevergradで多目的最適化を行って、変換が有効かどうかを調べるのがよいと思うが、それはRobynパッケージを使えば実行できるので、ここでは簡単に調べるだけにしておく。
+
+まずは変換せずにモデルを構築するとR2乗は0.52となった。
+
+```{r}
+df <- read_csv('~/Desktop/adstock.csv')
+fit_normal <- summary(lm(sales ~ youtube + facebook, data = df))
+fit_normal$adj.r.squared
+```
+
+次はAdstock変換とDiminishing returnsを考慮した変数を利用してモデルを構築する。R2乗は0.63となった。無変換の値よりも当てはまりが良くなっている。
+
+```{r}
+fit_adstock <- summary(lm(sales ~ 
+             GeometricAdstock_and_DiminishingReturn(youtube, 0.5, 1) + 
+             GeometricAdstock_and_DiminishingReturn(facebook, 0.5, 0.9), 
+           data = df)
+        )
+fit_adstock$adj.r.squared
+```
+
+ここで問題となるのが、変換の際のパラメタが決め打ちである点。これを非線形最小二乗法で最適化することで、より当てはまりが良くなるかを確認する。
+
+```{r}
+library(minpack.lm)
+
+fit_nls1 <- nlsLM(
+  data = df,
+  sales ~ alpha + 
+    beta1 * GeometricAdstock_and_DiminishingReturn(youtube, lambda1, gamma1) + 
+    beta2 * GeometricAdstock_and_DiminishingReturn(facebook, lambda2, gamma2),
+  start = c(
+    alpha = fit_adstock$coefficients[1],
+    beta1 = fit_adstock$coefficients[2],
+    beta2 = fit_adstock$coefficients[3],
+    lambda1 = 0.1,
+    gamma1 = 0.1,
+    lambda2 = 0.1,
+    gamma2 = 0.1
+  ),
+  lower = c(-Inf, -Inf, -Inf, 0, 0, 0, 0),
+  control = nls.control(maxiter = 5000)
+)
+
+
+fit_adstock_finalize <- 
+  lm(
+    sales ~
+      GeometricAdstock_and_DiminishingReturn(youtube, fit_nls1$m$getPars()[4], fit_nls1$m$getPars()[5]) +
+      GeometricAdstock_and_DiminishingReturn(facebook, fit_nls1$m$getPars()[6], fit_nls1$m$getPars()[7]),
+    data = df
+  )
+
+fit_nls1$m$getPars()
+```
+
+実行結果を確認すると0.65となって少し当てはまりをよくできた。
+
+```{r}
+summary(fit_adstock_finalize)$adj.r.squared
+```
+
+観測値と予測値もプロットして確認しておく。
+
+```{r}
+df %>% 
+  bind_cols(idx = 1:200, pred = predict(fit_adstock_finalize, newdata = df)) %>% 
+  select(idx, sales, pred) %>% 
+  pivot_longer(
+    cols = -idx,
+    names_to = 'type',
+    values_to = 'y'
+  ) %>% 
+  ggplot(aes(idx, y, col = type)) + 
+  geom_line(size = 0.5) + 
+  theme_classic()
+
+```
+
+## おまけ: 再検証
+
+Ridge回帰と時系列クロスバリデーションを使って、Adstock変換とDiminishing returnsを考慮することによるモデル精度の向上をRMESをもとに再検証する。まずは何も考慮しなかった場合、RMSEは2.28となった。
+
+```{r}
+library(tidymodels)
+
+df_train <- df[1:180,]
+df_test <- df[181:200,]
+
+df_folds <- df_train %>% 
+  rolling_origin(
+    initial = 120,      
+    assess = 20, 　    
+    skip = 9, 
+    cumulative = FALSE 
+  ) 
+ridge_recipe <- 
+  recipe(formula = sales ~ ., data = df_train)
+
+ridge_spec <- 
+  linear_reg(penalty = tune(), mixture = 0) %>% 
+  set_mode("regression") %>% 
+  set_engine("glmnet")
+ridge_workflow <- workflow() %>% 
+  add_recipe(ridge_recipe) %>% 
+  add_model(ridge_spec)
+
+
+penalty_grid <- grid_regular(penalty(range = c(-5, 5)), levels = 100)
+tune_res <- tune_grid(
+  ridge_workflow,
+  resamples = df_folds, 
+  grid = penalty_grid
+)
+# autoplot(tune_res)
+# collect_metrics(tune_res) %>% 
+#   filter(.metric == 'rmse')
+
+best_penalty <- select_best(tune_res, metric = "rmse")
+ridge_final <- finalize_workflow(ridge_workflow, best_penalty)
+ridge_final_fit <- fit(ridge_final, data = df_train)
+
+augment(ridge_final_fit, new_data = df_test) %>%
+  rmse(truth = sales, estimate = .pred)
+
+```
+
+次はAdstock変換とDiminishing returnsを考慮した場合は、RMSEは1.91となった。
+
+```{r}
+df$youtube <- GeometricAdstock_and_DiminishingReturn(df$youtube, 0.7595052, 0.8902439)
+df$facebook <- GeometricAdstock_and_DiminishingReturn(df$facebook, 0.4377238, 0.8797812)
+
+df_train2 <- df[1:180,]
+df_test2 <- df[181:200,]
+
+df_folds2 <- df_train2 %>% 
+  rolling_origin(
+    initial = 120,      
+    assess = 20, 　    
+    skip = 9, 
+    cumulative = FALSE 
+  ) 
+
+tune_res <- tune_grid(
+  ridge_workflow,
+  resamples = df_folds2, 
+  grid = penalty_grid
+)
+# autoplot(tune_res)
+
+best_penalty <- select_best(tune_res, metric = "rmse")
+ridge_final <- finalize_workflow(ridge_workflow, best_penalty)
+ridge_final_fit <- fit(ridge_final, data = df_train2)
+augment(ridge_final_fit, new_data = df_test2) %>%
+  rmse(truth = sales, estimate = .pred)
+```
+
+このように、Adstock変換とDiminishing returnsを考慮するだけでモデルの精度を向上させることができた。
+
+## 参考文献
+
+- [Robyn Features](https://facebookexperimental.github.io/Robyn/docs/features)
+- [Robyn Analysts guide to MMM](https://facebookexperimental.github.io/Robyn/docs/analysts-guide-to-MMM)
+- [Robyn R demo](https://github.com/facebookexperimental/Robyn/blob/main/demo/demo.R)
+- [統計コンサルの議事メモ](https://ushi-goroshi.hatenablog.com/search?q=mmm)
+- [Using R to Build a Simple Marketing Mix Model (MMM) and Make Predictions](https://towardsdatascience.com/building-a-marketing-mix-model-in-r-3a7004d21239)
+- [Media-Mix-Model-Modified/メディアミックスモデルの利点と限界](https://speakerdeck.com/ktgrstsh/medeiamitukusumoderufalseli-dian-toxian-jie)
+
+
+
+

@@ -1,0 +1,356 @@
+---
+title: "prophetのトレンド"
+pagetitle: "prophet02"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: TRUE
+    code_folding: "show"
+    highlight: "zenburn"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、下記のドキュメントを参考に、`prophet`パッケージの基本的な使い方をおさらいすることを目的としています。ゆくゆくは外部予測変数を追加したモデルやクロスバリデーション、パラメタチューニングなどなど、モデルを発展させながら使用方法をまとめていきます。
+
+- [Prophet | Forecasting at scale](https://facebook.github.io/prophet/docs/quick_start.html#r-api)
+
+モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。非常にわかりやすいです。
+
+- [Forecasting at scale](https://peerj.com/preprints/3190/)
+- [Prophet入門【理論編】Facebookの時系列予測ツール](https://www.slideshare.net/hoxo_m/prophetfacebook)
+- [Prophetのモデル式を1から理解する](https://devblog.thebase.in/entry/2019/12/20/110000_1)
+- [fb Prophetの解剖で学ぶベイズ時系列モデリング](https://ill-identified.hatenablog.com/entry/2018/05/28/020224)
+
+# ライブラリと関数の読み込み
+
+```{r}
+library(prophet)
+library(tidyverse)
+
+head_tail <- function(data, n = 5){
+  stopifnot(is.data.frame(data))
+  head(data, n = n) %>% print()
+  cat(paste(rep("-", 100), collapse = ""), "\n")
+  tail(data, n = n) %>% print()
+}
+```
+
+# prophetのトレンド
+
+prophetのモデルはトレンドを1つの構成要素としており、線形に成長する場合は`growth="linear"`を指定します。デフォルト設定では、`growth="linear"`です。
+
+一方で、特定の最大値、最小値が決まっていたり、予想できる場合、`growth="logistic"`と`cap`を指定することで、モデルの予測値の上限の収容力、下限の収容力をコントロールすることができます。
+
+WikipediaのR言語のページのページビュー(対数スケール)が保存されているサンプルデータを利用します。ここでは、8を超えないようにコントロールします(絶対にコントロールできるわけではないです)。基本的にはドメインを知識を利用して値を設定します。また、`cap`はデータフレームの列に加える必要があり、予測する場合のデータフレームにも必要です。そして、固定値である必要もなく、状況に応じて必要であれば、値を可変させることも可能です。
+
+```{r}
+# Githubのprophetのリポジトリからサンプルデータをインポート
+base_url <- 'https://raw.githubusercontent.com/facebook/prophet/master/examples/'
+data_path <- paste0(base_url, 'example_wp_log_R.csv')
+df <- readr::read_csv(data_path) %>%
+  dplyr::arrange(ds)
+
+# capの固定値を設定
+df_cap <- df %>% 
+  dplyr::mutate(cap = 8)
+
+# 先頭と末尾のデータを表示
+head_tail(df_cap, n = 5)
+```
+
+# モデルの学習と予測
+
+`cap`を格納したデータフレームを利用し、`growth=logistic`を指定して予測モデルを構築します。
+
+```{r}
+m_logistic <- prophet(df = df_cap, growth = "logistic")
+names(m_logistic)
+```
+
+予測で利用するデータフレームにも`cap`を格納する必要があります。その他は前回の記事の内容と同じです。
+
+```{r}
+future_df_logistic <- make_future_dataframe(m_logistic, periods = 900) %>% 
+  dplyr::mutate(cap = 8)
+forecast_df_logistic <- predict(object = m_logistic, df = future_df_logistic)
+dyplot.prophet(x = m_logistic, fcst = forecast_df_logistic)
+```
+予測された結果をみるとわかりますが、`cap`で指定した数値を超えないように調整されています。このモデルでは、`growth=logistic`を指定して予測モデルを構築しましたが、`growth=linear`を指定して予測モデルを構築すると、下記の通り、似たような予測が行われます。`cap`を指定していませんが、8を超えないように予測されています。`cap`を指定していないため、予測値の信用区間が発散していく傾向が見て取れます。
+
+おそらく、2013年以降から予測時点までの学習データの傾向から、予測時点は右肩上がりではなく、水平にくらいになると計算された結果だと思われます。今後の傾向が変わらないようであれば、このような場合は、`growth=logistic`と`cap`の設定はあってもなくても、同じになりそうです。
+
+```{r}
+m_linear <- prophet(df = df, growth = "linear")
+future_df_linear <- make_future_dataframe(m_linear, periods = 900)
+forecast_df_linear <- predict(object = m_linear, df = future_df_linear)
+dyplot.prophet(x = m_linear, fcst = forecast_df_linear)
+```
+
+サンプルデータを右肩上がりの傾向が学習できそうな2013年までに限定すると、8を超えて、9にも届きそうな予測になっています。
+
+```{r}
+m_linear2013 <- prophet(df = df %>% dplyr::filter(ds < "2013-01-01"), growth = "linear")
+future_df_linear2013 <- make_future_dataframe(m_linear2013, periods = 900)
+forecast_df_linear2013 <- predict(object = m_linear2013, df = future_df_linear2013)
+dyplot.prophet(x = m_linear2013, fcst = forecast_df_linear2013)
+```
+
+2013年までにデータを絞り、`cap`と`growth=logistic`を指定して予測モデルを構築すると、このようになります。
+
+実際に今日が2013年だとして、明日以降のデータを予測してほしいと言われたとします。データだけ見れば、右肩上がりなので、`cap`と`growth=logistic`は不要と思ってしまうかもしれません。Prophetが手軽に高品質に予測できるからと言って、データを可視化してみる、ドメイン知識を使ってモデルを熟慮することなどを怠れば、Prophetといえど役に立たないモデルになりそうです。
+
+```{r}
+m_logistic2013 <- prophet(df = df_cap %>% dplyr::filter(ds < "2013-01-01"), growth = "logistic")
+future_df_logistic2013 <- make_future_dataframe(m_logistic2013, periods = 900) %>% 
+  dplyr::mutate(cap = 8.0)
+forecast_df_logistic2013 <- predict(object = m_logistic2013, df = future_df_logistic2013)
+dyplot.prophet(x = m_logistic2013, fcst = forecast_df_logistic2013)
+```
+
+# フラットトレンド
+
+トレンドの変化があまりなく、強い季節性周期がある時系列データの場合、トレンドをフラット(`growth="flat"`)にすることが役立つ場合があります。
+
+```{r}
+prophet(df = df, growth = "flat")$growth
+```
+
+# prophetのトレンドを深ぼる
+
+prophetのトレンドについては、下記のProphetに関する論文に内容が記載されています。ここでは、ロジスティックトレンドについてみていきます。
+
+- [Forecasting at scale | 3.1.1  Nonlinear, Saturating Growth](https://peerj.com/preprints/3190/)
+
+これを参考にすると、ロジスティクトレンドは下記のように表現されています。`C`はcarrying capacity(環境収容力)、`k`はgrowth rate(成長率)、`m`はoffset parameter(オフセット)と記載されています。
+
+$$
+g(t) = \frac{C}{ 1 + exp(-k(t - m)) }
+$$
+
+さらに、論文の中では、環境収容力は一定ではなく、成長率も一定ではないため、時点によってこれらが変化できるようにしているとあります。一旦ここでは、時点よって変わらない骨格となる関数の挙動を深ぼってみます。
+
+```{r}
+# ロジスティックトレンド
+g <- function(t, C = 1, k = 1, m = 0){
+  res <- C / (1 + exp(-k * (t - m)))
+  return(res)
+}
+```
+
+`k`、`m`を固定し、`C`を変化させていきます。`C`は環境収容力を表すため、`C`で指定した値が上限になるように動いていることがわかります。
+
+```{r}
+t <- seq(-10, 10, 0.1)
+C <- c(1, 2, 3, 4, 5, 6)
+k <- rep(1, length(C))
+
+pattern <- paste0('C = ', C, ', k = ', k)
+df_plt <- tibble::tibble(t)
+for (i in 1:length(C)) {
+  y <- g(t = t, C = C[[i]], k = k[[i]])
+  df_plt <- cbind(df_plt, y)
+}
+names(df_plt) <- c('t', pattern)
+
+df_plt %>% 
+  tidyr::pivot_longer(cols = -t, names_to = 'patterns') %>% 
+  dplyr::arrange(patterns, t) %>% 
+  ggplot(., aes(t, value, col = patterns, fill = patterns)) + 
+  geom_line() + 
+  geom_hline(yintercept = 1) + 
+  scale_y_continuous(breaks = min(C):max(C)) +
+  facet_wrap( ~ patterns) 
+```
+
+`C`、`m`を固定し、`k`を変化させていきます。`k`は成長率を表すため、基準線と比較するとわかりますが、`k`が正の値に大きくなると、急激に大きく動いていることがわかります。また、`k`が負の場合、右肩下がりの変化になることが見てとれます。
+
+```{r}
+t <- seq(-10, 10, 0.1)
+k <- c(-2, -1, -0.5, 0.5, 1, 2)
+C <- rep(1, length(k))
+
+pattern <- paste0('C = ', C, ', k = ', k)
+df_plt <- tibble::tibble(t)
+for (i in 1:length(C)) {
+  y <- g(t = t, C = C[[i]], k = k[[i]])
+  df_plt <- cbind(df_plt, y)
+}
+names(df_plt) <- c('t', pattern)
+
+df_plt %>% 
+  tidyr::pivot_longer(cols = -t, names_to = 'patterns') %>% 
+  dplyr::arrange(patterns, t) %>% 
+  ggplot(., aes(t, value, col = patterns, fill = patterns)) + 
+  geom_line() + 
+  geom_vline(xintercept = 0) +
+  facet_wrap( ~ patterns) 
+```
+
+最後に`C`、`k`を固定し、`m`を変化させていきます。`m`はオフセットを表すため、同じ基準線の位置でも、出力値が変化していることがわかります。
+
+```{r}
+t <- seq(-10, 10, 0.1)
+m <- c(-2, -1, 0, 1, 2, 3)
+C <- rep(1, length(m))
+k <- rep(1, length(m))
+
+pattern <- paste0('C = ', C, ', k = ', k, ', m = ', m)
+df_plt <- tibble::tibble(t)
+for (i in 1:length(C)) {
+  y <- g(t = t, C = C[[i]], k = k[[i]], m = m[[i]])
+  df_plt <- cbind(df_plt, y)
+}
+names(df_plt) <- c('t', pattern)
+
+df_plt %>% 
+  tidyr::pivot_longer(cols = -t, names_to = 'patterns') %>% 
+  dplyr::arrange(patterns, t) %>% 
+  ggplot(., aes(t, value, col = patterns, fill = patterns)) + 
+  geom_line() + 
+  geom_vline(xintercept = 0) +
+  facet_wrap( ~ patterns) 
+```
+
+# 時点で変化する成長率のトレンド
+
+ここの作業が終わると、ロジスティクトレンドは下記のようになります。
+
+$$
+g(t) = \frac{C_{t}}{ 1 + exp(-(k + \boldsymbol{a}(t) \cdot \boldsymbol{\delta^{ \mathrm{T}}}) (t - m)}
+$$
+
+成長率`k`に$\boldsymbol{a}(t) \cdot \boldsymbol{\delta^{ \mathrm{T}}}$を足し込んでいますが、これはイメージとしては、成長率は状況に応じて変わるので、状況に応じて成長率が変わるのであれば、変化させようと表現しています。
+
+そのため、成長率が変わる変化点が$S_{j, 1...S}$個あったとし、各時点での成長率を調整するベクトル$\boldsymbol{\delta}$を用意します。また、時点$t$の成長率は、基本となる$k$と$t$時点までに出現した$\boldsymbol{\delta}$の総和として、下記のように表現します。
+
+$$
+k + \displaystyle \sum_{j:t > s_{j}} \delta_i
+$$
+
+そして、総和の計算をしやすいように$\boldsymbol{a}(t)$を01のベクトルで表して計算します。これで、時点によって変化する成長率を表現しています。再現コードは下記のブログを参考にさせていただきました。Pythonのコードを交えながら非常にわかりやすく、解説されているブログです。
+
+- [Prophetのモデル式を1から理解する](https://devblog.thebase.in/entry/2019/12/20/110000_1)
+
+自分の練習がてら、Rで再現コードを書いていますが、実装が誤っている場合、参考元ブログの誤りではなく、おそらく私の誤りである可能性が高いため、予めお断りさせていただきます。加え、次回以降の記事ではProphetパッケージのトレンドや未来の変化点の計算部分をスクリプトに沿って深ぼっているので、Rのスクリプトを勉強したいということであれば、そっちを見たほうが正確かつスクリプトも綺麗です。
+
+```{r}
+g2 <- function(t, C = 1, k = 1, m = 0,  S, d){
+  a <- matrix(0, nrow = length(t), ncol = length(S))
+  for (i in 1:length(t)) {
+    for (j in 1:length(S)) {
+      a[i, j] <- ifelse(S[[j]] < t[[i]], 1, 0) 
+    }
+  }
+  
+  y <- C / (1 + exp(-(k + (a %*% d)) * (t - m)))
+  
+  return(data.frame(t, y))
+}
+
+t <- seq(-10 ,10, length.out = 100)
+S <- c(-5, 1, 5) # change point time
+delta <- c(0.1, 0.3, -0.6) # change rate for growth rate
+
+df2 <- g2(
+  t = t, # time
+  C = 1, # capacity
+  k = 0.1, # growth rate
+  m = 0, # offset
+  S = S, # change point
+  d = delta  # change rate for growth rate
+)
+
+ggplot(df2, aes(t, y)) + 
+  geom_line() + 
+  geom_vline(xintercept = S, col = "red", linetype = "dashed") + 
+  scale_x_continuous(breaks = ceiling(seq(-10, 10, 1)))
+```
+
+このままでは、変化点で曲線が滑らかではなく、トレンドの変化が大きい状態です。この状態を調整するために、オフセットを利用します。
+
+# 時点で変化する成長率のトレンド調整
+
+ここの作業が終わると、ロジスティクトレンドは下記のようになります。
+
+$$
+g(t) = \frac{C_{t}}{ 1 + exp(-(k + \boldsymbol{a}(t) \cdot \boldsymbol{\delta^{ \mathrm{T}}}) (t - (m + \boldsymbol{a}(t) \cdot \boldsymbol{\gamma^{ \mathrm{T}}}))}
+$$
+
+まずは、成長率が変わる変化点$S_{j,1...S}$個に対し、オフセットを調整するベクトル$\boldsymbol{\gamma}$を用意します。ベクトル$\boldsymbol{\gamma}$は下記のように定義します。
+
+$$
+\gamma_{j} = \left(s_{j} - m - \displaystyle \sum_{l \lt j} \gamma_{l}\right) \cdot 
+\left(1 - \frac{ k + \displaystyle \sum_{l \lt j} \delta_{l} }{k + \displaystyle \sum_{l \le j} \delta_{l}} \right)
+$$
+
+オフセットを利用することで、折れ線が折れ曲がる前後を調整することで、変化点の結合部分が連続で滑らかになるように調整します。
+
+```{r}
+g3 <- function(t, C = 1, k = 1, m = 0,  S, d){
+  a <- matrix(0, nrow = length(t), ncol = length(S))
+  for (i in 1:length(t)) {
+    for (j in 1:length(S)) {
+      a[i, j] <- ifelse(S[[j]] < t[[i]], 1, 0) 
+    }
+  }
+  
+  gamma <- vector(mode = "numeric", length = length(S))
+  for (j in 1:length(gamma)) {
+    gamma[j] = (S[j] - m - sum(gamma[0:(j-1)])) * (1 - ((k + sum(d[0:(j-1)])) / (k + sum(d[0:j]))))
+  }
+
+  y <- C / (1 + exp(-(k + (a %*% d)) * (t - (m + (a %*% gamma)))))
+  
+  return(data.frame(t, y))
+}
+
+t <- seq(-10 ,10, length.out = 100)
+S <- c(-5, 1, 5) # change point time
+delta <- c(0.1, 0.3, -0.6) # change rate for growth rate
+
+df3 <-  g3(
+  t = t, # time
+  C = 1, # capacity
+  k = 0.1, # growth rate
+  m = 0, # offset
+  S = S, # change point
+  d = delta  # change rate for growth rate
+)
+
+ggplot(df3, aes(t, y)) + 
+  geom_line() + 
+  geom_vline(xintercept = S, col = "red", linetype = "dashed") + 
+  scale_x_continuous(breaks = seq(-10, 10, 1))
+```
+
+ここでは、トレンドを深ぼるにあたって、変化点を自分で設定していましたが、Prophetではどのように変化点を検知しているのか、次回はその点について見ていきます。
+
+# セッション情報
+
+```{r}
+sessionInfo()
+```
+
+
+

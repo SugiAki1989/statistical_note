@@ -1,0 +1,625 @@
+---
+title: "顧客の購買予測に関するメモ"
+pagetitle: "顧客の購買予測に関するメモ"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+[データ分析プロセス](https://www.kyoritsu-pub.co.jp/bookdetail/9784320123656)のp140「4.1.12 実データに対する分析：顧客の購買予測」のスクリプトを参考に書き直した。また、問題設定は下記の通り設定した。
+
+- データ：**2000年11月から2001年2月**までのPOSデータ
+- 予測対象：過去2ヶ月間で購買がある会員(**2001年1月から2001年2月**)
+- 予測タイミング：月末時点で翌月に購買するかを予測
+- 予測期間：**2001年3月**
+
+[データ分析プロセス](https://www.kyoritsu-pub.co.jp/bookdetail/9784320123656)とは異なり、データ範囲外の**2001年3月**の購買確率を予測する。そのため、**2000年12月から2001年1月**の情報で**2001年2月**の購買有無を予測することでモデルを訓練し、それを1ヶ月ずらし、**2001年1月から2001年2月**の情報で**2001年3月**の購買有無を予測する。つまり状況としては、**2001年2月の末時点で来月購買してくれそうなお客に何らかの施策をしたいから、買いそうな顧客のリストがほしい**という状況。
+
+※パイプラインを作る練習だったので、予測精度を上げるための工夫は何もしていない。
+
+## メモ
+
+```{r}
+# # Load library
+# pacman::p_load(tidyverse, lubridate, rsample, xgboost, vip, pdp, MLmetrics)
+# 
+# # Custom Function
+# met <- function(y_pred, y_true){
+#   Accuracy_res <- MLmetrics::Accuracy(y_pred = y_pred, y_true = y_true)
+#   Precision_res <- MLmetrics::Precision(y_pred = y_pred, y_true = y_true)
+#   Recall_res <- MLmetrics::Recall(y_pred = y_pred, y_true = y_true)
+#   Sensitivity_res <- MLmetrics::Sensitivity(y_pred = y_pred, y_true = y_true)
+#   Specificity_res <- MLmetrics::Specificity(y_pred = y_pred, y_true = y_true)
+#   AUC_res <- MLmetrics::AUC(y_pred = y_pred, y_true = y_true)
+#   ConfusionMatrix_res <- MLmetrics::ConfusionMatrix(y_pred = y_pred, y_true = y_true)
+#   F1_Score_res <- MLmetrics::F1_Score(y_pred = y_pred, y_true = y_true)
+#   LogLoss_res <- MLmetrics::LogLoss(y_pred = y_pred, y_true = y_true)
+#   out <- list(Accuracy = Accuracy_res,
+#               Precision = Precision_res,
+#               Recall = Recall_res, 
+#               Sensitivity = Sensitivity_res,
+#               Specificity = Specificity_res,
+#               AUC = AUC_res,
+#               F1_Score = F1_Score_res, 
+#               LogLoss = LogLoss_res,
+#               ConfusionMatrix = ConfusionMatrix_res)
+#   return(out)
+# }
+# 
+# 
+# # Read Tafeng Dataset
+# col_info <- cols(
+#   Time = col_datetime(),
+#   CustID = col_character(),
+#   Age = col_character(),
+#   Area = col_character(),
+#   ProductSubClass = col_character(),
+#   ProductID = col_character(),
+#   Amount = col_integer(),
+#   Asset = col_integer(),
+#   SalesPrice = col_integer()
+# )
+#  
+# tafeng %>% head(., 5)
+# # A tibble: 5 x 9
+#   Time                CustID   Age   Area  ProductSubClass ProductID     Amount Asset SalesPrice
+#   <dttm>              <chr>    <chr> <chr> <chr>           <chr>          <int> <int>      <int>
+# 1 2000-11-01 00:00:00 00046855 D     E     110411          4710085120468      3    51         57
+# 2 2000-11-01 00:00:00 00539166 E     E     130315          4714981010038      2    56         48
+# 3 2000-11-01 00:00:00 00663373 F     E     110217          4710265847666      1   180        135
+# 4 2000-11-01 00:00:00 00340625 A     E     110411          4710085120697      1    17         24
+# 5 2000-11-01 00:00:00 00236645 D     H     712901          8999002568972      2   128        170
+# 
+# tafeng %>% summary()
+#       Time                        CustID              Age                Area           ProductSubClass     ProductID        
+#  Min.   :2000-11-01 00:00:00   Length:817741      Length:817741      Length:817741      Length:817741      Length:817741     
+#  1st Qu.:2000-11-28 00:00:00   Class :character   Class :character   Class :character   Class :character   Class :character  
+#  Median :2001-01-01 00:00:00   Mode  :character   Mode  :character   Mode  :character   Mode  :character   Mode  :character  
+#  Mean   :2000-12-30 16:40:45                                                                                                 
+#  3rd Qu.:2001-01-30 00:00:00                                                                                                 
+#  Max.   :2001-02-28 00:00:00                                                                                                 
+#      Amount             Asset            SalesPrice      
+#  Min.   :   1.000   Min.   :     0.0   Min.   :     1.0  
+#  1st Qu.:   1.000   1st Qu.:    35.0   1st Qu.:    42.0  
+#  Median :   1.000   Median :    62.0   Median :    76.0  
+#  Mean   :   1.382   Mean   :   112.1   Mean   :   131.9  
+#  3rd Qu.:   1.000   3rd Qu.:   112.0   3rd Qu.:   132.0  
+#  Max.   :1200.000   Max.   :432000.0   Max.   :444000.0  
+# 
+# tafeng %>% dplyr::glimpse()
+# Observations: 817,741
+# Variables: 9
+# $ Time            <dttm> 2000-11-01, 2000-11-01, 2000-11-01, 2000-11-01, 2000-11-01, 2000-11-01, 2000-11-01, 2000-11-01, 2000-11-01,…
+# $ CustID          <chr> "00046855", "00539166", "00663373", "00340625", "00236645", "01704129", "00841528", "00768566", "00217361", …
+# $ Age             <chr> "D", "E", "F", "A", "D", "B", "C", "K", "F", "D", "D", "D", "F", "E", "A", "D", "F", "C", "F", "B", "B", "C"…
+# $ Area            <chr> "E", "E", "E", "E", "H", "E", "E", "E", "E", "E", "F", "E", "E", "E", "E", "E", "E", "F", "E", "E", "E", "F"…
+# $ ProductSubClass <chr> "110411", "130315", "110217", "110411", "712901", "110407", "110102", "110401", "130401", "110504", "500201"…
+# $ ProductID       <chr> "4710085120468", "4714981010038", "4710265847666", "4710085120697", "8999002568972", "4710734000011", "47103…
+# $ Amount          <int> 3, 2, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 2, 1, 2, 1, 1, 1, 12, 1, 1, 2, 1, 2, 2, 1, 1,…
+# $ Asset           <int> 51, 56, 180, 17, 128, 38, 20, 44, 76, 17, 95, 19, 113, 20, 15, 157, 20, 23, 56, 24, 83, 46, 28, 42, 72, 122,…
+# $ SalesPrice      <int> 57, 48, 135, 24, 170, 46, 28, 55, 90, 20, 109, 25, 129, 19, 19, 168, 19, 29, 48, 29, 98, 58, 24, 56, 86, 145…
+# 
+# tafeng %>% purrr::map(.x = .,.f = function(x) {sum(is.na(x))})
+# $Time
+# [1] 0
+# 
+# $CustID
+# [1] 0
+# 
+# $Age
+# [1] 0
+# 
+# $Area
+# [1] 0
+# 
+# $ProductSubClass
+# [1] 0
+# 
+# $ProductID
+# [1] 0
+# 
+# $Amount
+# [1] 0
+# 
+# $Asset
+# [1] 0
+# 
+# $SalesPrice
+# [1] 0
+```
+
+関数化すればよかったど。もういい。
+
+```{r}
+# # Get Demographic info
+# demog <- tafeng %>%
+#   dplyr::select(CustID, Age, Area) %>%
+#   dplyr::distinct()
+# 
+# demog
+# # A tibble: 32,266 x 3
+#    CustID   Age   Area 
+#    <chr>    <chr> <chr>
+#  1 00046855 D     E    
+#  2 00539166 E     E    
+#  3 00663373 F     E    
+#  4 00340625 A     E    
+#  5 00236645 D     H    
+#  6 01704129 B     E    
+#  7 00841528 C     E    
+#  8 00768566 K     E    
+#  9 00217361 F     E    
+# 10 02007052 D     E    
+# # … with 32,256 more rows
+# 
+# # Get Useful tbl
+# df_tmp <- tafeng %>%
+#   dplyr::select(CustID, Time, SalesPrice) %>%
+#   dplyr::mutate(
+#     Time = as.Date(Time),
+#     ym = str_c(lubridate::year(Time), str_pad(lubridate::month(Time), width = 2, pad = "0"), sep = "-")
+#     ) %>%
+#   dplyr::group_by(CustID, ym) %>%
+#   dplyr::summarise(
+#     Freq = n_distinct(Time),
+#     SalesPrice = sum(SalesPrice, na.rm = TRUE),
+#     LastPurchase = max(Time, na.rm = TRUE)
+#   ) %>%
+#   dplyr::select(CustID, ym, Freq, SalesPrice, LastPurchase) %>%
+#   dplyr::ungroup()
+# 
+# df_tmp
+# # A tibble: 65,696 x 5
+#    CustID   ym       Freq SalesPrice LastPurchase
+#    <chr>    <chr>   <int>      <int> <date>      
+#  1 00001069 2000-11     1        187 2000-11-13  
+#  2 00001069 2001-01     1        971 2001-01-21  
+#  3 00001069 2001-02     2        786 2001-02-10  
+#  4 00001113 2000-11     3       1602 2000-11-27  
+#  5 00001113 2001-01     1        628 2001-01-06  
+#  6 00001250 2001-02     2       1583 2001-02-10  
+#  7 00001359 2000-12     1        364 2000-12-04  
+#  8 00001823 2000-11     2       2174 2000-11-06  
+#  9 00001823 2001-01     1        433 2001-01-24  
+# 10 00002189 2000-12     1       9078 2000-12-02  
+# # … with 65,686 more rows
+# 
+# # Get Useful tbl
+# freq_M_w <- df_tmp %>%
+#   dplyr::select(CustID, ym, Freq) %>%
+#   tidyr::pivot_wider(
+#     names_from = ym,
+#     values_from = Freq,
+#     values_fill = list(Freq = 0)
+#   ) %>%
+#   dplyr::select(CustID, order(names(.)))
+# 
+# freq_M_w
+# # A tibble: 32,266 x 5
+#    CustID   `2000-11` `2000-12` `2001-01` `2001-02`
+#    <chr>        <int>     <int>     <int>     <int>
+#  1 00001069         1         0         1         2
+#  2 00001113         3         0         1         0
+#  3 00001250         0         0         0         2
+#  4 00001359         0         1         0         0
+#  5 00001823         2         0         1         0
+#  6 00002189         0         1         1         0
+#  7 00003667         0         2         0         2
+#  8 00004282         0         1         1         0
+#  9 00004381         1         0         0         0
+# 10 00004947         0         2         0         0
+# # … with 32,256 more rows
+# 
+# money_M_w <- df_tmp %>%
+#   dplyr::select(CustID, ym, SalesPrice) %>%
+#   tidyr::pivot_wider(
+#     names_from = ym,
+#     values_from = SalesPrice,
+#     values_fill = list(SalesPrice = 0)
+#   ) %>%
+#   dplyr::select(CustID, order(names(.)))
+# 
+# money_M_w
+# # A tibble: 32,266 x 5
+#    CustID   `2000-11` `2000-12` `2001-01` `2001-02`
+#    <chr>        <int>     <int>     <int>     <int>
+#  1 00001069       187         0       971       786
+#  2 00001113      1602         0       628         0
+#  3 00001250         0         0         0      1583
+#  4 00001359         0       364         0         0
+#  5 00001823      2174         0       433         0
+#  6 00002189         0      9078      4978         0
+#  7 00003667         0      9939         0      1570
+#  8 00004282         0       171       796         0
+#  9 00004381       701         0         0         0
+# 10 00004947         0      3363         0         0
+# # … with 32,256 more rows
+# 
+# recency_M_w <- df_tmp %>%
+#   dplyr::select(CustID, ym, LastPurchase) %>%
+#   mutate(LastPurchase = as.numeric(ymd(LastPurchase))) %>%
+#   tidyr::pivot_wider(
+#     names_from = ym,
+#     values_from = LastPurchase,
+#     values_fill = list(LastPurchase = NA)
+#   ) %>%
+#   dplyr::select(CustID, order(names(.)))
+# 
+# recency_M_w
+# # A tibble: 32,266 x 5
+#    CustID   `2000-11` `2000-12` `2001-01` `2001-02`
+#    <chr>        <dbl>     <dbl>     <dbl>     <dbl>
+#  1 00001069     11274        NA     11343     11363
+#  2 00001113     11288        NA     11328        NA
+#  3 00001250        NA        NA        NA     11363
+#  4 00001359        NA     11295        NA        NA
+#  5 00001823     11267        NA     11346        NA
+#  6 00002189        NA     11293     11325        NA
+#  7 00003667        NA     11317        NA     11361
+#  8 00004282        NA     11306     11335        NA
+#  9 00004381     11279        NA        NA        NA
+# 10 00004947        NA     11301        NA        NA
+# # … with 32,256 more rows
+```
+
+モデル作成。
+
+```{r}
+# # 予測に使用するデータを作成する
+# # range_term: 説明変数を構築するために使用する期間(YYYY-MM形式)
+# # target_term: 目的変数を構築するために使用する期間(YYYY-MM形式)
+# # pred_action_day: 予測を実施する日付(YYYY-MM-DD形式)
+# range_term <- c("2000-12", "2001-01")
+# target_term <- "2001-02"
+# pred_action_day <- "2001-01-31"
+# 
+# ids <- freq_M_w %>%
+#   dplyr::select(CustID, range_term) %>%
+#   tidyr::pivot_longer(cols = -CustID, names_to = "ym") %>%
+#   dplyr::group_by(CustID) %>%
+#   dplyr::summarise(check = sum(value)) %>%
+#   dplyr::filter(check != 0) %>%
+#   dplyr::pull(CustID)
+# 
+# df_freq <- freq_M_w %>%
+#   dplyr::select(CustID, range_term) %>%
+#   dplyr::filter(CustID %in% ids) %>% 
+#   purrr::set_names(str_c("f_", (1:ncol(.)-1)))
+# 
+# df_money <- money_M_w %>%
+#   dplyr::select(CustID, range_term) %>%
+#   dplyr::filter(CustID %in% ids) %>%
+#   purrr::set_names(str_c("m_", (1:ncol(.)-1)))
+# 
+# df_recency <- recency_M_w %>%
+#   dplyr::select(CustID, range_term) %>%
+#   dplyr::filter(CustID %in% ids) %>%
+#   tidyr::pivot_longer(cols = -CustID, names_to = "ym") %>%
+#   dplyr::mutate(recency = as.numeric(ymd(pred_action_day)) - value) %>%
+#   dplyr::select(-value) %>%
+#   tidyr::pivot_wider(names_from = ym, values_from = recency) %>%
+#   purrr::set_names(str_c("r_", (1:ncol(.)-1)))
+# 
+# df_target <- freq_M_w %>%
+#   dplyr::select(CustID, target_term) %>%
+#   dplyr::filter(CustID %in% ids) %>%
+#   purrr::set_names(c("t_CustID", "Target")) %>% 
+#   dplyr::mutate(Target = if_else(Target > 0, TRUE, FALSE)) 
+# 
+# df_demo <- demog %>%
+#   dplyr::filter(CustID %in% ids)
+# 
+# data <- df_freq %>%
+#   dplyr::left_join(., df_money, by = c("f_0" = "m_0")) %>%
+#   dplyr::left_join(., df_recency, by = c("f_0" = "r_0")) %>%
+#   dplyr::left_join(., df_demo, by = c("f_0" = "CustID")) %>%
+#   dplyr::left_join(., df_target, by = c("f_0" = "t_CustID")) %>% 
+#   dplyr::select(-f_0) %>% 
+#   dplyr::mutate_if(is.character, as.factor) %>% 
+#   base::data.matrix() %>%
+#   tidyr::as_tibble() 
+# 
+# set.seed(1989)
+# df_split <- rsample::initial_split(data = data,  prop = 0.7)
+# df_train <- rsample::training(df_split)
+# df_test  <- rsample::testing(df_split)
+# 
+# xgb_train <- xgboost::xgb.DMatrix(data  = df_train %>% dplyr::select(-Target) %>% as.matrix(), 
+#                                   label = df_train %>% dplyr::pull(Target))
+# 
+# xgb_test <- xgboost::xgb.DMatrix(data  = df_test %>% dplyr::select(-Target) %>% as.matrix(),
+#                                  label = df_test %>% dplyr::pull(Target))
+# 
+# params <- list(
+#   booster = "gbtree",
+#   objective = "binary:logistic",
+#   eval_metric = "logloss",
+#   eta = 0.1, 
+#   gamma = 0,
+#   max_depth = 5,
+#   min_child_weight = 2,
+#   colsample_bytree = 0.8
+# )
+# 
+# set.seed(1989)
+# xgb_cv <- xgboost::xgb.cv(
+#   data = xgb_train, 
+#   nrounds = 1000, 
+#   nfold = 5, 
+#   params = params,
+#   early_stopping_rounds = 50 
+# )
+# 
+# set.seed(1989)
+# xgb_fit <- xgboost::xgboost(param = params,
+#                             data = xgb_train,
+#                             nrounds = xgb_cv$best_iteration)
+# 
+# xgb_pred <- as.numeric(predict(xgb_fit, xgb_test) > 0.5)
+# met(y_pred = xgb_pred, y_true = df_test %>% pull(Target))
+# 
+# # $Accuracy
+# # [1] 0.6699759
+# # 
+# # $Precision
+# # [1] 0.6452555
+# # 
+# # $Recall
+# # [1] 0.7531951
+# # 
+# # $Sensitivity
+# # [1] 0.7531951
+# # 
+# # $Specificity
+# # [1] 0.5869688
+# # 
+# # $AUC
+# # [1] 0.670082
+# # 
+# # $F1_Score
+# # [1] 0.6950596
+# # 
+# # $LogLoss
+# # [1] 11.39873
+# # 
+# # $ConfusionMatrix
+# #      y_pred
+# # y_true    0    1
+# # 0 2652  869
+# # 1 1458 2072
+```
+
+予測を行う。
+
+```{r}
+# # 予測に使用するデータを作成する
+# # range_term: 説明変数を構築するために使用する期間(YYYY-MM形式)
+# # pred_action_day: 予測を実施する日付(YYYY-MM-DD形式)
+# range_term <- c("2001-01", "2001-02")
+# pred_action_day <- "2001-02-28"
+# 
+# ids <- freq_M_w %>%
+#   dplyr::select(CustID, range_term) %>%
+#   tidyr::pivot_longer(cols = -CustID, names_to = "ym") %>%
+#   dplyr::group_by(CustID) %>%
+#   dplyr::summarise(check = sum(value)) %>%
+#   dplyr::filter(check != 0) %>%
+#   dplyr::pull(CustID)
+# 
+# df_freq <- freq_M_w %>%
+#   dplyr::select(CustID, range_term) %>%
+#   dplyr::filter(CustID %in% ids) %>% 
+#   purrr::set_names(str_c("f_", (1:ncol(.)-1)))
+# 
+# df_money <- money_M_w %>%
+#   dplyr::select(CustID, range_term) %>%
+#   dplyr::filter(CustID %in% ids) %>%
+#   purrr::set_names(str_c("m_", (1:ncol(.)-1)))
+# 
+# df_recency <- recency_M_w %>%
+#   dplyr::select(CustID, range_term) %>%
+#   dplyr::filter(CustID %in% ids) %>%
+#   tidyr::pivot_longer(cols = -CustID, names_to = "ym") %>%
+#   dplyr::mutate(recency = as.numeric(ymd(pred_action_day)) - value) %>%
+#   dplyr::select(-value) %>%
+#   tidyr::pivot_wider(names_from = ym, values_from = recency) %>%
+#   purrr::set_names(str_c("r_", (1:ncol(.)-1)))
+# 
+# df_demo <- demog %>%
+#   dplyr::filter(CustID %in% ids)
+# 
+# data <- df_freq %>%
+#   dplyr::left_join(., df_money, by = c("f_0" = "m_0")) %>%
+#   dplyr::left_join(., df_recency, by = c("f_0" = "r_0")) %>%
+#   dplyr::left_join(., df_demo, by = c("f_0" = "CustID")) %>%
+#   dplyr::select(-f_0) %>% 
+#   dplyr::mutate_if(is.character, as.factor) %>% 
+#   base::data.matrix() %>%
+#   tidyr::as_tibble() %>% 
+#   dplyr::mutate(Target = NA) %>% 
+#   dplyr::bind_cols(df_freq %>% select(f_0))
+# 
+# xgb_df <- xgboost::xgb.DMatrix(data  = data %>% dplyr::select(-Target, -f_0) %>% as.matrix(), 
+#                                label = data %>% dplyr::pull(Target))
+# 
+# xgb_pred <- as.numeric(predict(xgb_fit, xgb_df) > 0.5)
+# 
+# df_out <- data %>% 
+#   mutate(Target = xgb_pred)
+# 
+# df_out
+# # A tibble: 24,202 x 10
+#      f_1   f_2   m_1   m_2   r_1   r_2   Age  Area Target f_0     
+#    <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>  <dbl> <chr>   
+#  1     1     2   971   786    38    18    11     5      0 00001069
+#  2     1     0   628     0    53    NA    11     6      0 00001113
+#  3     0     2     0  1583    NA    18     4     4      0 00001250
+#  4     1     0   433     0    35    NA    11     4      0 00001823
+#  5     1     0  4978     0    56    NA    11     2      0 00002189
+#  6     0     2     0  1570    NA    20    11     7      0 00003667
+#  7     1     0   796     0    46    NA    10     5      0 00004282
+#  8     0     1     0   553    NA    23     4     6      0 00004961
+#  9     2     0  2445     0    37    NA    11     4      0 00004978
+# 10     2     1  2756   315    43     9     4     6      1 00005241
+# # … with 24,192 more rows
+# 
+# df_out %>% 
+#   count(Target)
+# # A tibble: 2 x 2
+#   Target     n
+#    <dbl> <int>
+# 1      0 13619
+# 2      1 10583
+```
+## 備考
+
+```{r}
+
+# # 予測に使用するデータを作成する
+# # range_term: 説明変数を構築するために使用する期間(YYYY-MM形式)
+# # target_term: 目的変数を構築するために使用する期間(YYYY-MM形式)
+# # pred_action_day: 予測を実施する日付(YYYY-MM-DD形式)
+# range_term <- c("2000-11", "2000-12")
+# target_term <- "2001-01"
+# pred_action_day <- "2000-12-31"
+# 
+# ids <- freq_M_w %>%
+#   dplyr::select(CustID, range_term) %>%
+#   tidyr::pivot_longer(cols = -CustID, names_to = "ym") %>%
+#   dplyr::group_by(CustID) %>%
+#   dplyr::summarise(check = sum(value)) %>%
+#   dplyr::filter(check != 0) %>%
+#   dplyr::pull(CustID)
+# 
+# df_freq <- freq_M_w %>%
+#   dplyr::select(CustID, range_term) %>%
+#   dplyr::filter(CustID %in% ids) %>% 
+#   purrr::set_names(str_c("f_", (1:ncol(.)-1)))
+# 
+# df_money <- money_M_w %>%
+#   dplyr::select(CustID, range_term) %>%
+#   dplyr::filter(CustID %in% ids) %>%
+#   purrr::set_names(str_c("m_", (1:ncol(.)-1)))
+# 
+# df_recency <- recency_M_w %>%
+#   dplyr::select(CustID, range_term) %>%
+#   dplyr::filter(CustID %in% ids) %>%
+#   tidyr::pivot_longer(cols = -CustID, names_to = "ym") %>%
+#   dplyr::mutate(recency = as.numeric(ymd(pred_action_day)) - value) %>%
+#   dplyr::select(-value) %>%
+#   tidyr::pivot_wider(names_from = ym, values_from = recency) %>%
+#   purrr::set_names(str_c("r_", (1:ncol(.)-1)))
+# 
+# df_target <- freq_M_w %>%
+#   dplyr::select(CustID, target_term) %>%
+#   dplyr::filter(CustID %in% ids) %>%
+#   purrr::set_names(c("t_CustID", "Target")) %>% 
+#   dplyr::mutate(Target = if_else(Target > 0, TRUE, FALSE)) 
+# 
+# df_demo <- demog %>%
+#   dplyr::filter(CustID %in% ids)
+# 
+# data <- df_freq %>%
+#   dplyr::left_join(., df_money, by = c("f_0" = "m_0")) %>%
+#   dplyr::left_join(., df_recency, by = c("f_0" = "r_0")) %>%
+#   dplyr::left_join(., df_demo, by = c("f_0" = "CustID")) %>%
+#   dplyr::left_join(., df_target, by = c("f_0" = "t_CustID")) %>% 
+#   dplyr::select(-f_0) %>% 
+#   dplyr::mutate_if(is.character, as.factor) %>% 
+#   base::data.matrix() %>%
+#   tidyr::as_tibble() 
+# 
+# set.seed(1989)
+# df_split <- rsample::initial_split(data = data,  prop = 0.7)
+# df_train <- rsample::training(df_split)
+# df_test  <- rsample::testing(df_split)
+# 
+# xgb_train <- xgboost::xgb.DMatrix(data  = df_train %>% select(-Target) %>% as.matrix(), 
+#                                   label = df_train %>% pull(Target))
+# 
+# xgb_test <- xgboost::xgb.DMatrix(data  = df_test %>% select(-Target) %>% as.matrix(),
+#                                  label = df_test %>% pull(Target))
+# 
+# 
+# params <- list(
+#   booster = "gbtree",
+#   objective = "binary:logistic",
+#   eval_metric = "logloss",
+#   eta = 0.1, 
+#   gamma = 0,
+#   max_depth = 5,
+#   min_child_weight = 2,
+#   colsample_bytree = 0.8
+# )
+# 
+# set.seed(1989)
+# xgb_cv <- xgboost::xgb.cv(
+#   data = xgb_train, 
+#   nrounds = 1000, 
+#   nfold = 5, 
+#   params = params,
+#   early_stopping_rounds = 50 
+# )
+# 
+# set.seed(1989)
+# xgb_fit <- xgboost::xgboost(param = params,
+#                             data = xgb_train,
+#                             nrounds = xgb_cv$best_iteration)
+# 
+# xgb_pred <- as.numeric(predict(xgb_fit, xgb_test) > 0.5)
+# 
+# 
+# met(y_pred = xgb_pred, y_true = df_test %>% pull(Target))
+# $Accuracy
+# [1] 0.6715659
+# 
+# $Precision
+# [1] 0.6396836
+# 
+# $Recall
+# [1] 0.7801418
+# 
+# $Sensitivity
+# [1] 0.7801418
+# 
+# $Specificity
+# [1] 0.5637848
+# 
+# $AUC
+# [1] 0.6719633
+# 
+# $F1_Score
+# [1] 0.7029652
+# 
+# $LogLoss
+# [1] 11.3438
+# 
+# $ConfusionMatrix
+# y_pred
+# y_true    0    1
+# 0 2750  775
+# 1 1549 2002
+```

@@ -1,0 +1,168 @@
+---
+title: "RのTidy evaluation_12"
+pagetitle: "RのTidy evaluation_12"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+# はじめに
+この記事はTidy evaluationについて学習した内容を自分の備忘録としてまとめたものです。今回は`{testthat}`の使い方について、簡単にまとめておきます。詳しくはやらないというかできる技量がない。
+
+## `{testthat}`
+`{testthat}`を使用することで自動でテストを行うことが可能になる。しかも、テストタスクをより簡単かつ効果的に行うことができるのが`{testthat}`。Tidy evaluationを用いて、パッケージ開発を行う場合でも、そうでなくてもテストは重要な部分な部分でやらないといけないのですが、その部分を効率的にやってくれるのが。詳細は羽鳥先生の[Testing](http://r-pkgs.had.co.nz/tests.html#test-workflow)を参照ください。
+
+テストは下記のように構成されているようです。
+
+> Tests are organised hierarchically: expectations are grouped into tests which are organised in files:
+
+テストは階層的に構成されます：expectationsはfilesに編成されたtestsにグループ化されます：
+
+> An **expectation** is the atom of testing. It describes the expected result of a computation: Does it have the right value and right class? Does it produce error messages when it should? An expectation automates visual checking of results in the console. Expectations are functions that start with expect_.
+
+**expectation**は、テストの最小単位(atom)です。計算の期待される結果を書く。正しい値と正しいクラスを持っているか？必要なときにエラーメッセージを生成するか？などです。**expectation**は、コンソールでの結果の視覚的なチェックを自動化します。**expectation**は`expect_`で始まる関数を使用します。
+
+> A **test** groups together multiple expectations to test the output from a simple function, a range of possibilities for a single parameter from a more complicated function, or tightly related functionality from across multiple functions. This is why they are sometimes called unit as they test one unit of functionality. A test is created with test_that() .
+
+**test**は、複数の**expectation**や、複数の機能全体からの単純な出力、より複雑な関数からの単一のパラメータの可能性の範囲、又は密に関連する機能をまとめてテストします。1つのユニットの機能をテストするため、ユニットと呼ばれることもある理由です。**test**は`test_that()`を使用します。
+
+> A **file** groups together multiple related tests. Files are given a human readable name with context().
+
+**file**は、グループの複数の関連するテストをまとめる単位。ファイルには、`context()`を使って、人間が読める名前が付けられます。
+
+## `{testthat}`の使い方
+これが正しいテストの仕方なのかはわからないので、参考までに参考にしてください。まずは、関数を使った`.R`ファイルを任意の場所に保存しておきます。今回はデスクトップにある`work_dir`フォルダに保存したとします。
+
+```R:R
+$ cd ~/Desktop
+$ mkdir work_dir
+$ cd work_dir
+$ ls
+roll_sum.R
+```
+
+`roll_sum.R`の中身は下記のように累積和を計算する関数です。
+
+```R:R
+# roll_sum.Rとして保存
+roll_sum <- function(x) {
+  if(class(x) == "character") {
+    x <- NA
+    return(x)
+  }
+  
+  output <- vector("numeric", length(x))
+  output[1] <- x[1]
+  for (i in 2:length(x)) {
+    output[i] <- output[i - 1] + x[i]
+  }
+  output
+}
+```
+
+次に、テスト用のスクリプトを保存するフォルダ`tests`を`work_dir`の中に作ります。
+
+```R:R
+$ cd ~/Desktop/work_dir
+$ mkdir tests
+$ ls
+roll_sum.R  tests/
+```
+
+この中にテスト用のスクリプトを保存します。中身はこんな感じ。`expect_equal()`だけではなく、`expect_match()`、`expect_output()`、`expect_message()`、`expect_warning()`、`expect_error()`、`expect_is()`などもあります。
+
+```R:R
+# test_numeric.R
+
+context("test to numeric")
+
+test_that("work numeric", {
+  expect_that(roll_sum(1:10), equals(cumsum(1:10)))
+  expect_that(roll_sum(-10:0), equals(cumsum(-10:0)))
+})
+
+#----------------------------------------
+
+# test_character.R
+
+context("test to character")
+
+test_that("work character", {
+  expect_that(roll_sum(c("x", "y", "z")), equals(NA))
+})
+
+```
+
+`tests`の中はこんな感じ。
+
+```R:R
+$ cd ~/Desktop/work_dir/tests
+$ ls
+test_character.R  test_numeric.R
+```
+
+そして、`test_dir()`でテストを実行すると、下記のような結果が返ってくる。`test to character`では1つのテスト、`test to numeric`では2つのテストを書いているので、その結果が返ってくる。失敗していると、`Failed`や`Warnings`にその数が記録されます。テストを書く`.R`ごとに実行したいときは、`test_file()`を使う。
+
+```R:R
+library(testthat)
+
+# test_file("~/Desktop/work_dir/tests/test_character.R")
+test_dir("~/Desktop/work_dir/tests")
+
+✔ |  OK F W S | Context
+✔ |   1       | test to character
+✔ |   2       | test to numeric
+
+══ Results ══════════════════════════════════════════════════════
+OK:       3
+Failed:   0
+Warnings: 0
+Skipped:  0
+> test_dir("~/Desktop/work_dir/tests")
+✔ |  OK F W S | Context
+✔ |   1       | test to character
+✔ |   2       | test to numeric
+
+══ Results ══════════════════════════════════════════════════════
+OK:       3
+Failed:   0
+Warnings: 0
+Skipped:  0
+```
+
+`test_dir()`に` reporter="summary"`を指定することで、要約版のテスト結果を受けて取れます。各ファイルに対して、テストの成功した個数分、`.`で表現されます。
+
+```R:R
+test_dir("~/Desktop/work_dir/tests", reporter = "summary")
+test to character: .
+test to numeric: ..
+
+══ DONE ═════════════════════════════════════════════════════════
+```
+
+## 参照サイト
+- [Unit testing with R](https://www.brodrigues.co/blog/2016-03-31-unit-testing-with-r/)

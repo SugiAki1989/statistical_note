@@ -1,0 +1,109 @@
+---
+title: "Rの非公開のDlistってなんじゃらほい。"
+pagetitle: "Rの非公開のDlistってなんじゃらほい。"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+Rには非公開のクラスがいくつかある。例えば、`Dlist`なんかもそう。`list`ではない、`Dlist`である。他にもあるようだけど、ここでは、`Dlist`についてまとめておく。
+
+## Dlist
+`Dlist`はキャラクタータイプの一種で、`Sys.getenv()`などのシステム関係の返り値のクラスを調べると出てくる。
+
+```{r}
+tmp <- Sys.getenv()
+list(class(tmp), typeof(tmp))
+```
+
+調べると、RのBaseパッケージで定義されている**非公式のクラス**らしく、名前付き文字ベクトルを「きれい」にフォーマットして出力することを目的にしているとのこと。適当に名前付きのベクトルを作成して、クラスを`Dlist`にしてから`print()`してみると、フォーマットして出力される。
+
+```{r}
+string <- c("A" = "a", "B" = "bbb", "C" = "ccccc"); 
+string
+```
+
+```{r}
+class(string) <- "Dlist"
+print(string)
+```
+
+`Dlist`クラスの`print()`メソッド、`print.Dlist`の[実装](https://github.com/wch/r-source/blob/39954f65eb16ce07f0d64e9ce12c378b2a03da41/src/library/base/R/print.R#L125)をみると、`formatDL()`という関数に渡しているようで、`formatDL()`はフォーマットしてくれる関数らしいんだが、データフレームにはしてくれないよう。だけどデータフレームとし扱いたい理由があったので、無理くり変換する。クラスを`NULL`にして`as_tibble()`すると、行名にキーが入って、列名に値がはいる。
+
+```{r}
+Sys.getenv2 <- function() {
+  value <- Sys.getenv()
+  class(value) <- NULL
+  df <- tibble::as_tibble(value, rownames = "key")
+  return(df)
+}
+
+x <- Sys.getenv2()
+head(x)
+```
+
+クラスを持ってないオブジェクトに対して、`as_tibble()`がうまく作用する理屈は・・・。こんな名前付きの文字型ベクトルがあったとして、これを無理やりクラスを`Dlist`にしてみると、こうなる。
+
+```{r}
+val <- c("A" = "a", "B" = "b", "C" = "c")
+class(val) <- "Dlist"
+list(val,class(val))
+```
+
+これのクラスを`NULL`にしよう。そうすると`Dlist`から`character`に変換される。この状態では、名前付きの文字型ベクトルなので、
+
+```{r}
+class(val) <- NULL
+list(class(val), val)
+```
+
+データフレームに変換すれば、行名付きのデータフレームになるので、そこからは行名を列に取り出せばデータフレームの完成。
+
+```{r}
+tibble::as_tibble(val, rownames = "key")
+```
+
+ちなみに`formatDL()`は下記のようにしてフォーマットを整えることができる。
+
+```{r}
+# class(string) <- "Dlist"
+cat(formatDL(string, style = "list", width = 20), sep = "\n")
+```
+
+そしてちなみに、下記の`df2`の`*`の意味を今更知った・・・行名があるかないかなのね。
+
+```{r}
+val <- c("A" = "a", "B" = "b", "C" = "c")
+df1 <- tibble::as_tibble(val, rownames = NULL)
+list(df1, row.names(df1))
+```
+
+```{r}
+df2 <- tibble::as_tibble(val, rownames = NA)
+list(df2, row.names(df2))
+```
+
+誰得な内容になってしまったが、`Dlist`といものがあるみたい。

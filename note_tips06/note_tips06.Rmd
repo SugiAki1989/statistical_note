@@ -1,0 +1,141 @@
+---
+title: "t検定を繰り返し行う方法"
+pagetitle: "t検定を繰り返し行う方法"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここでは、複数の列が存在する場合にt検定を一括で行う方法をまとめておく。使用するパッケージは`{tidyverse}`と`{broom}`。
+
+## データセット
+今回想定しているデータは下記のようなテーブルのデータ。`seg`には0と1が入っている。この変数の0と1毎に各`v*`の値の平均に差があるかどうか、t検定を行いたい。`v*`は5列なので、今回であれば5行`t.test()`を書けば済む話だが、傾向スコアマッチングでベースラインの変数が揃ったかどうかを確認するときには、数十回書く必要があったりするので、なんとかしたい。
+
+```{r}
+library(tidyverse)
+library(broom)
+
+# 有効桁数と乱数シードの制御
+options(pillar.sigfig = 5)
+set.seed(1989)
+
+n <- 1000
+df <- tibble(seg = sample(c(0,1), n, replace = TRUE),
+             v1 = rnorm(n, 100, 10) + if_else(seg == 1, 5, 0),
+             v2 = rnorm(n, 50, 1)   + if_else(seg == 1, 5, 0),
+             v3 = rnorm(n, 200, 5)  + if_else(seg == 1, 5, 0),
+             v4 = rnorm(n, 300, 20) + if_else(seg == 1, 5, 0),
+             v5 = rnorm(n, 50, 0.5) + if_else(seg == 1, 5, 0))
+df
+```
+
+## 解決策
+`{tidyverse}`と`{broom}`を組み合わせることで解決する。これは確かに楽ではあるが、おそらくRユーザー以外には著しく可読性が下がる。for-loopのほうが他の言語を使っている人からしてもイメージはしやすいの確かなのかな。
+
+さておき、種明かしを始めるが、やっていることは単純で、データ構造をwide型からlong型に変換し、サブセットを作って、各サブセットにt検定を行ったのち、必要な情報をデータフレームに戻すということをやっている。
+
+```{r}
+df %>% 
+  gather(key = group, val = vals, -seg) %>% 
+  group_by(group) %>% 
+  nest() %>% 
+  mutate(fit = map(data, ~ t.test(.$vals ~ .$seg, var.equal = FALSE)),
+         glanced = map(fit, glance)) %>% 
+  unnest(glanced, .drop = TRUE) %>% 
+  select(group, estimate1, estimate2, estimate,conf.low, conf.high, p.value) %>% 
+  set_names(c("group", "seg0_mean", "seg1_mean","diff","conf_low", "conf_high", "pval")) %>% 
+  mutate(sig = if_else(pval < 0.05, "sig", "not sig"))
+```
+
+処理がミスってないかどうか確認しておく。愚直に5回書いてみたが、問題なさそうである。
+
+```{r}
+# t.test(df$v1 ~ df$seg, var.equal = FALSE)
+# 
+# 	Welch Two Sample t-test
+# 
+# data:  df$v1 by df$seg
+# t = -9.0878, df = 997.22, p-value < 2.2e-16
+# alternative hypothesis: true difference in means is not equal to 0
+# 95 percent confidence interval:
+#  -6.869951 -4.429941
+# sample estimates:
+# mean in group 0 mean in group 1 
+#        99.92969       105.57964 
+# 
+# t.test(df$v2 ~ df$seg, var.equal = FALSE)
+# 
+# 	Welch Two Sample t-test
+# 
+# data:  df$v2 by df$seg
+# t = -79.717, df = 997.7, p-value < 2.2e-16
+# alternative hypothesis: true difference in means is not equal to 0
+# 95 percent confidence interval:
+#  -5.152287 -4.904719
+# sample estimates:
+# mean in group 0 mean in group 1 
+#        49.93081        54.95932 
+# 
+# t.test(df$v3 ~ df$seg, var.equal = FALSE)
+# 
+# 	Welch Two Sample t-test
+# 
+# data:  df$v3 by df$seg
+# t = -14.295, df = 996.98, p-value < 2.2e-16
+# alternative hypothesis: true difference in means is not equal to 0
+# 95 percent confidence interval:
+#  -5.202228 -3.946372
+# sample estimates:
+# mean in group 0 mean in group 1 
+#        200.5395        205.1138 
+# 
+# t.test(df$v4 ~ df$seg, var.equal = FALSE)
+# 
+# 	Welch Two Sample t-test
+# 
+# data:  df$v4 by df$seg
+# t = -4.1246, df = 994.62, p-value = 4.024e-05
+# alternative hypothesis: true difference in means is not equal to 0
+# 95 percent confidence interval:
+#  -7.505204 -2.666034
+# sample estimates:
+# mean in group 0 mean in group 1 
+#        299.8409        304.9265 
+# 
+# t.test(df$v5 ~ df$seg, var.equal = FALSE)
+# 
+# 	Welch Two Sample t-test
+# 
+# data:  df$v5 by df$seg
+# t = -158.77, df = 997.84, p-value < 2.2e-16
+# alternative hypothesis: true difference in means is not equal to 0
+# 95 percent confidence interval:
+#  -5.044925 -4.921737
+# sample estimates:
+# mean in group 0 mean in group 1 
+#        49.96640        54.94973 
+
+```

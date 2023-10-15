@@ -1,0 +1,188 @@
+---
+title: "prophetパッケージの基本的な使い方"
+pagetitle: "prophet01"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: TRUE
+    code_folding: "show"
+    highlight: "zenburn"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、下記のドキュメントを参考に、`prophet`パッケージの基本的な使い方をおさらいすることを目的としています。ゆくゆくは外部予測変数を追加したモデルやクロスバリデーション、パラメタチューニングなどなど、モデルを発展させながら使用方法をまとめていきます。
+
+- [Prophet | Forecasting at scale](https://facebook.github.io/prophet/docs/quick_start.html#r-api)
+
+モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。非常にわかりやすいです。
+
+- [Forecasting at scale](https://peerj.com/preprints/3190/)
+- [Prophet入門【理論編】Facebookの時系列予測ツール](https://www.slideshare.net/hoxo_m/prophetfacebook)
+- [Prophetのモデル式を1から理解する](https://devblog.thebase.in/entry/2019/12/20/110000_1)
+- [fb Prophetの解剖で学ぶベイズ時系列モデリング](https://ill-identified.hatenablog.com/entry/2018/05/28/020224)
+
+# ライブラリと関数の読み込み
+
+```{r}
+library(prophet)
+library(tidyverse)
+
+head_tail <- function(data, n = 5){
+  stopifnot(is.data.frame(data))
+  head(data, n = n) %>% print()
+  cat(paste(rep("-", 100), collapse = ""), "\n")
+  tail(data, n = n) %>% print()
+}
+```
+
+# 必要なデータ形式
+
+`prophet()`に適した形でデータフレームを渡せば、あとは関数の内部で`rstan`パッケージの関数が計算し、計算計算を結果を返してくれる。そのためか、ドキュメントではR APIと表記されている。
+
+最低限のカラムとして、日付(`ds`)と予測したい指標(`y`)を用意すればよいが、カラム名は`ds`と`y`である必要があるので注意。また、`ds`は、`yyyy-mm-dd`か`yyyy-mm-dd hh:mm:ss`フォーマットでなければいけない。
+
+ここでは、ドキュメントにもあるWikipediaのページビューデータの期間を2年分に絞って動かしていく。
+
+```{r}
+# Githubのprophetのリポジトリからサンプルデータをインポート
+base_url <- 'https://raw.githubusercontent.com/facebook/prophet/master/examples/'
+data_path <- paste0(base_url, 'example_wp_log_peyton_manning.csv')
+df <- readr::read_csv(data_path) %>%
+  dplyr::filter(ds >= "2011-01-01" & ds <= "2012-12-31")
+
+# 先頭と末尾のデータを表示
+head_tail(df, n = 5)
+```
+
+# 予測モデルの作成
+モデル作成のために`prophet()`に先程用意しているデータフレームを渡すことで作成できます。モデルを発展させていくためには、用意されている引数や`add_*()`を利用することができます。`m`にはモデルを構築するための様々な要素が計算されていることがわかります。
+
+```{r}
+# デフォルト設定でモデルを作成
+m <- prophet(df = df)
+names(m)
+```
+
+# モデルで予測値を計算
+
+構築したモデルで予測を行うための準備として、データフレームを拡張します。このデータは`r df$ds[nrow(df)]`までしかないので、ここでは`make_future_dataframe()`を利用して、予測期間を含むデータフレームに拡張します。
+
+```{r}
+make_future_dataframe
+```
+
+関数の中身を見るとわかりますが、この関数は、モデルに渡されたデータフレームの最大日付(`m$history.dates`)を取得し、指定した期間の日付型のベクトルを生成し、最大日付の末尾にアペンドして、期間を拡張してくれる便利な関数です。
+
+例えば、今回のデータに対して、30日分追加する場合は、下記の日付が最大日付のベクトルにアペンドされることになります。
+
+```{r}
+# make_future_dataframe(m, periods = 30)
+dates <- seq(max(m$history.dates), length.out = 30 + 1, by = "day")
+dates[2:(30 + 1)]
+```
+
+実際に`make_future_dataframe()`を利用して、予測期間を含むデータフレームに拡張します。
+
+```{r}
+future_df <- make_future_dataframe(m, periods = 30)
+head_tail(future_df, n = 5)
+```
+
+このデータフレームとモデルを`predict()`に渡すことで、`prophet`クラスに対する`predict` メソッドが呼び出され、30日分の予測が行われます。
+
+```{r}
+# 予測値を計算
+forecast_df <- predict(object = m, df = future_df)
+
+# getS3method("predict", "prophet")
+# https://github.com/facebook/prophet/blob/a794018d654402ab6a97cb262e80d347db3485bd/R/R/prophet.R#L1303
+# df$yhat <- df$trend * (1 + df$multiplicative_terms) + df$additive_term
+# predict.prophetの予測値の計算に最終的に必要なカラム
+forecast_df %>% 
+  dplyr::select(ds, trend, ends_with("terms"), yhat) %>% 
+  head_tail(., n = 5)
+```
+
+# 予測結果を可視化
+
+データフレームとモデルを`plot()`に渡すことで、`prophet`クラスに対する`plot` メソッドが呼び出され、30日分の予測が加えられた、可視化が行われます。
+
+```{r}
+# getS3method("plot", "prophet")
+plot(x = m, fcst = forecast_df) +
+  labs(title = "Forecasting Wikipedia Page View", y = "PageView", x = "Date")
+```
+
+`dyplot.prophet()`を利用すれば、`dygraph`を使ったインタラクティブな可視化を行うことも可能です。
+
+```{r}
+dyplot.prophet(x = m, fcst = forecast_df)
+```
+
+# モデルの要素を分解して可視化
+
+`prophet_plot_components()`を使うことで、トレンド、周期、祝日、外部予測変数など、各要素の効果を分解して可視化することもできます。
+
+```{r}
+# weekly_start=1で月曜日始まりに設定
+# render_plot=FALSEでグラフをリストに格納し、ばらして可視化
+plts <- prophet_plot_components(m = m,
+                                         fcst = forecast_df, 
+                                         weekly_start = 1,
+                                         yearly_start = 0,
+                                         render_plot = FALSE)
+plts[[1]] + labs(title = "Trend Components")
+plts[[2]] + labs(title = "Weekly Seasonality Components")
+plts[[3]] + labs(title = "Yearly Seasonality Components")
+```
+
+# モデルの保存と読み込み
+
+Pythonでよく行われるような`pickle`でモデルを保存することも可能です。Rでは、学習済みのモデルを`saveRDS()`で保存し、`readRDS()`で読み込むことで、予測に使用できます。
+
+```{r}
+saveRDS(m, file = "model.RDS")  # Save model
+m2 <- readRDS(file = "model.RDS")  # Load mode
+# 学習済みのモデルを呼び出して予測
+# 60日分の予測を行う
+future_df2 <- make_future_dataframe(m2, periods = 60)
+forecast_df2 <- predict(object = m2, df = future_df2)
+forecast_df2 %>% 
+  dplyr::select(ds, trend, ends_with("terms"), yhat) %>% 
+  head_tail(., n = 5)
+``` 
+
+新たに予測した結果を可視化しておきます。
+
+```{r}
+plot(x = m2, fcst = forecast_df2) +
+  labs(title = "Forecasting Wikipedia Page View From Saved Model", y = "PageView", x = "Date")
+```
+
+# セッション情報
+
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,96 @@
+---
+title: "RのTidy evaluation_18"
+pagetitle: "RのTidy evaluation_18"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+# はじめに
+この記事はTidy evaluationについて学習した内容を自分の備忘録としてまとめたものです。今回は、`if_else()`を拡張した関数を作ったので、そのメモ。
+
+## 挙動
+たまに、数値インデックスを条件として、数値を動かしながら`if_else()`を使いたいときがあるので関数を作った。1から10まで動かす必要ある時に、10回も書くのはつらいので。
+
+```R:R
+multi_if_else <- function(data, cond_val, return_val, n = 1) {
+  index <- base::seq_len(n)
+  
+  cond_val_en <- rlang::enquo(cond_val)
+  return_val_en <- rlang::enquo(return_val)
+  
+ multi_funcs <-
+    purrr::map(.x = index,
+               .f = function(x) {
+      rlang::expr(dplyr::if_else(!!cond_val_en == !!x, !!return_val_en, NA_character_))
+      }) %>%
+   purrr::set_names(sprintf("if_%s_%02d", rlang::quo_text(cond_val_en), index))
+
+  data %>% dplyr::mutate(!!!multi_funcs)
+}
+```
+
+サンプルデータでうごかしてみる。
+
+```R:R
+df <- tibble(id = 1:10, f = letters[1:10])
+df
+
+# A tibble: 10 x 2
+      id f    
+   <int> <chr>
+ 1     1 a    
+ 2     2 b    
+ 3     3 c    
+ 4     4 d    
+ 5     5 e    
+ 6     6 f    
+ 7     7 g    
+ 8     8 h    
+ 9     9 i    
+10    10 j
+
+df %>% 
+  multi_if_else(., cond_val = id, return_val = f, n = 10)
+
+# A tibble: 10 x 12
+      id f     if_id_01 if_id_02 if_id_03 if_id_04 if_id_05 if_id_06 if_id_07 if_id_08 if_id_09 if_id_10
+   <int> <chr> <chr>    <chr>    <chr>    <chr>    <chr>    <chr>    <chr>    <chr>    <chr>    <chr>   
+ 1     1 a     a        NA       NA       NA       NA       NA       NA       NA       NA       NA      
+ 2     2 b     NA       b        NA       NA       NA       NA       NA       NA       NA       NA      
+ 3     3 c     NA       NA       c        NA       NA       NA       NA       NA       NA       NA      
+ 4     4 d     NA       NA       NA       d        NA       NA       NA       NA       NA       NA      
+ 5     5 e     NA       NA       NA       NA       e        NA       NA       NA       NA       NA      
+ 6     6 f     NA       NA       NA       NA       NA       f        NA       NA       NA       NA      
+ 7     7 g     NA       NA       NA       NA       NA       NA       g        NA       NA       NA      
+ 8     8 h     NA       NA       NA       NA       NA       NA       NA       h        NA       NA      
+ 9     9 i     NA       NA       NA       NA       NA       NA       NA       NA       i        NA      
+10    10 j     NA       NA       NA       NA       NA       NA       NA       NA       NA       j       
+```
+
+以上。あとはインプットの引数の妥当性チェックなど入れるなどして完成。
+

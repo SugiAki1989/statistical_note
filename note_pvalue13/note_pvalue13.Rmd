@@ -1,0 +1,181 @@
+---
+title: "フィッシャー情報量の直感的な理解"
+pagetitle: "フィッシャー情報量の直感的な理解"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、フィッシャー情報量の直感的な理解を行うことを目的としている。そのため、フィッシャー情報量の数理的な導出などは扱わない。このノートは[こちら](https://timeseriesreasoning.com/contents/fisher-information/)を参考にしている。また、フィッシャー情報量に関しては下記の動画がすごくわかりやすい。
+
+- [The Fisher Information](https://www.youtube.com/watch?v=pneluWj-U-o)
+
+## フィッシャー情報量の定義
+
+フィッシャー情報量は確率変数がパラメタに関して持っている情報量のことで、スコア関数の2次のモーメントとして定義される。
+
+確率変数$X$がパラメタ$\theta$を持つとき、尤度関数$L$は下記のように書ける。尤度関数は、データが得られた後に、観測データがどういうパラメタの確率分布から生成されたのか、尤もらしいパラメタを推定する方法。
+
+$$
+L(\theta |X) = f(X | \theta) 
+$$
+
+計算の都合で、尤度関数は基本的には対数化され、対数尤度関数が利用される。
+
+$$
+\ell(\theta |X) = log L(\theta |X) 
+$$
+
+対数尤度関数の1次微分されたものをスコア関数と呼ぶ。
+
+$$
+U(\theta| X) = \frac{\partial \ell(\theta |X)}{\partial \theta}
+$$
+
+そして、スコア関数の2次のモーメント(分散)として、フィッシャー情報量は定義される。
+
+$$
+I_{X}(\theta) = E[U(\theta| X)^{2}] = V[U(\theta| X)]
+$$
+
+また、下記のように式変形することで、見慣れたフィッシャー情報量の式となる。式変形の過程でスコア関数の期待値の性質$E[U(\theta | X)=0]$を利用して変形している。
+
+$$
+\begin{eqnarray}
+V[U(\theta| X)] &=& E \left[(U(\theta| X) - E[U(\theta| X)])^{2} \right] \\
+&=& E [(U(\theta| x)^{2}] \\
+&=& E \left[ \left( \frac {\partial \ell(\theta |X)} {\partial \theta} \right)^{2} \right] \\
+&=& I_{X}(\theta)
+\end{eqnarray}
+$$
+
+## フィッシャー情報量の図解
+
+フィッシャー情報量は、対数尤度関数$\ell(\theta|X)$を$\theta$で偏微分した導関数の分散として表現される。式だけ見てもぼんやりとした理解が進まないので、「分散」という部分に着目して考えていく。
+
+まず、平均が10で標準偏差が2の正規分布からサンプルデータを生成する。ヒストグラムを作成すると下記のような分布になる。このサンプルデータから最尤法でパラメタを推定した場合、平均が10で標準偏差が2となることが望ましい。なぜなら、そのパラメタを利用して乱数を発生させているためである。
+
+```{r}
+set.seed(1989)
+x <- rnorm(10000, 10, 2)
+hist(x, breaks = 100)
+axis(1, at = seq(0, 20, 1))
+```
+尤度関数では、$X$は確率変数という扱いなので、ここでは正規分布から生成されたと仮定する。ここで、確率変数$X$の特定の値として$X=10$に着目する。本来は得られたデータを全て利用するが、ここでは説明のために特定の値に焦点を当てている。
+
+そして、$X=10$という特定の値とフィッシャー情報量の関係を考える。フィッシャー情報量は確率変数$X$がパラメタ$\mu, \sigma$に関して持っている情報量のこと。つまり、$X=10$で分布が急に細く高くなるような場合、真のパラメタといえる可能性は高くなる。この場合、フィッシャー情報量は大きくなるはず。一方で、$X=10$ｗ中心にするものの、広くなだらかで、平べったくなっている場合、先程のケースよりもその値が真の値とは言えなそうな感じになる。つまり、フィッシャー情報量が小さいと言えそう。
+
+パラメタ$\theta$に対する$X$のフィッシャー情報量は、$\theta$周辺の$X$の分散と関わりがありそうなことがわかる。そのため、フィッシャー情報量の式には、分散が出現する。
+
+さらにフィッシャー情報量の分散の機能を理解するために尤度関数から分散の機能を理解する。まず、確率変数$X$は正規分布を仮定しているので、確率密度関数は下記のように書ける。分散の役割を分る安くしたいので、赤色でマークアップしておく。
+
+$$
+f(X=10|\mu,\sigma) = \frac{1}{\sqrt{2 \pi}\color{red}{\sigma}} e ^{-(\frac{(10 - \mu)^{2}}{2 \color{red}{\sigma^2}})}
+$$
+
+ここでは、はじめにデータを生成した時点で、平均は10、標準偏差は2ということがわかっているので、この式の標準偏差の部分を埋めることができる。
+
+$$
+\begin{eqnarray}
+f(X=10|\mu,\sigma=2) &=& \frac{1}{\color{red}{2}\sqrt{2 \pi}} e ^{-(\frac{(10 - \mu)^{2}}{\color{red}{8}})} \\
+&=& \frac{1}{\color{red}{5.01}} e^{\color{red}{-0.125}(10 - \mu)^{2}}
+\end{eqnarray}
+$$
+
+この関数を$\mu$の関数とみることで、尤度関数$L(\mu | X=10)$が得られる。尤度関数は、母集団平均$\mu$の様々な値に対して、 $X=x$を観察する確率なので、この分布がピークを打つ$\mu$こそ、$X=10$の値が観測される可能性が高いことを示している。
+
+```{r}
+mu <- seq(0,20,0.1)
+y <- (1/5.01)*exp(-0.125*(10-mu)^2)
+plot(mu, y, breaks = seq(0, 20, 1), type = 'l',
+     main = 'Likelihood(mu | X=10,sigma=2)')
+abline(v = 10, col = 'tomato')
+```
+
+対数尤度関数として考えてみる。先程の尤度関数に自然対数をとって、自然対数と分数の部分を計算しておく。
+
+$$
+\begin{eqnarray}
+\ell(\mu|X=10,\sigma=2) &=& ln \left(\frac{1}{\color{red}{5.01}} \right) \color{red}{-0.125}(10 - \mu)^{2} \\
+&=& \color{red}{-1.61} \color{red}{-0.125}(10 - \mu)^{2} \\
+\end{eqnarray}
+$$
+
+対数尤度関数の式を可視化してみると、尤度関数のときと同じく、$\mu=10$で最大となっていることがわかる。
+
+```{r}
+mu <- seq(-100, 100,0.1)
+y <- -1.61-0.125*(10-mu)^2
+plot(mu, y, breaks = seq(-100, 100, 10), type = 'l',
+     main = 'LogLikelihood(mu | X=10,sigma=2)')
+abline(v = 10, col = 'tomato')
+```
+
+この最大となる場所は、対数尤度関数を$\mu$で偏微分して、イコール0とすれば、最尤推定値が求められる。微分すると、切片が2.5、傾きが-0.25の1次関数が得られる。
+
+$$
+\begin{eqnarray}
+\frac{\partial}{\partial \mu} (\mu | \sigma=2, X=10) &=& \frac{\partial}{\partial \mu}(\color{red}{-1.61} \color{red}{-0.125}(10 - \mu)^{2}) \\
+&=& \color{red}{0.25} (10 -\mu) \\
+&=& \color{red}{2.5} - \color{red}{0.25} \mu
+\end{eqnarray}
+$$
+
+可視化すると、このような直線が得られる。
+
+```{r}
+mu <- seq(-100, 100,0.1)
+y <- 2.5 - 0.25*mu
+plot(mu, y, type = 'l',
+     main = 'Partial derivative of LogLikelihood')
+```
+
+ここまでは、暗黙的に$\sigma=2$を仮定していたが、本来は$\sigma$も推定するべきパラメタとなるので、最尤推定値は、
+
+$$
+\begin{eqnarray}
+\frac{\partial}{\partial \mu} (\mu | \sigma=2, X=10) &=& \frac{(10 - \mu)}{\color{red}{\sigma^{2}}}
+&=& \frac{1}{\color{red}{\sigma^{2}}} (10 - \mu)
+\end{eqnarray}
+$$
+
+となる。この式を観察するとわかるが、$X$の確率分布の分散$\sigma^2$は偏微分から導かれる、直線の傾きと逆関係にある。$X$は真の$\mu$の周りに大きな広がりを持つ時、それは分散が大きくなるので、傾きが緩やかになる。一方で、$X$は真の$\mu$の周りに密度高く小さな幅しか持たない時、それは分散が小さくなるので、この直線の傾きが急になる。
+
+$$
+\begin{eqnarray}
+V[U(\theta| X)] &=& E \left[ \left( \frac {\partial \ell(\theta |X)} {\partial \theta} \right)^{2} \right] \\
+\end{eqnarray}
+$$
+
+つまり、分布の分散が小さければ小さいほど(分布が細く高い)、最尤推定量付近のサポート曲線の「鋭さ」が増し、傾きの期待値は大きくなり、フィッシャー情報量が大きくなる。言い換えると、フィッシャー情報量が大きいと、誤差が小さく、$\theta$の推定精度が良い一方で、フィッシャー情報量が小さいと、誤差が大きく、$\theta$の推定精度が悪い、ということになる。ここまで理解した上で、下記の動画をみると、さらに理解が深まると思われる。
+
+- [The Fisher Information](https://www.youtube.com/watch?v=pneluWj-U-o)
+
+
+## 参考文献
+
+- [【統計学】尤度って何？をグラフィカルに説明してみる。](https://qiita.com/kenmatsu4/items/b28d1b3b3d291d0cc698)
+- [フィッシャー情報量](https://stats.biopapyrus.jp/glm/fisher-information.html)
+- [The Fisher Information](https://www.youtube.com/watch?v=pneluWj-U-o)

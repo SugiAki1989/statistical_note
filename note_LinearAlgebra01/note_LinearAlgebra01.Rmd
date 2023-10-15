@@ -1,0 +1,223 @@
+---
+title: "データ分析と線形代数01"
+pagetitle: "LinearAlgebra01"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: TRUE
+    code_folding: "show"
+    highlight: "zenburn"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+::: {.update-right}
+UPDATE: `r Sys.time()`
+:::
+
+# 行列の作成
+
+行列を作成する際は、`matrix()`を利用する。`byrow`は行ごとに値を保存するか、列ごとに値を保存するかを決める引数。
+
+```{r}
+A <- matrix(1:6, nrow = 2, ncol = 3, byrow = FALSE)
+B <- matrix(1:6, nrow = 2, ncol = 3, byrow = TRUE)
+# 列ごとに値が入る
+A
+# 行ごとに値が入る
+B
+```
+
+# 行列の演算
+
+足す、引く、スカラ倍は下記の通りです。
+
+```{r}
+# 和算
+A + B
+
+# 除算
+A - B
+
+# スカラ倍
+10 * A
+```
+
+行列積を計算する場合は`%*%`演算子を利用します。
+
+```{r}
+# [2×3][3×2]=[2×2]
+A %*% t(B)
+
+# [3×2][2×3]=[3×3]
+t(A) %*% B
+```
+
+行列の要素ごとの掛け算は`*`演算子で計算できます。
+
+```{r}
+A * B
+```
+
+クロネッカー積を計算する場合は、`%x%`演算子を利用できます。
+
+```{r}
+B %x% A
+```
+
+# 行列の次元
+
+`dim()`に行列を渡すことで、行列の次元を調べることができます。
+
+```{r}
+dim(A)
+
+dim(B %x% A)
+```
+
+# 行列の結合
+
+行列を結合する場合は、列方向に結合する`cbind()`と行方向に結合する`rbind()`が利用できます。
+
+```{r}
+# 列方向に結合
+cbind(A, B)
+
+# 行方向に結合
+rbind(A, B)
+```
+
+# 行列の対角成分とトレース
+
+行列から対角成分を抽出する場合は、`diag()`を利用する。トレースはそれを足し合わせることで得られます。
+
+```{r}
+C <- matrix(1:9, nrow = 3, ncol = 3, byrow = TRUE)
+C
+
+# 対角成分の抽出
+diag(C)
+
+# トレース
+sum(diag(C))
+```
+
+`diag(diag(x))`と2重に関数を重ねることで、対角行列を得ることができます。
+
+```{r}
+diag(diag(C))
+```
+
+行列の積のトレースは、行列をかける順番によりません。
+
+```{r}
+sum(diag(A %*% t(B)))
+
+sum(diag(B %*% t(A)))
+```
+
+# 行列の転置
+
+説明もなしに先程から使用していますが、行列を転置させる場合は、`t()`に行列を渡します。
+
+```{r}
+A
+t(A)
+```
+
+行列の積の結果を転置したものは、行列のかけ順を入れ替えて、行列の積の計算をしたものと一致します。
+
+```{r}
+# 行列の積の結果を転置
+t(A %*% t(B))
+
+B %*% t(A)
+```
+
+# 行列式
+
+行列式を計算する場合は`det()`に行列を渡します。
+
+```{r}
+det(C)
+```
+
+# 行列の逆行列
+
+行列の逆行列を計算した場合は、`solve()`に行列を渡すことで計算できます。
+
+```{r}
+options(digits = 2)
+a <- matrix(1:4, nrow = 2, ncol = 2, byrow = FALSE)
+b <- matrix(2:5, nrow = 2, ncol = 2, byrow = TRUE)
+
+# 逆行列の計算
+solve(a) 
+
+# 逆行列の検証
+solve(a) %*% a
+
+# 逆行列の検証
+a %*% solve(a)
+```
+
+逆行列の逆行列は、もとの行列にもどります。
+
+```{r}
+solve(solve(a))
+
+a
+```
+
+「行列の積を転置した行列の逆行列」と「行列の積の逆行列を転置した行列」は同じ行列になります。
+
+```{r}
+solve(t(a %*% b))
+
+t(solve(a %*% b))
+```
+
+他にも、「行列の積の逆行列」と「行列を入れ替えた行列の逆行列の行列の積」は同じ行列になります。
+
+```{r}
+solve(a %*% b)
+
+solve(b) %*% solve(a)
+```
+
+# 行列の固有値
+
+行列の固有値を計算した場合は、`eigen()`に行列を渡すことで計算できます。返り値の`values`が固有値で、`vectors`が固有ベクトル。
+
+```{r}
+D <- A %*% t(B)
+eigen(D)
+```
+
+# 行列の特異値分解
+
+1つの行列を3つの行列に分解する方法が特異値分解。`svd()`に行列を渡すことで計算できます。返り値の`u`のことを左特異行列、`d`のことを特異値行列、`v`のことを右特異行列と呼びます。
+
+```{r}
+svd(D)
+```
+
+# セッション情報
+
+```{r}
+sessionInfo()
+```

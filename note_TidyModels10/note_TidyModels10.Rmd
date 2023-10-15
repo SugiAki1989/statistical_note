@@ -1,0 +1,316 @@
+---
+title: "TidyModels: modeltime + cross-validation + hyperparameter-tuning"
+pagetitle: "TidyModels: modeltime + cross-validation + hyperparameter-tuning"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+`tidymodels`パッケージの使い方をいくつかのノートに分けてまとめている。`tidymodels`パッケージは、統計モデルや機械学習モデルを構築するために必要なパッケージをコレクションしているパッケージで、非常に色んなパッケージがある。ここでは、今回は`modeltime`パッケージ + `cross-validation` + `hyperparameter-tuning`についてまとめていく。モデルの数理的な側面や機械学習の用語などは、このノートでは扱わない。
+
+下記の公式ドキュメントや`tidymodels`パッケージに関する書籍を参考にしている。
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+## `modeltime`パッケージの目的
+
+`modeltime`パッケージは、時系列モデルの構築を効率よく行うためのパッケージで、`tidymodels`パッケージと組み合わせて時系列モデルを作成する際に使用される。時系列予測のための体系的なワークフローを提供し、時系列ブーストモデルなど新しいアルゴリズムもカバーしている点が特徴的。
+
+前回は基本的な使い方をまとめており、時系列モデルのハイパーパラメータチューニングを扱う。
+
+- [Hyperparameter Tuning with Boostime](https://albertoalmuinha.com/posts/2021-06-28-boostime-tuning/parameter-tuning-boostime/?panelset1=slice2-m2&panelset2=m12&panelset=m2)
+
+上記のサイトをなぞりながら、不明点を追記しながらまとめていく。
+
+## モデルの作成
+
+まずは必要なパッケージを読み込んでおく。
+
+```{r}
+library(tidymodels)
+library(tidyverse)
+library(modeltime)
+library(timetk)
+library(DT)
+``` 
+
+前回同様、ここでも`timetk`パッケージ内の`m4_monthly`データセットの`id`が`M750`の部分を使用する。
+
+```{r}
+m4_monthly %>% 
+  filter(id == "M750") %>% 
+  tk_summary_diagnostics(date)
+```
+
+データは、1990-01-01から始まり、2015-06-01まである。レコード数は306レコードで、間隔は月単位のデータになっている。
+
+```{r}
+m750 <- m4_monthly %>% filter(id == "M750") %>% select(-id)
+m750 %>% datatable()
+```
+
+グラフ化しておく。
+
+```{r}
+m750 %>%
+  plot_time_series(.data = ., .date_var = date, .value = value, .interactive = FALSE) + 
+  scale_x_date(limits = c(as.Date("1990-01-01"), as.Date("2015-06-01")),
+               labels = date_format("%Y/%m"),
+               breaks = date_breaks("1 year")) + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.2, hjust=0.2))
+```
+
+ここでは最終的に12ヶ月の予測を試みる。まずは、予測する分だけデータフレームを拡張する。これは`future_frame`関数で実行でき、2015-07-01から2016-06-01まで、データフレームが拡張されていることがわかる。
+
+```{r}
+m750_extend <- m750 %>%
+  future_frame(
+        .length_out = 12,
+        .bind_data  = TRUE
+    )
+m750_extend %>% datatable()
+```
+
+拡張したデータを学習データ、テストデータ、予測用データに再分割する。
+
+```{r}
+# 2015-07-01から2016-06-01(n=12)
+df_future <- m750_extend %>% filter(is.na(value))
+# 1990-01-01から2015-06-01(n=306)
+df <- m750_extend %>% filter(!is.na(value))
+
+# <Training/Testing/Total>
+# <275/31/306>
+df_init   <- initial_time_split(df, 0.9)
+df_train  <- df_init %>% training()
+df_test   <- df_init %>% testing()
+
+bind_rows(
+  df_train %>% summarise(n.obs = n(), start = min(date), end = max(date)) %>% mutate(tag = "train"),
+  df_test %>% summarise(n.obs = n(), start = min(date), end = max(date)) %>% mutate(tag = "test"),
+  df_future %>% summarise(n.obs = n(), start = min(date), end = max(date)) %>% mutate(tag = "forecast")
+)
+```
+
+学習データをクロスバリデーション用に分割する。学習データに5年、評価データに2年、フォールド間のスキップは1年で、分割数は5とする。
+
+```{r}
+m750_resamples <- df_train %>%
+  time_series_cv(
+    date_var    = date, 
+    initial     = "5 years",
+    assess      = "2 years",
+    skip        = "1 years",
+    cumulative  = TRUE,
+    slice_limit = 5
+  )
+
+m750_resamples %>%
+ tk_time_series_cv_plan() %>% 
+ group_by(.id) %>% 
+ summarise(min = min(date), max = max(date))
+```
+クロスバリデーションの様子を`plot_time_series_cv_plan`関数で可視化しておく。
+
+```{r}
+m750_resamples %>%
+  tk_time_series_cv_plan() %>% 
+  plot_time_series_cv_plan(.date_var = date, .value = value, .interactive = FALSE, .facet_ncol  = 1) + 
+  scale_x_date(limits = c(as.Date("1990-01-01"), as.Date("2015-06-01")),
+               labels = date_format("%Y/%m"),
+               breaks = date_breaks("1 year")) + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.2, hjust=0.2))
+```
+
+データの分割が終わったので、レシピの設定を行なう。`step_times_series_signature`関数を使用して、日付から多数の特徴量を生成する。
+
+```{r}
+recipe <- recipe(value ~ ., training(m750_resamples$splits[[1]])) %>%
+  step_timeseries_signature(date) %>%
+  step_rm(matches("(.iso$)|(.xts$)|(day)|(hour)|(minute)|(second)|(am.pm)")) %>%
+  step_rm("date_index.num") %>%
+  step_mutate(date_month = factor(date_month, ordered = TRUE)) %>%
+  step_dummy(all_nominal(), one_hot = TRUE)
+
+recipe %>% prep() %>% bake(df_test) %>% datatable()
+```
+
+データの分割が終わったので、パラメタのチューニングを行なうためのモデルの設定を行なう。今回はProphetBoostモデルを利用する。Prophet Boostモデルは、Prophet と XGBoost を組み合わせたアルゴリズムで、ワークフローを使用してモデルを設定できる。細かい数理的な部分は追えてないのでわからないが、おそらくこういうことだと思われる。
+
+1. Prophet で単変量時系列へのモデリング
+2. 前処理レシピで提供される外部予測変数を使用し、XGBoost モデルを使用してProphetの残差を回帰。
+
+Prophetは時系列データを様々な要素分解(成長関数、周期性、祝日効果など)して、変化点を検出しながら、モデルを組み立てることができ、時系列データに特化したPropehetでまず予測値を得る。そこから残差を観測値として、XGBoostモデルが学習を繰り返すことで予測モデルが学習していく。
+
+```{r}
+prophet_boost <-
+  modeltime::prophet_boost(
+    # prophet
+    growth = "linear",
+    changepoint_num = tune(),
+    changepoint_range = tune(),
+    seasonality_yearly = TRUE,
+    seasonality_weekly = FALSE, # Monthlyデータなので機能しない
+    seasonality_daily  = FALSE, # Monthlyデータなので機能しない
+    season = "multiplicative",
+    prior_scale_changepoints = tune(),
+    prior_scale_seasonality = tune(),
+    # prior_scale_holidays = NULL,
+    # xgboost
+    trees = 1000,
+    sample_size = c(0.1, 1),
+    # mtryを設定すると場合によってはエラーになる。原因不明。
+    mtry = tune(),  
+    tree_depth = tune(),
+    learn_rate = tune(),
+    stop_iter = tune(),
+    min_n = tune(),
+    # loss_reduction = tune(),
+  ) %>%
+  set_engine('prophet_xgboost')
+
+prophet_boost
+```
+
+モデルのハイパーパラメーターの調整は`tidymodels`のモデリングフレームワークに従い、`workflows`パッケージの関数でワークフローを作成して行なう。
+
+```{r}
+workflow <- workflow() %>%
+    add_model(prophet_boost) %>%
+    add_recipe(recipe) 
+workflow
+```
+
+そして、`tune_grid`関数を使用して、クロスバリデーションでパラメタの最適値を探索する。ただ、私が`modeltimes`パッケージやProphetBoostモデルを理解してないためか、多数のエラー、ワーニングが出る…。
+
+```{r}
+set.seed(1989)
+tune_results <- tune_grid(
+    object     = workflow,
+    resamples  = m750_resamples,
+    param_info = parameters(workflow),
+    grid       = 30,
+    metrics = metric_set(rmse, mae, mape)
+    )
+```
+
+パラメタの組み合わせを見るときは、`show_best`関数で取り出す。ここでは`mape`基準でクロスバリデーションの結果を確認する。
+
+```{r}
+tune_results %>% 
+  show_best(n = 10, metric = "mape") %>% 
+  datatable()
+```
+
+あとは、ベストなバラメタを`select_best`関数で取り出して、ワークフローのパラメタを`finalize_workflow`関数で更新する。そして、取りあえずデータは何でも良いので、形式的にフィッティングしておく。
+
+```{r}
+tuned_best_params <- tune_results %>%
+    select_best("mape")
+
+best_workflow <- workflow %>%
+    finalize_workflow(parameters = tuned_best_params)
+
+# ここのデータはなんでもよい
+model_predicted_best_workflow <- best_workflow %>%
+    fit(training(m750_resamples$splits[[1]])) 
+
+model_predicted_best_workflow
+```
+
+ここまでくれば、`modeltime`のワークフローに戻って作業ができる。ということで、これまで通り`modeltime`のワークフローに従って、モデルテーブルに登録する。
+
+```{r}
+models_tbl <- modeltime_table(
+    model_predicted_best_workflow
+)
+models_tbl
+```
+
+その後は`modeltime_calibrate`関数でテストデータに対するキャリブレーションを行なう。
+
+```{r}
+calibration_tbl <- models_tbl %>% 
+  modeltime_calibrate(df_test)
+
+calibration_tbl %>% 
+  pluck(".calibration_data", 1) %>% 
+  datatable()
+```
+
+テストデータと観測値をグラフで確認する。
+
+```{r}
+calibration_tbl %>%
+               modeltime_forecast(
+                 new_data = df_test,
+                 actual_data = m750,
+                 keep_data = TRUE
+               ) %>% 
+  plot_modeltime_forecast(.interactive = TRUE, .legend_show = FALSE)
+```
+
+評価指標を確認するためには`table_modeltime_accuracy`関数を利用する。
+
+```{r}
+calibration_tbl %>%
+  modeltime_accuracy(new_data = df_test) %>%
+  table_modeltime_accuracy(.interactive = FALSE)
+```
+
+テストデータでの検証も終わったら、あとはフルデータでモデルの再学習を行なう。
+
+```{r}
+refit_tbl <- calibration_tbl %>% 
+             modeltime_refit(data = m750)
+refit_tbl
+```
+
+その後は、当初の目的であった、2015-07-01から2016-06-01の間の予測を行なう。
+
+```{r}
+refit_tbl %>%
+    modeltime_forecast(actual_data = m750, new_data = df_future) %>%
+    plot_modeltime_forecast(.interactive = TRUE, .legend_show = FALSE)
+```
+
+下記は観測値と予測値を統合したデータで、おまけとして出力する。そのまま出力しておく。
+
+```{r}
+refit_tbl %>%
+    modeltime_forecast(actual_data = m750, new_data = df_future) %>% 
+  print(n = 500)
+```
+
+## 参考文献
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+

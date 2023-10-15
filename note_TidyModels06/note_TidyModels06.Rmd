@@ -1,0 +1,213 @@
+---
+title: "TidyModels: yardstickパッケージ"
+pagetitle: "TidyModels: yardstickパッケージ"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+`tidymodels`パッケージの使い方をいくつかのノートに分けてまとめている。`tidymodels`パッケージは、統計モデルや機械学習モデルを構築するために必要なパッケージをコレクションしているパッケージで、非常に色んなパッケージがある。ここでは、今回は`yardstick`というパッケージの使い方をまとめていく。モデルの数理的な側面や機械学習の用語などは、このノートでは扱わない。
+
+下記の公式ドキュメントや`tidymodels`パッケージに関する書籍を参考にしている。
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+## `yardstick`パッケージの目的
+
+`yardstick`パッケージは、`tidymodels`パッケージを利用したモデリングにおいて(実際は`tidymodels`に限らない)、モデルの予測性能を評価するための関数がまとめられているパッケージ。
+
+公式ドキュメントは下記の通り。
+
+- [yardstick](https://yardstick.tidymodels.org/)
+
+また、下記がわかりやすかったので参考にさせていただいた。
+
+- [機械学習で使う指標総まとめ(教師あり学習編)](https://www.procrasist.com/entry/ml-metrics)
+
+## `yardstick`パッケージの実行例
+
+`yardstick`パッケージの基本的な利用方法を確認していく。ざっくりとどのような関数があるのかを確認すると、基本的なものからマニアックなものまで幅広く用意されていそうである。
+
+```{r}
+library(tidymodels)
+library(tidyverse)
+
+# 評価のための関数だけではない
+tibble(function_name = ls("package:yardstick")) %>% 
+  filter(!str_detect(function_name, "vec")) %>% 
+  print(n = 100)
+```
+
+まずは、2クラス分類の予測モデルを評価するための関数をまとめておく。パッケージに付属している`two_class_example`データや例を参考にする。分類といえば混同行列なので、`conf_mat`関数で混同行列を作成する。表側に予測値、表頭が観測値という形式で出力される。世間的によく見る混同行列とは反対かもしれない。
+
+```{r}
+two_class_example %>% 
+  conf_mat(
+    truth = truth,
+    estimate = predicted,
+    dnn = c("Pred", "Truth")
+  ) 
+```
+
+特定の指標で計算したい場合は、指標にあわせた関数が用意されているので、それを利用する。`accuracy`関数は因子型である必要がある。
+
+```{r}
+list(
+  two_class_example %>% accuracy(truth = truth, estimate = predicted),
+  sum(227, 192)/sum(227, 31, 50, 192)
+)
+```
+
+`precision`は、陽性と予測したもののうち、実際に陽性であるものの割合を表す指標で、`precision`関数で計算できる。
+
+```{r}
+my_precision <- 227/sum(227, 50)
+list(
+  two_class_example %>% precision(truth = truth, estimate = predicted),
+  my_precision
+)
+```
+
+`recall`は、True Positive Rate(TPR)とも呼ばれるやつで、実際に陽性であるもののうち、正しく陽性と予測できたものの割合を表す指標で、`recall`関数で計算できる。ROC曲線の縦軸で使用される。
+
+```{r}
+my_recall <- 227/sum(227, 31)
+
+list(
+  two_class_example %>% recall(truth = truth, estimate = predicted),
+  my_recall
+)
+```
+
+`f_meas`は、`recall`、`precision`の調和平均で、`f_meas`関数で計算できる。
+
+```{r}
+list(
+  two_class_example %>% f_meas(truth = truth, estimate = predicted),
+  (2 * my_precision * my_recall)/(my_precision + my_recall)
+)
+```
+
+
+`specificity`は、True Negative Rate(TNR)、特異度とも呼ばれるやつで、実際に陰性であるもののうち、正しく陰性と予測できたものの割合を表す指標で、`recall`関数で計算できる。
+
+```{r}
+my_specificity <- 192/sum(50, 192)
+list(
+  two_class_example %>% specificity(truth = truth, estimate = predicted),
+  my_specificity
+)
+```
+
+
+`LogLoss`は、
+`accuracy`に確率を組み込んだような指標で、予測を正解確率、不正解確率を含めて評価している。小さいほどモデルの性能がよい。
+`mn_log_loss`関数で計算できるが、`estimate`には、因子型のレベルが低いもの方の確率を渡す。
+
+```{r}
+# class1を1、class2を0に変換
+y <- 2 - as.numeric(two_class_example$truth)
+# class1のときは、two_class_example$Class1を使い、class2のときは1-two_class_example$Class1に変換
+p <- ifelse(y == 1, two_class_example$Class1, 1- two_class_example$Class1)
+my_logloss <- -1*mean(log(p))
+
+list(
+  use_prob_col = levels(two_class_example$truth)[[1]], 
+  two_class_example %>% mn_log_loss(truth = truth, estimate = Class1),
+  my_logloss
+)
+```
+
+`AUC(Area Under Curve)`は、曲線の下側の面積の大きさで分類予測を評価する指標で、大きいほどモデルの性能がよい。
+`roc_auc`関数で計算できるが、`estimate`には、因子型のレベルが低いもの方の確率を渡す。
+
+```{r}
+list(
+  two_class_example %>% roc_auc(truth = truth, estimate = Class1)
+)
+```
+
+ここからは回帰問題で使用する評価指標をまとめておく。組み込みの`Orange`データをサンプルデータに変換する。
+
+```{r}
+set.seed(1989)
+regress_sample <- tibble(truth = Orange$age, pred = rnorm(nrow(Orange), 0, 50) + Orange$age)
+regress_sample
+```
+
+`rmse`は平均二乗平方根誤差と呼ばれるもので、`rmse`関数で計算できる。
+
+```{r}
+list(
+  regress_sample %>% rmse(truth = truth, estimate = pred),
+  sqrt(mean((regress_sample$truth - regress_sample$pred)^2))
+)
+```
+
+`mae`は平均絶対誤差と呼ばれるもので、`mae`関数で計算できる。
+
+```{r}
+list(
+  regress_sample %>% mae(truth = truth, estimate = pred),
+  mean(abs(regress_sample$truth - regress_sample$pred))
+)
+```
+
+`mape`は平均絶対パーセント誤差と呼ばれているもので、`mape`関数で計算できる。この例だと平均して約13％前後の誤差があることになる。
+
+```{r}
+list(
+  regress_sample %>% mape(truth = truth, estimate = pred),
+  mean(abs(regress_sample$truth - regress_sample$pred)/regress_sample$truth) * 100
+)
+```
+
+便利な関数`metric_set`がある。これは評価指標をまとめて出力できる関数。回帰でも、
+
+```{r}
+regression_metric_set <- metric_set(rmse, mae, mape)
+regress_sample %>% 
+  regression_metric_set(truth = truth, estimate = pred)
+```
+
+分類でも利用可能。
+
+```{r}
+classification_metric_set <- metric_set(accuracy, precision, recall, f_meas)
+two_class_example %>% 
+  classification_metric_set(truth = truth, estimate = predicted)
+```
+
+
+## 参考文献
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+

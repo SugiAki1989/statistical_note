@@ -1,0 +1,208 @@
+---
+title: "タイプ1トービットモデル"
+pagetitle: "タイプ1トービットモデル"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここではタイプ1トービットモデルについて、モデルの内容、モデルの推定法(最尤法)、Rでの実行方法をまとめている。タイプ2トービットモデルについてはここでは扱っていないが、下記の参考にした書籍には記載があるので、そちらを参照のこと。
+
+- [Rによるマーケティング・データ分析 基礎から応用まで](https://www.saiensu.co.jp/search/?isbn=978-4-88384-367-1&y=2023#support)
+
+## トービットモデル
+
+トービットモデルは、データの上限、下限を持っている打ち切りデータ(CensoredData)に利用される手法の1つ。目的変数が打ち切りデータの場合、通常の回帰モデルでパラメタを推定しても、最小二乗法の推定量は普遍性も一致性ももってない。
+
+打ち切りデータの例として、小売の会員の購買金額は0よりも小さくなることはないし、店舗への会員訪問回数も同じである。なぜ打ち切りデータに通常の回帰モデルが不適なのか、直感的な説明をすると、データ全体に対してモデルの回帰係数を推定した結果、パラメタが正なり負なり推定されるわけだが、売上が0円の会員(ここでは登録したが買ってないケース)もいるわけで、これらはパラメタや説明変数がどうであれ、目的変数は0で一定であるためである。
+
+この問題を回避するために売上が0ではないデータに限定して、モデルを解釈する方法もあるように見える。顧客の属性や行動履歴を用いて、モデリングした結果、当初の分析目的である会員全体を対象にしている分析でもなく、特定の集団を分析しているため、このモデルの解釈は限定的になる。その点を無視して、会員全体に分析結果を反映させるとセレクションバイアスが発生していることになる。売上0より大きい会員は特定の特徴を持っている可能性があるためである。
+
+他にも、この記事を書いている時期が野球の世界大会であるWBCとかぶっているので、野球の例であれば、出場していない選手の空振り数やヒット数などのパフォーマンスは、出場していないのであれば0である。このようなケースで出場している選手のデータに限定すると、セレクションバイアスが発生する。ほかにも、一定の世帯年収がなければ教育費は0になっているデータに対して、教育費が0を除外したデータだけで分析するわけにもいかない。
+
+## モデルの推定法
+
+ここでは、個人を$i$、個人が持つ説明変数を$x_{i} = (x_{i1},x_{i2},...,x_{ik})^{t}$とする。トービットモデルでは、目的変数$y_{i}$に対して、$y_{i}$に対する効用を表す潜在変数$y^{*}_{i}$を定義する。$y^{*}_{i}$は観測されないが、観測できる$y_{i}$とは下記のように関係を考える。
+
+$$
+\begin{eqnarray}
+y^{*}_{i} = 
+  \begin{cases}
+    y^{*}_{i} & ( y^{*}_{i} \gt 0 ) \\
+    0 & ( y^{*}_{i} \le 0 ) 
+  \end{cases}
+\end{eqnarray}
+$$
+
+$y^{*}_{i} \gt 0 $では$y^{*}_{i}$と$y^{*}_{i}$が一致し、$y^{*}_{i} \le 0$では$y^{*}_{i}$は0または負の値を持つことになる。効用を表す潜在変数$y^{*}_{i}$を利用することで、説明変数が大きくなると$y^{*}_{i}$が大きくなる、説明変数が小さくなると$y^{*}_{i}$は小さくなる、という自然な仮定を考えることができる。これであれば通常の回帰モデルを利用することは問題にならない。
+
+$$
+y^{*}_{i} = x^{t}_{i}\beta + u_{i}, u_{i} \sim N(0, \sigma^{2})
+$$
+
+ただ、$y^{*}_{i}$は観測できないので、$y_{i}$を使って分析すると、パラメタの普偏性や一致性が損なわれ、データを限定しても同様である。そのため、$y^{*}_{i}$を使ってモデルを計算できるように工夫してパラメタを推定する必要がある。トービットモデルの推定方法としては最尤法とヘックマン2ステップ推定法があるらしいが、後者は勉強不足でわからないので、最尤法を利用する。
+
+まず、領域を分けて考えると$y_{i} \gt 0$の領域では、$y^{*}_{i}$と$y^{*}_{i}$が一致するので、$y_{i}$を観測する確率は下記のように書ける。ここで$\phi$は標準正規分布を表す。
+
+$$
+\begin{eqnarray}
+P(y_{i})
+&=& P \left(y^{*}_{i} \right) \\
+&=& P \left(x^{t}_{i}\beta + u_{i} \right) \\
+&=& P \left( x^{t}_{i}\beta + \epsilon_{i} \sigma \right)\\
+&=& \frac{1}{\sigma} \phi \left( \frac{ y^{*}_{i} - x^{t}_{i}\beta}{\sigma} \right) \\
+\end{eqnarray}
+$$
+
+次に、$y_{i} = 0$のとき、$y_{i}$を観測する確率を考える。さきほどの$u_{i}$に対して、$\epsilon_{i} = \frac{u_{i}}{\sigma}$とすると、$\epsilon_{i}\sim N(0, 1)$となり、標準正規分布に従うことがわかる。$\Phi$は累積分布関数。
+
+$$
+\begin{eqnarray}
+P(y_{i}=0)
+&=& P \left(y^{*}_{i} \le 0 \right) \\
+&=& P \left(x^{t}_{i}\beta + u_{i} \le 0 \right) \\
+&=& P \left( \frac{u_{i}}{\sigma} \le - \frac{x^{t}_{i}\beta}{\sigma} \right)\\
+&=& P \left( \epsilon_{i} \le - \frac{x^{t}_{i}\beta}{\sigma} \right)\\
+&=& 1 - \Phi\left( \frac{x^{t}_{i}\beta}{\sigma}\right)\\
+\end{eqnarray}
+$$
+
+これで各領域で確率を計算できそうなので、組み合わせると尤度関数が構築できる。$\delta(y_{i})$は指示関数で、領域によって振り分けを行う。
+
+$$
+L(\beta, \sigma^{2}|{y_{i},x_{i}}) = \displaystyle \prod_{i=1}^{n} \left[\frac{1}{\sigma} \phi \left( \frac{ y_{i} - x^{t}_{i}\beta}{\sigma} \right)\right]^{1-\delta(y_{i})}\left[ 1 - \Phi\left( \frac{x^{t}_{i}\beta}{\sigma}\right)\right]^{\delta(y_{i})}
+$$
+
+参考書を読んでいるときに使った手書きのメモはこれ。デジタルにする気力がなかったので、そのままアップしておく。
+
+![](/Users/aki/Documents/statistical_note/note_regression08/tobitmodel.png)
+
+Rで最尤法を使って計算してみる。まずはパラメタが正しく推定できているか、ダミデータを作成する。$\alpha=1, \beta=2$とする。また、$y \lt 0$のとき、打ち切りデータとなり、0になる。この打ち切りデータに対して最小二乗法の回帰モデルで推定すると、うまく推定できていないことがわかる。
+
+```{r}
+set.seed(1989)
+N <- 5000
+x <- rnorm(N)
+e <- rnorm(N)
+a <- 1
+b <- 2
+y <- a + b * x + e
+y_cens <- ifelse(y < 0, 0, y)
+df_cens <- data.frame(x, y, y_cens)
+fit <- lm(y_cens ~ x, data = df_cens)
+fit
+```
+
+データを限定しても、正しく推定できていない。
+
+```{r}
+fit_filter <- lm(y_cens ~ x, data = dplyr::filter(df_cens, y>0))
+fit_filter
+```
+
+これに対してトービットモデルでパラメタを推定してみる。ここでは対数尤度関数に変換して利用している。推定された結果を見る限り問題なく推定されているように見える。
+
+```{r warning=FALSE}
+# 初期値
+p <- c(sigma = 1, a = 1, b = 1)
+X <- model.matrix(y_cens ~ x, data=df_cens[,c(1,3)])
+y <- df_cens$y_cens
+optim(par = p,
+      fn = function(p) {
+        sigma <- p[1]
+        beta <- matrix(p[-1], ncol = 1)
+        xb <- X %*% beta
+        -1 * sum(ifelse(y <= 0, log(1 - pnorm(xb/sigma)), log(dnorm((y - xb)/sigma)/sigma)))
+      }, 
+      method = "BFGS", 
+      hessian = TRUE)$par
+```
+
+## Rでの実践
+
+参考にしている書籍のデータをお借りして、トービットモデルへの理解を深める。タイプ2トービットモデルはここでは扱わないが、書籍では説明されているので、そちらを参照。
+
+データセットの内容は下記の通り。オフラインの店舗の企業が、オンライン店舗を出店し、顧客分析を行う際の例。会員全体を対象にしている分析で、オンライン店舗での購買金額が、顧客の属性や行動履歴によって、どのように説明されているかを知りたいとする。それがわかれば、似たような会員をオンライン店舗での購入につなげる施策を検討できる。打ち切りデータなので、オンラインで購入していない会員のオンライン店舗の売上は0となっている。
+
+|カラム名|内容|
+|:---|:---|
+|`CID`|会員ID|
+|`Purchase`|会員のオンライン店舗の利用有無(1=利用あり)|
+|`Amount`|会員のオンライン店舗の購買金額|
+|`Sex`|会員の性別(1=男性)|
+|`Age`|会員の年齢|
+|`Fsize`|会員の家族人数|
+|`Income`|会員の対数収入|
+|`Ownhouse`|会員の持ち家有無(1=あり)|
+|`Crossbuying`|会員の購入カテゴリ数|
+|`Pfreq`|会員の購買頻度|
+|`Rduration`|会員の入会期間(月数)|
+
+トービットモデルは`censReg`パッケージの`censReg()`関数で利用できる。`Income`と`Ownhouse`以外は有意となっている。このモデルでは、男性で家族の人数が多いほうがオンライン店舗での購入金額は大きくなり、年齢では若い方が購入金額が大きくなることがわかる。
+
+```{r}
+library(censReg)
+data_chap7 <- read.csv('~/Desktop/chapter_07.csv')
+fit_tobit <-
+  censReg(Amount ~ Sex + Age + Fsize + Income + Ownhouse + Crossbuying,
+          data = data_chap7)
+summary(fit_tobit)
+```
+
+トービットモデルのパラメタは解釈に注意が必要で、通常の最小二乗法の回帰モデルは、説明変数の$E(y_{i})$に対する限界効果である一方で、トービットモデルは$E(y^{*}_{i})$に対する説明変数の限界効果である。もし最小二乗法の回帰モデルの係数と比較するのであれば、トービットモデルでの$E(y_{i})$に対する説明変数の限界効果を知る必要がある。これは下記の式で計算できる。
+
+$$
+\frac{\partial E(y_{i})}{\partial x_{ji}} = \beta_{j} \Phi \left( \frac{x^{t}_{i} \beta}{\sigma} \right)
+$$
+この場合、限界効果は$x_{i}$に依存するため、平均を使うことで、平均限界効果を計算する。これは`margEff()`関数で計算できる。
+
+```{r}
+margEff(fit_tobit)
+```
+
+平均限界効果を用いると、最小二乗法の回帰モデルと係数の比較ができる。平均は`margEff()`の中で、`censReg`クラスのオブジェクトがすでにもっている。
+
+```{r}
+# purrr::map_dbl(data_chap7,mean)でも同じ
+fit_tobit$xMean
+```
+
+この関数の中身は下記の通り。
+
+```{r}
+getS3method("margEff", "censReg")
+```
+
+
+
+## 参考文献
+
+- [Rによるマーケティング・データ分析 基礎から応用まで](https://www.saiensu.co.jp/search/?isbn=978-4-88384-367-1&y=2023#support)
+- [「Rによるマーケティング・データ分析」サポートサイト](https://www2.econ.osaka-u.ac.jp/~r_marketing_data/)
+- [Rでトービット・モデルによる打ち切りデータの推定](https://uncorrelated.hatenablog.com/entry/20120210/1328868314)
+- [プロビットモデルとトービットモデルの理論](https://knknkn.hatenablog.com/entry/2019/01/27/184212)
+- [トービットモデル](https://drive.google.com/file/d/1vRIxbHQT5iS-E2ZzvsmMqO2rFXSHHcFm/view)

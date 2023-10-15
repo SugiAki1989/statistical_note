@@ -1,0 +1,133 @@
+---
+title: "マルチコの計算方法を忘れた"
+pagetitle: "マルチコの計算方法を忘れた"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# マルチコ
+マルチコリニアリティ(多重共線性)のおさらい。久しぶりに名前を聞いたけど、L1L2正則化回帰をすることが大きなったので、考慮することを少なくなったので・・・計算の仕方を忘れていたので、そのまとめ。
+
+## マルチコの計算方法
+そもそもマルチコとは、2つの変数が互いに相関しているために、回帰分析の係数推定が不安定になり、標準誤差が高くなること。そうかどうかをVIF(分散インフレーション係数)を計算することで確かめる。
+
+$$
+Regress \ the \ k \ th \ predictor \ on \ rest \ of \ the \ predictions \ in \ the \ model\\
+VIF = \frac{1}{1-R^{2}_{k}}
+$$
+
+VIFが1の場合、はTolerance(1 - R2)が1なので、その場合、R2は0、「つまり相関がない」ということになる。分野にもよるが、4とか10を超えるVIFは、モデルから外したほうが良いと言われる。
+
+VIFを計算する手順は、`y ~ x1 + x2 + x3`の回帰モデルの場合、`x1`のVIFは`x1 ~ x2 + x3`のR2を使って計算され、`x2`のVIFは`x2 ~ x1 + x3`のR2を使って計算され、`x3`のVIFは`x3 ~ x1 + x2`のR2を使って計算される。つまり、予測変数に対して、説明力のある変数の組み合わせは、R2が高くなるので、そうなると、その組み合わせのVIFは高くなる。
+
+## 実際に計算する。
+olsrrパッケージやcarパッケージを使えばモデルを入れるだけで計算できる。
+
+```{r}
+library(olsrr)
+library(tidyverse)
+
+
+df <- mtcars %>% 
+  dplyr::select(mpg, disp, hp, wt, qsec)
+
+model <- lm(mpg ~ disp + hp + wt + qsec, data = df)
+olsrr::ols_vif_tol(model)
+```
+
+実際には、先程示したような計算がされる。
+
+```{r}
+model_disp <- lm(disp ~ hp + wt + qsec, data = df)
+r_disp <- summary(model_disp)$r.squared
+r_disp_tol <- (1 - r_disp)
+
+list(r_disp_tol, 1/r_disp_tol)
+```
+
+```{r}
+model_hp <- lm(hp ~ wt + qsec + disp, data = df)
+r_hp <- summary(model_hp)$r.squared
+r_hp_tol <- 1 - r_hp
+
+list(r_hp_tol, 1/r_hp_tol)
+```
+
+
+```{r}
+model_wt <- lm(wt ~ qsec + disp + hp, data = df)
+r_wt <- summary(model_wt)$r.squared
+r_wt_tol <- 1 - r_wt
+
+list(r_wt_tol, 1/r_wt_tol)
+```
+
+
+```{r}
+model_qsec <- lm(qsec ~ disp + hp + wt, data = df)
+r_qsec <- summary(model_qsec)$r.squared
+r_qsec_tol <- 1 - r_qsec
+list(r_qsec_tol, 1/r_qsec_tol)
+```
+
+## おまけ
+
+マルチコと関係ないけど、重回帰分析のパラメタを手計算する。
+
+```{r}
+# https://detail.chiebukuro.yahoo.co.jp/qa/question_detail/q10259809340
+# https://ja.wolframalpha.com/input?i=%7B%7BS_11%2C+S_12%2C+S_13%7D%2C+%7BS_12%2CS_22%2CS_23%7D%2C+%7BS_13%2CS_23%2CS_33%7D%7D+%E3%81%AE%E9%80%86%E8%A1%8C%E5%88%97
+
+y <- matrix(c(18,12,14,6,12,8,10,16), ncol = 1)
+x <- matrix(c(8,7,5,4,6,2,3,9,
+              4,7,8,3,8,5,6,9,
+              8,7,9,3,8,3,6,7), ncol = 3)
+n <- length(y)
+
+# S11: x1の分散
+# S22: x2の分散
+# S33: x3の分散
+# S12: x1とx2の共分散
+# S13: x1とx3の共分散
+# S23: x2とx3の共分散
+# S1y: x1とyの共分散
+# S2y: x2とyの共分散
+# S3y: x3とyの共分散
+S11 <- sum((x[,1]-mean(x[,1]))^2)/n
+S22 <- sum((x[,2]-mean(x[,2]))^2)/n
+S33 <- sum((x[,3]-mean(x[,3]))^2)/n
+S12 <- sum((x[,1]-mean(x[,1]))*(x[,2]-mean(x[,2])))/n
+S13 <- sum((x[,1]-mean(x[,1]))*(x[,3]-mean(x[,3])))/n
+S23 <- sum((x[,2]-mean(x[,2]))*(x[,3]-mean(x[,3])))/n
+S1y <- sum((x[,1]-mean(x[,1]))*(y[,1]-mean(y[,1])))/n
+S2y <- sum((x[,2]-mean(x[,2]))*(y[,1]-mean(y[,1])))/n
+S3y <- sum((x[,3]-mean(x[,3]))*(y[,1]-mean(y[,1])))/n
+
+numerator <- (S22*S33 - S23^2)*S1y + (S13*S23 - S12*S33)*S2y + (S12*S23 - S13*S22)*S3y
+denominator <- S11*S22*S33 + 2*S12*S23*S13 - S11*S23^2 - S22*S13^2 - S33*S12^2
+b1 <- numerator/denominator
+b1
+```

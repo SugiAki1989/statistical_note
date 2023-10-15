@@ -1,0 +1,81 @@
+---
+title: "道具立"
+pagetitle: "道具立"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではRを使って因果推論に関する分析を実行する方法をまとめている。主にRで因果推論を行うためのパッケージの使い方に焦点を当てる。因果推論の数理学的な部分については、下記の書籍、資料が詳しいので、そちらをあたってください。
+
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)
+- [星野崇宏(2009)調査観察データの統計科学 岩波書店](https://www.iwanami.co.jp/book/b257892.html)
+- [星野匡郎,田中久稔(2016)Rによる実証分析 オーム社](https://shop.ohmsha.co.jp/shopdetail/000000004800/)
+- [安井翔太(2020) 効果検証入門 技術評論社](https://gihyo.jp/book/2020/978-4-297-11117-5)
+- [矢内勇生 統計的因果推論入門](https://yukiyanai.github.io/econometrics2/)
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://github.com/JaehyunSong/kobe_ci)
+
+今回は、因果推論のノートを作成するに当たり、必要なデータなど道具立を整える。
+
+
+## データセット
+
+傾向スコアで有名な研究論文「[The effectiveness of right heart catheterization in the initial care of critically ill patients. SUPPORT Investigators.](https://www.ncbi.nlm.nih.gov/pubmed/8782638)」のデータを[こちら](https://biostat.app.vumc.org/wiki/pub/Main/DataSets/rhc.csv)よりダウンロードして、カラムをサンプルしたものを利用する。
+
+```{r}
+library(tidyverse)
+## https://biostat.app.vumc.org/wiki/pub/Main/DataSets/Crhc.html
+read.csv('https://biostat.app.vumc.org/wiki/pub/Main/DataSets/rhc.csv') %>%
+  dplyr::select(
+    ptid = X,         ## Patient ID
+    dth30,            ## 30日以内死亡フラグ(=1)
+    t3d30,            ## 30日以内の生存日数(dth30=1 & t3d30 = 5は5日での死亡、dth30=0 & t3d30 = 10は10日での退院して生存)
+    rhc = swang1,     ## 右心カテーテルの処置(=1)
+    sex,              ## 性別(男性が1)
+    age,              ## 年齢
+    weight = wtkilo1, ## 体重Kg
+    edu,              ## 教育歴
+    aps1,             ## 集中治療開始時の重篤度スコア
+    alb1,             ## 集中治療開始時のアルブミン値
+    resp1,            ## 集中治療開始時の呼吸数
+    hrt1              ## 集中治療開始時の心拍数
+  ) %>%
+  dplyr::mutate(
+    sex = ifelse(sex == 'Male', 1, 0),
+    rhc = ifelse(rhc == 'RHC', 1, 0),
+    dth30 = ifelse(dth30 == 'Yes', 1, 0)
+  ) %>% write_csv('~/Desktop/rhc_mini.csv')
+```
+
+## 参考文献および参考資料
+
+- [The effectiveness of right heart catheterization in the initial care of critically ill patients. SUPPORT Investigators.](https://www.ncbi.nlm.nih.gov/pubmed/8782638)
+- [biostat: Right heart catheterization dataset](https://biostat.app.vumc.org/wiki/pub/Main/DataSets/rhc.csv)
+- [Data frame:rhc](https://biostat.app.vumc.org/wiki/pub/Main/DataSets/Crhc.html)

@@ -1,0 +1,436 @@
+---
+title: "pivot_longer() / pivot_wider()のおさらい"
+pagetitle: "pivot_longer() / pivot_wider()のおさらい"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここでは、`{tidyr}`で新たに使えるようになった`gather()`、`spread()`の改良系である`pivot_longer()`と`pivot_wider()`を自分のためにおさらいしておく。引数名の改善や、加工ステップを引数を設定することで簡略化できるようになっている。すでに素晴らしい解説記事もあるので、こちらをさきに読むべき。
+
+- [Pivot data from wide to long](https://tidyr.tidyverse.org/reference/pivot_longer.html)
+- [Pivoting](https://tidyr.tidyverse.org/dev/articles/pivot.html)
+- [tidyr 1.0.0の新機能 pivot_*() / tidyr-pivot](https://speakerdeck.com/yutannihilation/tidyr-pivot)
+- [雑訳vignette: Pivoting (tidyr 1.0.0)](https://blog.atusy.net/2019/06/29/pivoting-tidyr-1-0-0/)
+
+## サンプルデータ
+サンプルデータは[120 years of Olympic history: athletes and results](https://www.kaggle.com/heesoo37/120-years-of-olympic-history-athletes-and-results)のデータを利用する。内容はこんな感じ。120年分のオリンピックの参加した選手の基本情報がまとまっている。
+
+```R:R
+tmp <- read_csv("Olympic.csv")
+
+tmp
+# A tibble: 271,116 x 15
+      ID Name             Sex      Age Height Weight Team       NOC   Games     Year Season City     Sport     Event                Medal
+   <dbl> <chr>            <chr>  <dbl>  <dbl>  <dbl> <chr>      <chr> <chr>    <dbl> <chr>  <chr>    <chr>     <chr>                <chr>
+ 1     1 A Dijiang        Male      24    180     80 China      CHN   1992 Su…  1992 Summer Barcelo… Basketba… Basketball Men's Ba… NA   
+ 2     2 A Lamusi         Male      23    170     60 China      CHN   2012 Su…  2012 Summer London   Judo      Judo Men's Extra-Li… NA   
+ 3     3 Gunnar Nielsen … Male      24     NA     NA Denmark    DEN   1920 Su…  1920 Summer Antwerp… Football  Football Men's Foot… NA   
+ 4     4 Edgar Lindenau … Male      34     NA     NA Denmark/S… DEN   1900 Su…  1900 Summer Paris    Tug-Of-W… Tug-Of-War Men's Tu… Gold 
+ 5     5 Christine Jacob… Female    21    185     82 Netherlan… NED   1988 Wi…  1988 Winter Calgary  Speed Sk… Speed Skating Women… NA   
+ 6     5 Christine Jacob… Female    21    185     82 Netherlan… NED   1988 Wi…  1988 Winter Calgary  Speed Sk… Speed Skating Women… NA   
+ 7     5 Christine Jacob… Female    25    185     82 Netherlan… NED   1992 Wi…  1992 Winter Albertv… Speed Sk… Speed Skating Women… NA   
+ 8     5 Christine Jacob… Female    25    185     82 Netherlan… NED   1992 Wi…  1992 Winter Albertv… Speed Sk… Speed Skating Women… NA   
+ 9     5 Christine Jacob… Female    27    185     82 Netherlan… NED   1994 Wi…  1994 Winter Lilleha… Speed Sk… Speed Skating Women… NA   
+10     5 Christine Jacob… Female    27    185     82 Netherlan… NED   1994 Wi…  1994 Winter Lilleha… Speed Sk… Speed Skating Women… NA   
+# … with 271,106 more rows
+
+```
+
+さらに加工したこれを使います。列ごとに性別ごとの年度の参加フラグが格納されている形。
+
+```
+df <- tmp %>% 
+  select(Team, Sex, Year) %>%
+  filter(Team %in% c("Japan", "United States", "Great Britain")) %>%
+  distinct(Sex, Team, Year, .keep_all = TRUE) %>%
+  mutate(Is_join = 1) %>%
+  unite(Gender_Year, Sex, Year, sep = "_", remove = TRUE, na.rm = FALSE) %>%
+  spread(Gender_Year, Is_join)
+
+df
+# A tibble: 3 x 69
+  Team  Female_1900 Female_1904 Female_1908 Female_1912 Female_1920 Female_1924 Female_1928 Female_1932 Female_1936 Female_1948 Female_1952 Female_1956 Female_1960
+  <chr>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>
+1 Grea…           1          NA           1           1           1           1           1           1           1           1           1           1           1
+2 Japan          NA          NA          NA          NA          NA          NA           1           1           1          NA           1           1           1
+3 Unit…           1           1          NA          NA           1           1           1           1           1           1           1           1           1
+# … with 55 more variables: Female_1964 <dbl>, Female_1968 <dbl>, Female_1972 <dbl>, Female_1976 <dbl>, Female_1980 <dbl>, Female_1984 <dbl>, Female_1988 <dbl>,
+#   Female_1992 <dbl>, Female_1994 <dbl>, Female_1996 <dbl>, Female_1998 <dbl>, Female_2000 <dbl>, Female_2002 <dbl>, Female_2004 <dbl>, Female_2006 <dbl>,
+#   Female_2008 <dbl>, Female_2010 <dbl>, Female_2012 <dbl>, Female_2014 <dbl>, Female_2016 <dbl>, Male_1896 <dbl>, Male_1900 <dbl>, Male_1904 <dbl>,
+#   Male_1906 <dbl>, Male_1908 <dbl>, Male_1912 <dbl>, Male_1920 <dbl>, Male_1924 <dbl>, Male_1928 <dbl>, Male_1932 <dbl>, Male_1936 <dbl>, Male_1948 <dbl>,
+#   Male_1952 <dbl>, Male_1956 <dbl>, Male_1960 <dbl>, Male_1964 <dbl>, Male_1968 <dbl>, Male_1972 <dbl>, Male_1976 <dbl>, Male_1980 <dbl>, Male_1984 <dbl>,
+#   Male_1988 <dbl>, Male_1992 <dbl>, Male_1994 <dbl>, Male_1996 <dbl>, Male_1998 <dbl>, Male_2000 <dbl>, Male_2002 <dbl>, Male_2004 <dbl>, Male_2006 <dbl>,
+#   Male_2008 <dbl>, Male_2010 <dbl>, Male_2012 <dbl>, Male_2014 <dbl>, Male_2016 <dbl>> 
+```
+
+## `pivot_longer()`
+### Long型に変換する
+`cols`で畳み込んで積み上げる範囲や列を選択し、`names_to`でその列名を指定し、`values_to`で値が格納される列名を指定する。
+
+```R:R
+df %>%
+  pivot_longer(
+    cols = Female_1900:Male_2016, 
+    names_to = "Gender_Year", 
+    values_to = "Is_join"
+  )
+
+# A tibble: 204 x 3
+   Team          Gender_Year Is_join
+   <chr>         <chr>         <dbl>
+ 1 Great Britain Female_1900       1
+ 2 Great Britain Female_1904      NA
+ 3 Great Britain Female_1908       1
+ 4 Great Britain Female_1912       1
+ 5 Great Britain Female_1920       1
+ 6 Great Britain Female_1924       1
+ 7 Great Britain Female_1928       1
+ 8 Great Britain Female_1932       1
+ 9 Great Britain Female_1936       1
+10 Great Britain Female_1948       1
+# … with 194 more rows
+```
+
+### 正規表現で列を選択する
+列の選択には、[vars_select: Select or rename variables](https://rdrr.io/cran/tidyselect/man/vars_select.html)で紹介されている方法が利用できる。
+
+- `starts_with()`: Starts with a prefix.
+- `ends_with()`: Ends with a suffix.
+- `contains()`: Contains a literal string.
+- `matches()`: Matches a regular expression.
+- `num_range()`: Matches a numerical range like x01, x02, x03.
+- `one_of()`: Matches variable names in a character vector.
+- `everything()`: Matches all variables.
+- `last_col()`: Select last variable, possibly with an offset.
+
+```R:R
+df %>% 
+  pivot_longer(
+  cols = matches("^[FM]"), 
+  names_to = "Gender_Year", 
+  values_to = "Is_join"
+)
+
+# A tibble: 204 x 3
+   Team          Gender_Year Is_join
+   <chr>         <chr>         <dbl>
+ 1 Great Britain Female_1900       1
+ 2 Great Britain Female_1904      NA
+ 3 Great Britain Female_1908       1
+ 4 Great Britain Female_1912       1
+ 5 Great Britain Female_1920       1
+ 6 Great Britain Female_1924       1
+ 7 Great Britain Female_1928       1
+ 8 Great Britain Female_1932       1
+ 9 Great Britain Female_1936       1
+10 Great Britain Female_1948       1
+# … with 194 more rows
+```
+
+### 列の加工も同時に行う
+`names_prefix `で削除したい文字列を指定し、`names_ptypes `で処理後のデータのタイプを指定する。
+
+```R:R
+df %>% 
+  select(Team, starts_with("Female")) %>% 
+  pivot_longer(
+    cols = matches("^F"), 
+    names_to = "Year",
+    names_prefix = "Female_",
+    names_ptypes = list(Year = integer()),
+    values_to = "Is_join"
+  )
+
+# A tibble: 99 x 3
+   Team           Year Is_join
+   <chr>         <int>   <dbl>
+ 1 Great Britain  1900       1
+ 2 Great Britain  1904      NA
+ 3 Great Britain  1908       1
+ 4 Great Britain  1912       1
+ 5 Great Britain  1920       1
+ 6 Great Britain  1924       1
+ 7 Great Britain  1928       1
+ 8 Great Britain  1932       1
+ 9 Great Britain  1936       1
+10 Great Britain  1948       1
+# … with 89 more rows
+```
+
+### 列の分割を同時に行う
+`names_pattern`で正規表現のグループ化を使えば、列を分割しながら変換ができる。
+
+```R:R
+df %>% 
+  pivot_longer(
+  cols = matches("^[FM]"), 
+  names_to = c("Gender", "Year"),
+  names_pattern = "(^[F|M]e?m?ale)",
+  names_ptypes = list(Gender = character(),
+                      Year   = integer()),
+  values_to = "Is_join"
+)
+
+# A tibble: 204 x 4
+   Team          Gender  Year Is_join
+   <chr>         <chr>  <int>   <dbl>
+ 1 Great Britain Female  1900       1
+ 2 Great Britain Female  1904      NA
+ 3 Great Britain Female  1908       1
+ 4 Great Britain Female  1912       1
+ 5 Great Britain Female  1920       1
+ 6 Great Britain Female  1924       1
+ 7 Great Britain Female  1928       1
+ 8 Great Britain Female  1932       1
+ 9 Great Britain Female  1936       1
+10 Great Britain Female  1948       1
+# … with 194 more rows
+```
+
+### 欠損値の処理を同時に行う
+変換後にNAが出る場合、`values_drop_na`を使うと除外できる。
+
+```R:R
+df %>% 
+  pivot_longer(
+  cols = matches("^[FM]"), 
+  names_to = c("Gender", "Year"),
+  names_pattern = "(^[F|M]e?m?ale)_(\\d*$)",
+  names_ptypes = list(Gender = character(),
+                      Year   = integer()),
+  values_to = "Is_join",
+  values_drop_na = TRUE
+)
+
+# A tibble: 188 x 4
+   Team          Gender  Year Is_join
+   <chr>         <chr>  <int>   <dbl>
+ 1 Great Britain Female  1900       1
+ 2 Great Britain Female  1908       1
+ 3 Great Britain Female  1912       1
+ 4 Great Britain Female  1920       1
+ 5 Great Britain Female  1924       1
+ 6 Great Britain Female  1928       1
+ 7 Great Britain Female  1932       1
+ 8 Great Britain Female  1936       1
+ 9 Great Britain Female  1948       1
+10 Great Britain Female  1952       1
+# … with 178 more rows
+```
+
+### 特殊なLong型への変換
+複数の列をLong型への変換する。これは見た方が早い。
+
+```R:R
+df2 <- tmp %>% 
+  select(Team, Year, Season) %>%
+  filter(Team %in% c("Japan", "United States", "Great Britain")) %>%
+  arrange(desc(Year)) %>%
+  distinct(Sex, Team, Year, Season, .keep_all = TRUE)
+
+df_winter <-  df2  %>%
+  filter(Year %in% c(2006, 2010, 2014))%>%
+  mutate(Is_join = 1) %>%
+  filter(Season == "Winter") %>%
+  rename(Winter_Year = Year) %>%
+  select(-Season) %>%
+  distinct(Team, Is_join, Winter_Year, .keep_all = TRUE) %>%
+  spread(Winter_Year, Is_join) %>%
+  gather(Winter_Year, `Winter_Isjoin`, `2006`:`2014`, na.rm = FALSE, convert = TRUE) %>%
+  arrange(`Team`, Winter_Year)
+
+df_summer <-  df2 %>%
+  filter(Season == "Summer") %>%
+  filter(Year %in% c(1948, 1952, 1956)) %>%
+  mutate(Is_join = 1) %>%
+  rename(Summer_Year = Year) %>%
+  select(-Season) %>%
+  distinct(Team, Is_join, Summer_Year, .keep_all = TRUE) %>%
+  spread(Summer_Year, Is_join) %>%
+  gather(Summer_Year, Summer_Isjoin, `1948`:`1956`, na.rm = FALSE, convert = TRUE) %>%
+  arrange(`Team`, Summer_Year) 
+
+df3 <- df_summer%>%
+  bind_cols(df_winter) %>%
+  select(-Team1)
+
+ df3
+# A tibble: 9 x 5
+  Team          Summer_Year Summer_Isjoin Winter_Year Winter_Isjoin
+  <chr>               <int>         <dbl>       <int>         <dbl>
+1 Great Britain        1948             1        2006             1
+2 Great Britain        1952             1        2010             1
+3 Great Britain        1956             1        2014             1
+4 Japan                1948            NA        2006             1
+5 Japan                1952             1        2010             1
+6 Japan                1956             1        2014             1
+7 United States        1948             1        2006             1
+8 United States        1952             1        2010             1
+9 United States        1956             1        2014             1
+```
+
+日本、イギリス、アメリカの夏冬3回分のオリンピックの参加フラグが、横にくっついている状態。これを、国名、シーズン、年度、参加フラグに分けて変換したい。`Team:Summer_Isjoin`まで、`Team`と`Winter_Year:Winter_Isjoin`の2回にデータを分けて、目的のデータに変換できるが、`pivot_longer()`では一度でできる。
+
+`_`と`Summer/Winter`に着目し、`_`より前は`Season`列にまとめて、`names_to`に`.value`‘を指定すれば、`Year`を独立した列に変換し、目的のデータ構造にできる。
+
+```R:R
+df3 %>% 
+  pivot_longer(-Team,
+               names_to = c("Season", ".value"),
+               names_sep = "_") %>%
+  arrange(Team, Season, Year)
+
+# A tibble: 18 x 4
+   Team          Season  Year Isjoin
+   <chr>         <chr>  <int>  <dbl>
+ 1 Great Britain Summer  1948      1
+ 2 Great Britain Summer  1952      1
+ 3 Great Britain Summer  1956      1
+ 4 Great Britain Winter  2006      1
+ 5 Great Britain Winter  2010      1
+ 6 Great Britain Winter  2014      1
+ 7 Japan         Summer  1948     NA
+ 8 Japan         Summer  1952      1
+ 9 Japan         Summer  1956      1
+10 Japan         Winter  2006      1
+11 Japan         Winter  2010      1
+12 Japan         Winter  2014      1
+13 United States Summer  1948      1
+14 United States Summer  1952      1
+15 United States Summer  1956      1
+16 United States Winter  2006      1
+17 United States Winter  2010      1
+18 United States Winter  2014      1
+```
+
+## `pivot_wider()`
+
+### Wide型への変換
+さきほどLong型にしたデータをWideに変換する。`names_from`で広げる列を選択し、`values_from`で値が格納される列名を指定する。
+
+```R:R
+df_long <- df %>%
+  pivot_longer(
+    cols = Female_1900:Male_2016, 
+    names_to = "Gender_Year", 
+    values_to = "Is_join",
+    values_drop_na = TRUE #組み合わせを欠損させる
+  )
+
+df_long %>% 
+  pivot_wider(
+  names_from = Gender_Year, 
+  values_from = Is_join
+)
+
+# A tibble: 3 x 69
+  Team  Female_1900 Female_1908 Female_1912 Female_1920 Female_1924 Female_1928 Female_1932 Female_1936 Female_1948 Female_1952 Female_1956 Female_1960
+  <chr>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>
+1 Grea…           1           1           1           1           1           1           1           1           1           1           1           1
+2 Japan          NA          NA          NA          NA          NA           1           1           1          NA           1           1           1
+3 Unit…           1          NA          NA           1           1           1           1           1           1           1           1           1
+# … with 56 more variables: Female_1964 <dbl>, Female_1968 <dbl>, Female_1972 <dbl>, Female_1976 <dbl>, Female_1980 <dbl>, Female_1984 <dbl>,
+#   Female_1988 <dbl>, Female_1992 <dbl>, Female_1994 <dbl>, Female_1996 <dbl>, Female_1998 <dbl>, Female_2000 <dbl>, Female_2002 <dbl>, Female_2004 <dbl>,
+#   Female_2006 <dbl>, Female_2008 <dbl>, Female_2010 <dbl>, Female_2012 <dbl>, Female_2014 <dbl>, Female_2016 <dbl>, Male_1896 <dbl>, Male_1900 <dbl>,
+#   Male_1904 <dbl>, Male_1906 <dbl>, Male_1908 <dbl>, Male_1912 <dbl>, Male_1920 <dbl>, Male_1924 <dbl>, Male_1928 <dbl>, Male_1932 <dbl>, Male_1936 <dbl>,
+#   Male_1948 <dbl>, Male_1952 <dbl>, Male_1956 <dbl>, Male_1960 <dbl>, Male_1964 <dbl>, Male_1968 <dbl>, Male_1972 <dbl>, Male_1976 <dbl>, Male_1980 <dbl>,
+#   Male_1984 <dbl>, Male_1988 <dbl>, Male_1992 <dbl>, Male_1994 <dbl>, Male_1996 <dbl>, Male_1998 <dbl>, Male_2000 <dbl>, Male_2002 <dbl>, Male_2004 <dbl>,
+#   Male_2006 <dbl>, Male_2008 <dbl>, Male_2010 <dbl>, Male_2012 <dbl>, Male_2014 <dbl>, Male_2016 <dbl>, Female_1904 <dbl>
+```
+
+### 欠損している組み合わせを補完する
+広げた際に組み合わせが欠損している場合、`values_fill`を使うことで、同時に欠損値を補完できる。
+
+```R:R
+df_long %>% 
+  pivot_wider(
+    names_from = Gender_Year, 
+    values_from = Is_join,
+    values_fill = list(Is_join = 0)
+  )
+
+# A tibble: 3 x 69
+  Team  Female_1900 Female_1908 Female_1912 Female_1920 Female_1924 Female_1928 Female_1932 Female_1936 Female_1948 Female_1952 Female_1956 Female_1960
+  <chr>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>
+1 Grea…           1           1           1           1           1           1           1           1           1           1           1           1
+2 Japan           0           0           0           0           0           1           1           1           0           1           1           1
+3 Unit…           1           0           0           1           1           1           1           1           1           1           1           1
+# … with 56 more variables: Female_1964 <dbl>, Female_1968 <dbl>, Female_1972 <dbl>, Female_1976 <dbl>, Female_1980 <dbl>, Female_1984 <dbl>,
+#   Female_1988 <dbl>, Female_1992 <dbl>, Female_1994 <dbl>, Female_1996 <dbl>, Female_1998 <dbl>, Female_2000 <dbl>, Female_2002 <dbl>, Female_2004 <dbl>,
+#   Female_2006 <dbl>, Female_2008 <dbl>, Female_2010 <dbl>, Female_2012 <dbl>, Female_2014 <dbl>, Female_2016 <dbl>, Male_1896 <dbl>, Male_1900 <dbl>,
+#   Male_1904 <dbl>, Male_1906 <dbl>, Male_1908 <dbl>, Male_1912 <dbl>, Male_1920 <dbl>, Male_1924 <dbl>, Male_1928 <dbl>, Male_1932 <dbl>, Male_1936 <dbl>,
+#   Male_1948 <dbl>, Male_1952 <dbl>, Male_1956 <dbl>, Male_1960 <dbl>, Male_1964 <dbl>, Male_1968 <dbl>, Male_1972 <dbl>, Male_1976 <dbl>, Male_1980 <dbl>,
+#   Male_1984 <dbl>, Male_1988 <dbl>, Male_1992 <dbl>, Male_1994 <dbl>, Male_1996 <dbl>, Male_1998 <dbl>, Male_2000 <dbl>, Male_2002 <dbl>, Male_2004 <dbl>,
+#   Male_2006 <dbl>, Male_2008 <dbl>, Male_2010 <dbl>, Male_2012 <dbl>, Male_2014 <dbl>, Male_2016 <dbl>, Female_1904 <dbl>
+```
+
+
+### 列を結合しながら変換する
+列が分割されていても、Wide型に変換しながら、列の結合を行うことができる。
+
+```R:R
+df_long %>% 
+    separate(Gender_Year, into = c("Gender", "Year"), sep = "_") # 列を分割する
+# A tibble: 188 x 4
+   Team          Gender Year  Is_join
+   <chr>         <chr>  <chr>   <dbl>
+ 1 Great Britain Female 1900        1
+ 2 Great Britain Female 1908        1
+ 3 Great Britain Female 1912        1
+ 4 Great Britain Female 1920        1
+ 5 Great Britain Female 1924        1
+ 6 Great Britain Female 1928        1
+ 7 Great Britain Female 1932        1
+ 8 Great Britain Female 1936        1
+ 9 Great Britain Female 1948        1
+10 Great Britain Female 1952        1
+# … with 178 more rows
+
+df_long %>% 
+  separate(Gender_Year, into = c("Gender", "Year"), sep = "_") %>% # 列を分割する
+  pivot_wider(
+  names_from = c(Gender, Year), 
+  values_from = Is_join,
+  values_fill = list(Is_join = 0)
+)
+
+# A tibble: 3 x 69
+  Team  Female_1900 Female_1908 Female_1912 Female_1920 Female_1924 Female_1928 Female_1932 Female_1936 Female_1948 Female_1952
+  <chr>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>       <dbl>
+1 Grea…           1           1           1           1           1           1           1           1           1           1
+2 Japan           0           0           0           0           0           1           1           1           0           1
+3 Unit…           1           0           0           1           1           1           1           1           1           1
+# … with 58 more variables: Female_1956 <dbl>, Female_1960 <dbl>, Female_1964 <dbl>, Female_1968 <dbl>, Female_1972 <dbl>,
+#   Female_1976 <dbl>, Female_1980 <dbl>, Female_1984 <dbl>, Female_1988 <dbl>, Female_1992 <dbl>, Female_1994 <dbl>, Female_1996 <dbl>,
+#   Female_1998 <dbl>, Female_2000 <dbl>, Female_2002 <dbl>, Female_2004 <dbl>, Female_2006 <dbl>, Female_2008 <dbl>, Female_2010 <dbl>,
+#   Female_2012 <dbl>, Female_2014 <dbl>, Female_2016 <dbl>, Male_1896 <dbl>, Male_1900 <dbl>, Male_1904 <dbl>, Male_1906 <dbl>,
+#   Male_1908 <dbl>, Male_1912 <dbl>, Male_1920 <dbl>, Male_1924 <dbl>, Male_1928 <dbl>, Male_1932 <dbl>, Male_1936 <dbl>,
+#   Male_1948 <dbl>, Male_1952 <dbl>, Male_1956 <dbl>, Male_1960 <dbl>, Male_1964 <dbl>, Male_1968 <dbl>, Male_1972 <dbl>,
+#   Male_1976 <dbl>, Male_1980 <dbl>, Male_1984 <dbl>, Male_1988 <dbl>, Male_1992 <dbl>, Male_1994 <dbl>, Male_1996 <dbl>,
+#   Male_1998 <dbl>, Male_2000 <dbl>, Male_2002 <dbl>, Male_2004 <dbl>, Male_2006 <dbl>, Male_2008 <dbl>, Male_2010 <dbl>,
+#   Male_2012 <dbl>, Male_2014 <dbl>, Male_2016 <dbl>, Female_1904 <dbl>
+```

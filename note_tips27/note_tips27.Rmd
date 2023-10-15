@@ -1,0 +1,164 @@
+---
+title: "n行×m列のサンプルデータを簡単に作れるパッケージ"
+pagetitle: "n行×m列のサンプルデータを簡単に作れるパッケージ"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここでは`{HCmodelSets}`を使ったサンプルデータの作成方法をまとめておく。このパッケージは、CoxとBatteyによって2017年に発表された論文'[Large numbers of explanatory variables, a semi-descriptive analysis](https://www.pnas.org/content/114/32/8592)'で提案された内容をもとに作られているパッケージ。
+
+疎回帰、いわゆるスパースなデータに対処する標準的な方法はLASSO回帰ですが、この論文では、LASSO回帰ではなく、本質的に同等な代替モデルを構築し、列が非常に多いデータに対して、次元削減、探索、モデル選択をどうするのが良いのかをまとめているもの。ここでは、サンプルデータを作るの便利なで、その部分にだけまとめておく。
+
+## `DGP()`
+`DGP()`を使えば、目的変数に関連する説明変数や、説明変数に関連するノイズ変数含んだサンプルデータを簡単に生成できる。ここでは、目的変数と相関のある説明変数は10個、説明変数と相関のあるノイズ変数の数は90個、無関係な説明変数は900個のデータを作る。細かい設定はドキュメントを参照願います。
+
+2022年12月現在、パッケージはアーカイブされているので、必要な関数をコピペした。
+
+```{r}
+# Source: https://github.com/cran/HCmodelSets/blob/master/R/DGP.R
+DGP = function(s,a,sigStrength,rho,n,noise=NULL,var,d,intercept,type.response="N",DGP.seed=NULL, scale=NULL, shape = NULL, rate=NULL){
+
+  if(type.response=="S" & is.null(scale)==TRUE){
+    stop('You choose cox family! Therefore you must provide parameters scale, shape!')
+  }
+  if(type.response=="S" & is.null(shape)==TRUE){
+    stop('You choose cox family! Therefore you must provide parameters scale, shape!')
+  }
+  if(type.response=="N" & is.null(shape)==FALSE){
+    stop('Scale and shape parameters will not be used since type.response is gaussian!')
+  }
+  if(type.response=="N" & is.null(scale)==FALSE){
+    stop('Scale and shape parameters will not be used since type.response is gaussian!')
+  }
+  if(type.response=="N" & is.null(rate)==FALSE){
+    stop('Scale, shape and rate parameters will not be used since type.response is gaussian!')
+  }
+  if(type.response=="S" & !is.null(noise)==TRUE){
+    stop('You choose cox family! Parameter noise is not use!')
+  }
+  if(!is.element(type.response,c("S","N"))){
+    stop('Only supports gaussian (N) or survival data (S)!')
+  }
+
+  cov1=rho*rep(1,a+s)+(1-rho)*diag(a+s);
+  covMatrixInit = rbind(cbind(cov1, matrix(0,s+a,d-(s+a))),cbind(matrix(0,d-(s+a),s+a),diag(d-(s+a))))
+  covMatrix = diag(sqrt(var) * rep(1,d)) %*% covMatrixInit %*% diag(sqrt(var)* rep(1,d))
+  trueBetaInit = c(sigStrength * rep(1,s) , rep(0,d-s))
+
+  if(!is.null(DGP.seed)){
+    set.seed(DGP.seed)
+  }
+
+  #### creating DGP
+  permuteVec=sample(d);
+  trueBeta=trueBetaInit[permuteVec] # permute the rows of the initial beta vector
+  TRUE.idx = which(trueBeta!=0)
+  I = diag(d)
+  permMatrix=I[permuteVec,]
+  covPerm=permMatrix%*%covMatrix%*%(solve(permMatrix)) # permute rows and columns of the covariance matrix accordingly.
+  XAll = mvtnorm::rmvnorm(n,rep(0,d),covPerm)
+
+  if(type.response!="S"){
+
+    epsilon=rnorm(n,0,noise)
+    YAll=intercept*rep(1,n)+XAll%*%trueBeta+epsilon;
+
+    return(list("Y"=YAll,"X"=XAll,"TRUE.idx"=TRUE.idx))
+
+  } else if(type.response=="S" & is.null(rate)==FALSE){
+    v <- runif(n=nrow(XAll))
+    Tlat <- (- log(v) / (scale * exp(XAll %*% trueBeta)))^(1 / shape)
+    C <- rexp(n=nrow(XAll), rate=rate)
+    time <- pmin(Tlat, C)
+    status <- as.numeric(Tlat <= C)
+
+    return(list("Y"=time,"X"=XAll,"status"=status,"TRUE.idx"=TRUE.idx))
+
+  } else if(type.response=="S" & is.null(rate)==TRUE){
+    v <- runif(n=nrow(XAll))
+    Tlat <- (- log(v) / (scale * exp(XAll %*% trueBeta)))^(1 / shape)
+    status <- rep(0,length(Tlat))
+
+    return(list("Y"=Tlat,"X"=XAll,"status"=status,"TRUE.idx"=TRUE.idx))
+
+  }
+}
+
+```
+
+```{r}
+true_n  <- 10
+noise_n <- 90
+sample_size <- 10000
+sample_cols <- true_n + noise_n + 900
+
+# GGP:Data generating process
+dgp <- DGP(
+  s = true_n,           # 目的変数と相関のある説明変数の数
+  a = noise_n,          # 説明変数と相関のあるノイズ変数の数
+  sigStrength = 0.8,    # 目的変数と説明変数の相関の強さ
+  rho = 0.7,            # 説明変数とノイズ変数相関の強さ
+  n = sample_size,      # サンプルサイズ
+  noise = 1,            # 真の回帰直線の観測値の分散
+  var = 1,              # 潜在的な説明変数の分散
+  d = sample_cols,      # 潜在的な説明変数の数
+  type.response = "N",  # 目的変数を正規分布から生成
+  intercept = 0,        # 回帰直線の切片
+  DGP.seed = 1989)      # 乱数シード
+
+```
+
+あとは、リストの各項目に、説明変数や目的変数、目的変数と相関のある説明変数のインデックスが入っているので、これをもとに、データを作成する。ここでは、10000行×1001列のデータを生成する。目的変数と相関のある説明変数にはサフィックスとして`_t`をつけておく。
+
+```{r}
+library(tidyverse)
+Y <- as_tibble(dgp$Y)
+X <- as_tibble(dgp$X)
+tmp <- X %>% bind_cols(Y)
+names(tmp) <- c(paste("X", 1:sample_cols, sep = "_"), "Y")
+true_val <- names(tmp[,dgp$TRUE.idx])
+df <- tmp %>% 
+  rename_at(vars(true_val), list( ~ paste0(., "_t"))) %>%
+  select(Y, everything())
+
+dim(df)
+```
+
+`sigStrength=0.8`で設定しているので、だいたい0.8になっている。
+
+```{r}
+summary(lm(Y ~ ., data = df)) %>%
+  broom::tidy() %>% 
+  arrange(p.value)
+```
+
+ちょっと列の多いサンプルデータとかを作るときとか、その手のデータの学習速度を計測したいとかに便利かもしれない。
+
+## 参考サイト
+
+- [Package ‘HCmodelSets’](https://cran.r-project.org/web/packages/HCmodelSets/HCmodelSets.pdf)
+- [Introducing the HCmodelSets Package](https://insightr.wordpress.com/2018/08/04/introducing-the-hcmodelsets-package/)

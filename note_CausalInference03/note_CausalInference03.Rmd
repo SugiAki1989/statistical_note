@@ -1,0 +1,271 @@
+---
+title: "傾向スコアと生存分析"
+pagetitle: "傾向スコアと生存分析"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではRを使って因果推論に関する基礎的な理論から分析を実行するための方法をまとめている。ここでは傾向スコアと生存分析についてまとめておく。
+
+## 傾向スコアの数理
+傾向スコアの数理については下記が詳しいので、ここでは扱わない。
+
+### 傾向スコア
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)のp96
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://raw.githubusercontent.com/JaehyunSong/kobe_ci/master/Slide/Slide_Day2.pdf)のp41
+- [矢内勇生 統計的因果推論入門](http://yukiyanai.github.io/jp/classes/econometrics2/contents/slides/metrics2_topic05_slides.pdf)のp1
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp136
+
+### 傾向スコアとバランシング
+- [矢内勇生 統計的因果推論入門](http://yukiyanai.github.io/jp/classes/econometrics2/contents/slides/metrics2_topic05_slides.pdf)のp50
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp166
+
+### 傾向スコアとIPW
+- [矢内勇生 統計的因果推論入門](http://yukiyanai.github.io/jp/classes/econometrics2/contents/slides/metrics2_topic05_slides.pdf)のp35
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://raw.githubusercontent.com/JaehyunSong/kobe_ci/master/Slide/Slide_Day2.pdf)のp52
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp179
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)のp140
+
+### 傾向スコアの層別解析
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp172
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)のp131
+
+### 傾向スコアとマッチング
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://raw.githubusercontent.com/JaehyunSong/kobe_ci/master/Slide/Slide_Day2.pdf)のp24
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp151
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)のp109
+
+
+## 準備
+必要なライブラリを読み込んでおく。
+
+```{r}
+library(tidyverse)
+library(survival)
+library(survminer)
+library(MatchIt)
+library(tableone)
+library(cobalt)
+```
+
+ここで使用するサンプルデータは、[みんなの医療統計 多変量解析編](https://www.kspub.co.jp/book/detail/1563216.html)で利用されているサンプルデータをお借りする。このデータは右心カテーテル検査(RHC)の有用性に関する論文で使用されたものをサンプリングしたもの。
+
+傾向スコアで有名な研究論文「[The effectiveness of right heart catheterization in the initial care of critically ill patients. SUPPORT Investigators.](https://www.ncbi.nlm.nih.gov/pubmed/8782638)」のデータは[こちら](https://biostat.app.vumc.org/wiki/pub/Main/DataSets/rhc.csv)よりダウンロードできる。
+
+このデータをもとに、書籍では紹介されていないRでの実行方法をまとめておく。
+
+```{r}
+# ptid: 患者ID
+# swang1: 1 is RHC, 0 is NoRHC
+# dth30.num: 1 is death in 30days, 0 is alive
+# t3d30: died x days entring ICU
+# aps1: 集中治療開始時の重篤度スコア
+# alb1: 集中治療開始時のアルブミン値
+# resp1: 集中治療開始時の呼吸数
+# hrt1: 集中治療開始時の心拍数
+
+df <- read_csv('~/Desktop/rhc651.csv', show_col_types = FALSE) %>% 
+  select(ptid, swang1, dth30.num, t3d30, age, aps1, alb1, resp1, hrt1)
+df
+```
+
+## 傾向スコアマッチング
+傾向スコアで有名な研究があるので、それをもとに傾向スコアの概念を説明する。ちなみに私は医学系ではないので、細かい内容は知らない。
+
+- [The effectiveness of right heart catheterization in the initial care of critically ill patients. SUPPORT Investigators.](https://www.ncbi.nlm.nih.gov/pubmed/8782638)
+
+> **RESULTS**:
+> By case-matching analysis, patients with RHC had an increased 30-day mortality (odds ratio, 1.24; 95% confidence interval, 1.03-1.49). The mean cost (25th, 50th, 75th percentiles) per hospital stay was $49 300 ($17 000, $30 500, $56 600) with RHC and $35 700 ($11 300, $20 600, $39 200) without RHC. Mean length of stay in the ICU was 14.8 (5, 9, 17) days with RHC and 13.0 (4, 7, 14) days without RHC. These findings were all confirmed by multivariable modeling techniques. Subgroup analysis did not reveal any patient group or site for which RHC was associated with improved outcomes. Patients with higher baseline probability of surviving 2 months had the highest relative risk of death following RHC. Sensitivity analysis suggested that a missing covariate would have to increase the risk of death 6-fold and the risk of RHC 6-fold for a true beneficial effect of RHC to be misrepresented as harmful.
+>
+> **CONCLUSION**:
+> In this observational study of critically ill patients, after adjustment for treatment selection bias, RHC was associated with increased mortality and increased utilization of resources. The cause of this apparent lack of benefit is unclear. The results of this analysis should be confirmed in other observational studies. These findings justify reconsideration of a randomized controlled trial of RHC and may guide patient selection for such a study.
+
+これはICU入室から24時間以内に右心カテーテルによるモニタリングが行われたグループと行われなかったグループ間で傾向スコアマッチングを行い、30日後死亡率などが比較された研究。結果、右心カテーテルが予後に悪影響(死亡率が上がる)があることがわかり、この結果から、右心カテーテルに対するランダム化比較試験実施する必要性が検討された。
+
+実施にはランダム化比較試験が実施され、同程度の結果となり、右心カテーテルの利用は低下した。という日常的な診療に大きな影響を与えた傾向スコアを使った研究。
+
+ちなみに右心カテーテルとは、[近畿中央呼吸器センター診療部](https://kcmc.hosp.go.jp/shinryo/ushinkate.html)によると、
+
+> 心臓、肺の病気や症状があるとき、特に、心不全や肺高血圧症などの可能性が疑われる場合に受けていただき、診断の確定、今後の治療方針の決定に必要な情報を得る上で有用な検査です。
+
+とのこと。では、傾向スコアの内容についてみていく。下記は、上記の論文[The effectiveness of right heart catheterization in the initial care of critically ill patients. SUPPORT Investigators.](http://www.zirkin.com/em/articles/General%20Critical%20Care/Core/PAC/Connors1996.pdf)の**患者情報の部分の一部**である。他の患者情報はリンク先で確認。
+
+![](/Users/aki/Documents/statistical_note/note_CausalInference03/ps01.png)
+
+様々な患者の背景情報がまとめられている。年齢、性別、人種、病状などがあるが、RHC(right heart catheterization)を実施したグループと実施していないグループでは、背景情報がバラバラな状態である。これを揃える必要がある。そのために傾向スコアを計算する。
+
+いずれかの治療を選択する場合、個人が一方の治療を受ける傾向をスコア化したのが傾向スコアである。RHCなのかNoRHCを比較する場合、RHCを受ける確率は、個人の背景情報をもとに推測が可能である。例えばRHC=1でNoRHC=0として、交絡の原因となる背景情報を説明変数にして、ロジスティック回帰を実行すれば、RHCを受ける確率が計算できる。つまり、複数の要因が治療に与える影響度合いを1つの傾向スコアという値に集約したことになる。基本的には、傾向スコアが同じ個人を比較すると、背景情報が似ていることになる。
+
+そして、傾向スコアをもとに傾向スコアマッチングを行えば、背景情報が等しい個人をマッチさせることになるので、グループ間の背景情報を均質化できる。この傾向スコアマッチングを行った上で、術後のアウトカムを比較すれば、RHCが予後に影響を与えるかどうかを推測できる。
+
+![](/Users/aki/Documents/statistical_note/note_CausalInference03/ps02.png)
+![](/Users/aki/Documents/statistical_note/note_CausalInference03/ps3.png)
+
+RHCを受けた患者ではday30の死亡率が高くなっていた(OR1.24[1.03-1.49])。RHCを受けた患者の入院1日当りの費用は49,300ドルであり、受けなかった患者の入院1日当りの費用は35,700ドルであった。RHCを受けた患者さんの ICUの平均滞在期間は 14.8日(5, 9, 17)、受けなかった患者のICUの平均滞在期間は13日であった。
+
+というようにRHCを見直すべきような結果が傾向スコアマッチングの分析から発見された。
+
+## 傾向スコアと生存分析
+
+まずはバランシングせずにカプランマイヤー曲線を計算する。サンプリングしたデータとはいえ、RHCが行われたグループは術後予後が良くなく、RHCが行われていないグループのほうが1ヶ月以内の生存率が高い。
+
+```{r}
+fit_by_swang <- survfit(Surv(t3d30, dth30.num) ~ swang1, data = df)
+survminer::ggsurvplot(fit_by_swang, 
+                      fun = 'pct',
+                      risk.table = TRUE,
+                      tables.height = 0.3,
+                      linetype = 'strata',
+                      conf.int = TRUE,
+                      pval = TRUE,
+                      palette = c('#E86670', '#749FC6'),
+                      legend = 'bottom',
+                      break.x.by = 5)
+```
+
+Cox回帰を使って、ハザード比を計算しておく。ハザード比は1.49なので、RHCが行われていないグループを1とすると、RHCが行われたグループは、死亡リスクが1.49倍になることになる。
+
+```{r}
+fit_coxph <- survival::coxph(Surv(t3d30, dth30.num) ~ swang1, data = df, method = 'breslow')
+summary(fit_coxph)
+```
+
+ここで、各群のベースラインを見てみると、治療開始時の重篤度スコアである`avg_aps1`、治療開始時の心拍`avg_hrt1`に大きな差があるため、交絡が起こっている。そのため、RHCが予後に影響したのかどうかがわからない。つまり、検査を受けた人は、そもそも重篤なことが多く、カテーテル検査が行われたのであれば、単純にカテーテル検査が予後の生存と関わっているとは言えない。
+
+```{r}
+# CreateTableOne(
+#   data = df,
+#   vars = c("dth30.num", "t3d30", "age", "aps1", "alb1", "resp1", "hrt1"),
+#   factorVars = c("dth30.num"),
+#   strata = "swang1",
+#   test = FALSE
+# )
+df %>% 
+  group_by(swang1) %>% 
+  summarise(
+    n = n(),
+    avg_age = mean(age),
+    avg_aps1 = mean(aps1),
+    avg_alb1 = mean(alb1),
+    avg_resp1 = mean(resp1),
+    avg_hrt1 = mean(hrt1)
+      ) %>% 
+  pivot_longer(cols = n:avg_hrt1,
+               names_to = 'name',
+               values_to = 'value') %>% 
+  pivot_wider(names_from = swang1, names_prefix = 'flg_') %>% 
+  mutate(diff = abs(flg_1 - flg_0))
+
+```
+交絡を解消するため傾向スコアマッチングを行う。傾向スコアマッチングはRCTができていない状態のデータにおいて、ベースラインを揃えることで、同じような背景の人のみを解析に入れ込むことで、ランダム化したようなデータが作れる。その状態で介入である治療の有無ごとにアウトカムを比較することで、介入による違いを明らかにできる。
+
+傾向スコアは「各個人の背景情報をもとに、右心カテーテル検査(介入)を受ける傾向(確率)」をスコア化したもの。つまり介入に暴露する確率のこと。傾向スコアを並び替えてざっくりと確認すると、傾向スコアが低いと`aps1`も低く、傾向スコアが高いと`aps1`も高くなる。
+
+全分析がそうではないことには注意が必要だが、今回の場合であれば、傾向スコアが重篤度合いを代替表現していると言えるので、傾向スコアで並び替えると、傾向スコアが高い患者ほど重篤で、傾向スコアが低いほど、軽症であるといえる。この状態のデータをバランシングせずに分析すれば、RHCを受けたグループのほうが、重篤な患者が多く偏っていたために、予後が悪くなってしまう。
+
+バランシングすることで、RHCが行われているグループの重篤な患者、RHCが行われていないグループの軽症な患者がマッチせず、RHCが行われているグループの中等症の患者、RHCが行われていないグループの中等症の患者がマッチさせることができる。つまり似たものマッチングすることで、交絡を防げることになる。傾向スコアを使用したからと言って、必ずしも交絡しないわけではなく、必要な共変量が含まれていればの話である。
+
+```{r}
+matching <- matchit(swang1 ~ age + aps1 + alb1 + resp1 + hrt1, 
+                    data = df,
+                    method = "nearest")
+summary(matching)
+```
+
+`cobalt`パッケージの`love.plot()`で共変量の調整前後の状態が確認できる。`aps1`、`resp1`はうまくバランシングできておらず、$|0.1|$を超えている。
+
+```{r}
+love.plot(matching, thresholds = 0.1)
+```
+`match.data()`でマッチングしたデータのみを取り出して、各群の共変量の差を計算すると、さきほどよりも小さくなっている。
+
+```{r}
+matched_df <- match.data(matching)
+matched_df %>% 
+  group_by(swang1) %>% 
+  summarise(
+    n = n(),
+    avg_age = mean(age),
+    avg_aps1 = mean(aps1),
+    avg_alb1 = mean(alb1),
+    avg_resp1 = mean(resp1),
+    avg_hrt1 = mean(hrt1)
+  ) %>% 
+  pivot_longer(cols = n:avg_hrt1,
+               names_to = 'name',
+               values_to = 'value') %>% 
+  pivot_wider(names_from = swang1, names_prefix = 'flg_') %>% 
+  mutate(diff = abs(flg_1 - flg_0))
+```
+
+再度カプランマイヤー曲線を計算する。大きく結果が変わるわけではないが、曲線の差が縮まっていることがわかる。つまり、交絡が取り除かれていることによる影響。
+
+
+```{r}
+fit_by_matched_swang <- survfit(Surv(t3d30, dth30.num) ~ swang1, data = matched_df)
+survminer::ggsurvplot(fit_by_matched_swang, 
+                      fun = 'pct',
+                      risk.table = TRUE,
+                      tables.height = 0.3,
+                      linetype = 'strata',
+                      pval = TRUE,
+                      conf.int = TRUE,
+                      palette = c('#E86670', '#749FC6'),
+                      legend = 'bottom',
+                      break.x.by = 5)
+```
+
+
+Cox回帰のハザード比も1.32となっており、最初の結果よりも死亡リスクが小さい。
+
+```{r}
+fit_coxph_by_matched_swang <- survival::coxph(Surv(t3d30, dth30.num) ~ swang1,
+                                              data = matched_df,
+                                              method = 'breslow')
+summary(fit_coxph_by_matched_swang)
+```
+
+他の変数をモデルに組み込んでみると、ハザード比は1.26となりさらに小さく調整される。いずれにせよ、RHCを行うと死亡リスクが高くなる。
+
+```{r}
+fit_coxph_by_matched_cov <- survival::coxph(Surv(t3d30, dth30.num) ~ swang1 + age + aps1 + alb1 + resp1 + hrt1,
+                                              data = matched_df,
+                                              method = 'breslow')
+summary(fit_coxph_by_matched_cov)
+```
+
+## 参考文献および参考資料
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)
+- [星野匡郎,田中久稔(2016)Rによる実証分析 オーム社](https://shop.ohmsha.co.jp/shopdetail/000000004800/)
+- [安井翔太(2020) 効果検証入門 技術評論社](https://gihyo.jp/book/2020/978-4-297-11117-5)
+- [矢内勇生 統計的因果推論入門](https://yukiyanai.github.io/econometrics2/)
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://github.com/JaehyunSong/kobe_ci)
+- [みんなの医療統計 多変量解析編(2017) 講談社サイエンティフィック](https://www.kspub.co.jp/book/detail/1563216.html)

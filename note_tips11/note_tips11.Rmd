@@ -1,0 +1,92 @@
+---
+title: "関数の実行をタイムアウトさせたい"
+pagetitle: "関数の実行をタイムアウトさせたい"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+関数の実行をタイムアウトさせたい。プロセスIDをどうこうして実現できるとか思って、5時間くらい色々頑張ったが、検索したらでてきた。がーさすRとともに悲しい。
+
+## タイムアウトさせる
+タイムアウトで指定した秒数で処理が完了しなければ、関数の実行を中止する。
+
+```R:R
+library(R.utils)
+
+R.utils::withTimeout(sum((1:1e3)^2), timeout = 3, onTimeout = "silent")
+[1] 333833500
+
+R.utils::withTimeout(sum((1:1e8)^2), timeout = 3, onTimeout = "silent")
+NULL
+```
+
+
+中身はこんな感じ。
+
+```R:R
+> withTimeout
+function (expr, substitute = TRUE, envir = parent.frame(), timeout, 
+    cpu = timeout, elapsed = timeout, onTimeout = c("error", 
+        "warning", "silent"), ...) 
+{
+    if (substitute) 
+        expr <- substitute(expr)
+    if (!is.environment(envir)) 
+        throw("Argument 'envir' is not a list: ", class(envir)[1L])
+    cpu <- Arguments$getNumeric(cpu, range = c(0, Inf))
+    elapsed <- Arguments$getNumeric(elapsed, range = c(0, Inf))
+    onTimeout <- match.arg(onTimeout)
+    setTimeLimit(cpu = cpu, elapsed = elapsed, transient = TRUE)
+    on.exit({
+        setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
+    })
+    tryCatch({
+        eval(expr, envir = envir)
+    }, error = function(ex) {
+        msg <- ex$message
+        pattern <- gettext("reached elapsed time limit", "reached CPU time limit", 
+            domain = "R")
+        pattern <- paste(pattern, collapse = "|")
+        if (regexpr(pattern, msg) != -1L) {
+            ex <- TimeoutException(msg, cpu = cpu, elapsed = elapsed)
+            if (onTimeout == "error") {
+                throw(ex)
+            }
+            else if (onTimeout == "warning") {
+                warning(getMessage(ex))
+            }
+            else if (onTimeout == "silent") {
+            }
+        }
+        else {
+            throw(ex)
+        }
+    })
+}
+<bytecode: 0x5565ed6a2300>
+<environment: namespace:R.utils>
+```

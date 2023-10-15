@@ -1,0 +1,104 @@
+---
+title: "UTC, JSTの調べごと"
+pagetitle: "UTC, JSTの調べごと"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+CSVでもAPIでもなんでもいいけど、"2022-07-17 18:51:59 ???"というタイムゾーンなしの日時の文字列が手元に得られたとする。
+タイムゾーンがないので、「日本」でこのアクションが"2022-07-17 18:51:59 ???"に行われたのかわからないので困る。
+これがUTC表記だったのであれば、"2022-07-17 18:51:59 UTC+00:00"なので、9時間進めたJST表記の"2022-07-18 03:51:59 UTC+09:00"に修正する。
+これがJST表記だったのであれば、"2022-07-17 18:51:59 UTC+09:00"なので、このまま扱う。
+
+```
+# R
+library("lubridate")
+
+# UTC
+utc <- as.POSIXlt(Sys.time(), tz="UTC")
+utc
+[1] "2022-07-17 18:51:59 UTC"
+
+# UTC to JST
+utc2jst <- lubridate::with_tz(utc, tzone = "Japan") # "Asia/Tokyo"でもOK
+utc2jst
+[1] "2022-07-18 03:51:59 JST"
+
+# JST
+jst <- as.POSIXlt(Sys.time(), tz="Asia/Tokyo")
+jst
+[1] "2022-07-18 03:51:59 JST"
+
+# 0sec
+utc - jst
+Time difference of -0.00385499 secs
+utc - utc2jst1
+Time difference of 32.65067 mins
+
+# UnixTimeは同じ
+as.numeric(utc)
+[1] 1658083919
+as.numeric(utc2jst1)
+[1] 1658081960
+as.numeric(jst)
+[1] 1658083919
+
+# Pyhton
+from pytz import timezone
+from datetime import datetime
+
+# UTC
+utc = datetime.now(timezone('UTC'))
+print(utc)
+2022-07-17 18:50:16.076800+00:00
+
+# UTC to JST
+utc2jst = utc.astimezone(timezone('Asia/Tokyo'))
+print(utc2jst)
+2022-07-18 03:50:16.076800+09:00
+
+# JST
+jst = datetime.now(timezone('Asia/Tokyo'))
+print(jst)
+2022-07-18 03:50:16.085671+09:00
+
+# 0sec
+delta1 = utc - jst
+print(delta1.total_seconds())
+-0.008871
+
+delta2 = utc - utc2jst
+print(delta2.total_seconds())
+0.0
+```
+
+## 参考
+
+- [https://cz-cdn.shoeisha.jp/static/images/article/11658/sample.html:title]
+- [https://datetime360.com/ja/utc-jst-time/:title]
+
+

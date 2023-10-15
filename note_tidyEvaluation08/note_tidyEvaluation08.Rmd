@@ -1,0 +1,455 @@
+---
+title: "RのTidy evaluation_08"
+pagetitle: "RのTidy evaluation_08"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+## はじめに
+この記事はTidy evaluationについて学習した内容を自分の備忘録としてまとめたものです。今回は、Tidy evaluationと関わりのある表現式、シンボル、コール・オブジェクト、`Quosure`あたりおさらいしました。
+
+### Expression
+Expressionは表現式と呼ばれるもの。Rではコンソールに入力したスクリプトを実行すると、評価されるようになっています。このような場合に、実行と切り分けるために表現式を利用できます。`rlang::expr()`は、実行アクションを行わず、入力を表現式として捉えることが可能です。
+
+```R:R
+obj_expr <- rlang::expr(y <- x * 10)
+obj_expr
+y <- x * 10
+```
+
+表現式は、定数(Constants)、スカラー(scalars)、シンボル(symbols)、コール・オブジェクト(call objects)などで構成されます。`rlang::is_syntactic_literal()`でチェックできます。
+
+### Constants, scalars
+定数(Constants)、スカラー(scalars)は長さ1の`TRUE`、`1L`、`1.0`、`"x"`などのオブジェクトか`NULL`などのことです。
+
+```R:R
+is_syntactic_literal(TRUE)
+[1] TRUE
+
+is_syntactic_literal(1L)
+[1] TRUE
+
+is_syntactic_literal(1.0)
+[1] TRUE
+
+is_syntactic_literal("x")
+[1] TRUE
+
+is_syntactic_literal(NULL)
+[1] TRUE
+```
+
+### symbols
+シンボル(symbols)は、`x`、`iris`、`mean`のようなオブジェクトの名前のことです。シンボルは`rlang::expr()`または`sym()`でコードをキャプチャする必要があります。
+
+```R:R
+expr(x)
+x
+
+expr(iris)
+iris
+
+expr(mean)
+mean
+
+sym("x")
+x
+
+sym("iris")
+iris
+
+sym("mean")
+mean
+```
+
+コードをリストでキャプチャしたい場合は、`rlang::exprs()`が使えます。
+
+```R:R
+rlang::exprs(x, iris, mean)
+[[1]]
+x
+
+[[2]]
+iris
+
+[[3]]
+mean
+```
+
+シンボルオブジェクトは、`rlang::as_string()`または`as.character()`で文字型に戻すことが可能です。
+
+```R:R
+as_string(expr(x))
+[1] "x"
+
+as_string(expr(iris))
+[1] "iris"
+
+as_string(expr(mean))
+[1] "mean"
+
+as.character(expr(x))
+[1] "x"
+
+as.character(expr(iris))
+[1] "iris"
+
+as.character(expr(mean))
+[1] "mean"
+
+e <- exprs(x,iris,mean)
+purrr::map(e, as_string)
+[[1]]
+[1] "x"
+
+[[2]]
+[1] "iris"
+
+[[3]]
+[1] "mean"
+```
+
+`str()`を使うと、シンボルであることがひと目でわかります。
+
+```R:R
+str(expr(x))
+ symbol x
+
+str(expr(iris))
+ symbol iris
+
+str(expr(mean))
+ symbol mean
+
+str(e)
+List of 3
+ $ : symbol x
+ $ : symbol iris
+ $ : symbol mean
+```
+
+`is.symbol()`または`is.name()`でチェックできます。
+
+```R:R
+is.symbol(expr(x))
+[1] TRUE
+
+is.symbol(expr(iris))
+[1] TRUE
+
+is.symbol(expr(mean))
+[1] TRUE
+
+is.name(expr(x))
+[1] TRUE
+
+is.name(expr(iris))
+[1] TRUE
+
+is.name(expr(mean))
+[1] TRUE
+
+e <- exprs(x,iris,mean)
+purrr::map(e, is.symbol)
+[[1]]
+[1] TRUE
+
+[[2]]
+[1] TRUE
+
+[[3]]
+[1] TRUE
+```
+
+### `quote()`
+シンボルオブジェクトは`quote()`でも得ることができる。
+
+```R:R
+quote(x)
+x
+
+quote(expr(x))
+expr(x)
+
+str(quote(x))
+ symbol x
+
+is.symbol(quote(x))
+[1] TRUE
+
+identical(quote(x), expr(x))
+[1] TRUE
+
+identical(typeof(quote(x)), typeof(expr(x)))
+[1] TRUE
+
+identical(str(quote(x)), str(expr(x)))
+ symbol x
+ symbol x
+[1] TRUE
+```
+
+### コール・オブジェクト(call objects)
+コール・オブジェクトは、キャプチャされている関数呼び出しを表します。呼び出しオブジェクトは特別なタイプのリストで、最初のコンポーネントは呼び出す関数(通常はシンボル)で、残りの要素はその呼び出しオブジェクトの引数です。`lobstr::ast()`で抽象構文木で表現するとわかりよいです。
+
+```R:R
+lobstr::ast(x <- 10)
+█─`<-` 
+├─x 
+└─10 
+
+lobstr::ast(head(iris, 5))
+█─head 
+├─iris 
+└─5 
+
+lobstr::ast(mean(rnorm(n = 100, mean = 0, sd = 1)))
+█─mean 
+└─█─rnorm 
+  ├─n = 100 
+  ├─mean = 0 
+  └─sd = 1 
+```
+
+コール・オブジェクトは関数呼び出しのように見えますが、表示するとオブジェクトを識別できます。
+
+```R:R
+str(expr(x <- 10))
+ language x <- 10
+
+str(expr(head(iris, 5)))
+ language, mode "(": (head(iris, 5))
+
+str(expr(mean(rnorm(n = 100, mean = 0, sd = 1))))
+ language mean(rnorm(n = 100, mean = 0, sd = 1))
+```
+
+`typeof()`で確認するとシンボルとコール・オブジェクトは異なることがわかります。
+
+```R:R
+typeof(expr(x))
+[1] "symbol"
+
+typeof(expr(iris))
+[1] "symbol"
+
+typeof(expr(mean))
+[1] "symbol"
+
+typeof(expr(x <- 10))
+[1] "language"
+
+typeof(expr((head(iris, 5))))
+[1] "language"
+
+typeof(expr(mean(rnorm(n = 100, mean = 0, sd = 1))))
+[1] "language"
+```
+
+もちろん、`is.call()`で確認すると`TRUE`が返ります。
+
+```R:R
+is.call(expr(x <- 10))
+[1] TRUE
+
+is.call(expr((head(iris, 5))))
+[1] TRUE
+
+is.call(expr(mean(rnorm(n = 100, mean = 0, sd = 1))))
+[1] TRUE
+```
+
+### シンボルとコール・オブジェクトの違い
+シンボルとコール・オブジェクトの違いは、**実行ができる状態なのかどうか**で判断できる。下記の`quote(rnorm)`と`quote(rnorm(10))`では、前者はエラーが返るが、後者は評価が実行される。
+
+```R:R
+# expr(rnorm(10))
+quote(rnorm(10))
+
+quote(rnorm)
+rnorm
+
+quote(rnorm(10))
+rnorm(10)
+```
+
+`typeof()`と`is.**()`で確認すると、たしかに実行できる状態かどうかでシンボルかコール・オブジェクトに分かれているようです。つまり、シンボルは名前自体のことで、コール・オブジェクトは評価されていない関数呼び出しのこと。
+
+```R:R
+typeof(quote(mean))
+[1] "symbol"
+
+typeof(quote(rnorm(10)))
+[1] "language"
+
+is.symbol(quote(mean))
+[1] TRUE
+
+is.call(quote(mean(10)))
+[1] TRUE
+```
+
+### Quotation
+Tidy evaluationでは、`quo()`という関数が登場しますが、[HELP]()によると下記のようにあります。
+
+> Quotation is a mechanism by which an expression supplied as argument is captured by a function. Instead of seeing the value of the argument, the function sees the recipe (the R code) to make that value. This is possible because R expressions are representable as regular objects in R:
+> (拙訳)Quotationは、引数として指定された式が関数によってキャプチャされるメカニズムです。引数の値を表示する代わりに、関数はレシピ(Rコード)を参照して、その値を作成します。これは、Rの式がRの通常のオブジェクトとして表現できるため可能です。
+
+> - Calls represent the action of calling a function to compute a new value. Evaluating a call causes that value to be computed. Calls typically involve symbols to reference R objects.> (拙訳)コール(call)は、新しい値を計算するために関数を呼び出すアクションを表します。呼び出しを評価すると、その値が計算されます。**呼び出し**には通常、Rオブジェクトを参照する**シンボル**が含まれます。
+
+> - Symbols represent the name that is given to an object in a particular context (an environment).
+> (拙訳)シンボルは、特定のコンテキスト(環境)でオブジェクトに付けられた名前を表します。
+
+> We call objects containing calls and symbols expressions. There are two ways to create R expressions.
+> (拙訳)**コール(call)とシンボル(表現式)を含むオブジェクト**を呼び出します。
+
+とのことです。`quo()`や`enquo()`は`expr()`と似ていますが、**表現とその環境の両方**を`Quosure`と呼ばれるオブジェクトでキャプチャします。これには、その式がキャプチャされた元の環境への参照が含まれており、具体的には、その式で言及される関数とオブジェクトが定義される場所のことを指します。
+
+実際に中身を確認すると、**表現とその環境の両方**を`Quosure`と呼ばれるオブジェクトが表示されます。
+
+```R:R
+quo(x)
+<quosure>
+expr: ^x
+env:  global
+
+quo(iris)
+<quosure>
+expr: ^iris
+env:  global
+ 
+
+f <- function(x){
+  enquo(x)
+}
+f(mean)
+<quosure>
+expr: ^mean
+env:  global
+```
+
+`Quosure`は*コール(call)とシンボル(表現式)を含むオブジェクト**だったので、コール・オブジェクトかどうかを検証すると、`"language"`オブジェクトであることがわかります。先ほどもコール・オブジェクトは`"language"`でした。
+
+つまり`Quosure`は、シンボルを含むけれども、シンボルではないようです。
+
+```R:R
+typeof(quo(x))
+[1] "language"
+
+typeof(quo(mean))
+[1] "language"
+ 
+str(quo(x))
+ language ~x
+ - attr(*, ".Environment")=<environment: R_GlobalEnv> 
+
+str(quo(mean))
+ language ~mean
+ - attr(*, ".Environment")=<environment: R_GlobalEnv> 
+```
+
+調べてみるとわかりますが、`Quosure`はコール・オブジェクトです。
+
+```R:R
+is_quosure(quo(x))
+[1] TRUE
+is_quosure(quo(mean))
+[1] TRUE
+
+is.call(quo(x))
+[1] TRUE
+
+is.call(quo(mean))
+[1] TRUE
+```
+
+また、`Quosure`の表現式を取りたい場合は`get_expr()`、環境が知りたい場合は`get_env()`が利用可能です。
+
+```R:R
+q <- quo(rnorm(100))
+get_expr(q)
+rnorm(100)
+
+get_env(q)
+<environment: R_GlobalEnv>
+```
+
+`expr()`や`sym()`と同じように、この`Qousure`の表現式を、省略なしの文字型に変換する関数`quo_text()`が用意されています。`quo_text()`と似た関数`quo_label()`は、省略ありの文字列を返します。
+
+```R:R
+quo_text(quo_text(quo(x)))
+[1] "\"x\""
+
+quo_text(quo_text(quo(mean)))
+[1] "\"mean\""
+
+quo_text(quo_text(quo(iris)))
+[1] "\"iris\""
+
+typeof(quo_text(quo(x)))
+[1] "character"
+
+typeof(quo_text(quo(mean)))
+[1] "character"
+
+typeof(quo_text(quo(iris)))
+[1] "character"
+
+# quo_text()の省略版を作成する
+# quo_label(quo_text(quo(x)))
+# quo_label(quo_text(quo(mean)))
+# quo_label(quo_text(quo(iris)))
+```
+
+冒頭で紹介した`as_string()`は**表現式**を文字列に返す関数なので、`Quosure`には対応していません。**コール(call)とシンボル(表現式)を含むオブジェクト**が`Quosure`であり、`Quosure`コール・オブジェクトです。
+
+ややこしいですが、baseの`quote()`は表現式しかキャプチャしないので、as_string()`を使うことができます。
+
+```R:R
+as_string(quo(x))
+ エラー: Can't convert a `quosure/formula` object to a string
+Call `rlang::last_error()` to see a backtrace
+
+as_string(quote(x))
+[1] "x"
+```
+
+`Quosure`から表現式の文字列が欲しい場合は、`quo_text()`を使う必要があります。下記、再掲です。`quo_name()`というのもありますが、これは名前のない引数に名前を付与する場合に使います。
+
+```R:R
+quo_text(quo_text(quo(x)))
+[1] "\"x\""
+
+ quo_text(quo_text(quo(mean)))
+[1] "\"mean\""
+
+quo_text(quo_text(quo(iris)))
+[1] "\"iris\""
+```
+
+以上です…似たようなのが多いので、頭ごちゃごちゃしますね。

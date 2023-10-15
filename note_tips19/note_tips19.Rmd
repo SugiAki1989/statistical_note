@@ -1,0 +1,72 @@
+---
+title: "解約率とユーザー数の可視化"
+pagetitle: "解約率とユーザー数の可視化"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここではSaaSの記事でよく見かける解約率とユーザー数の関係図を可視化する。例えば下記の記事のグラフで、他の記事でも沢山見かけるものの、計算仮定が書かれていないので、計算して可視化してみた。
+
+- [ami.SaaS：解約率は成長の上限を決める](https://note.com/taira0131/n/naaa9f1eac5fa)
+
+## 可視化
+
+解約率が成長上限が決まるという関係は、グラフを見れば明らかで、持続的に成長できるのは、解約率が1桁のときのみとわかる。下記はシミュレーション設定。
+
+- 毎月新規ユーザーが100人増える
+
+
+
+```{r}
+library(tidyverse)
+sim_churn <- function(t, rate, new){
+  y <- vector(mode = "numeric", length = t)
+  y[[1]] <- new
+  for (i in 2:t) {
+    y[[i]] <- new + (y[[i-1]] - (y[[i-1]]*rate))
+  }
+  return(y)
+}
+
+
+t <- 36
+rate <- c(0.03, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30)
+map_dfc(
+  .x = rate, 
+  .f = function(x){sim_churn(t = t, rate = x, new = 100)}
+  ) %>% 
+  bind_cols(1:t) %>% 
+  setNames(c(paste0("ChurnRate=", rate), "time")) %>% 
+  pivot_longer(cols = -time, names_to = "rate_type", values_to = "y") %>% 
+  arrange(rate_type, time) %>% 
+  ggplot(., aes(time, y, col = rate_type)) + 
+  geom_line(size = 1) + 
+  scale_x_continuous(breaks = 1:t) + 
+  scale_y_continuous(breaks = seq(0, 5000, 250)) + 
+  theme_bw()
+```

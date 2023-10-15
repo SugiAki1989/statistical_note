@@ -1,0 +1,164 @@
+---
+title: "Rで微分偏微分を行う"
+pagetitle: "Rで微分偏微分を行う"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではRを使った微分、偏微分の方法をまとめておく。
+
+## 微分
+### 1変数の1階微分
+$h$が十分小さいとき、1変数の微分は定義によると下記のように表現できる。
+
+$$
+f^{\prime}(x)= \frac{f(x+h) - f(x)}{h}
+$$
+
+Rで計算するには、先程の式をそのまま利用すれば良い。ここでは、$f(x)=2x^3$の$x=3$を計算してみる。
+
+```{r}
+h <- 0.001
+
+f <- function(x){
+  return(2*x^3)
+}
+
+x <- 3
+
+d <- function(x){
+  res <- (f(x + h) - f(x)) / h
+  return(res)
+}
+
+d(x)
+```
+
+この結果をRの組み込み関数を使って検証すると、近似的な解が得られていることがわかる。
+
+```{r}
+d <- D(expression(2*x^3), 'x')
+# print(eval(expression(d)))
+eval(d)
+
+# library(numDeriv)
+# d <- genD(func = f, x)
+# d$f0
+```
+
+### 1変数の2階微分
+$h$が十分小さいとき、1変数の2階微分は定義によると下記のように表現できる。
+
+$$
+f^{(2)}(x)= \frac{f(x+2h) - 2f(x+h) + f(x)}{h^{2}}
+$$
+
+
+Rで計算するには、1階微分同様にそのまま利用すれば良い。ここでは、$f(x)=2x^3$の$x=3$を計算してみる。
+
+```{r}
+h <- 0.001
+
+f <- function(x){
+  return(2*x^3)
+}
+
+x <- 3
+
+d2 <- function(x){
+  res <- (f(x + 2*h) - 2*f(x + h) +  f(x)) / h^2
+  return(res)
+}
+
+d2(x)
+```
+
+さきほど同様に、この結果をRの組み込み関数を使って検証すると、近似的な解が得られていることがわかる。2階微分は`D(D(f))`とすれば良いらしい。
+
+```{r}
+d2 <- D(D(expression(2*x^3), 'x'), 'x')
+# print(eval(expression(d)))
+eval(d2)
+```
+
+## 偏微分
+$h$が十分小さいとき、$y$、$x$という順に偏微分する場合、定義によると下記のように表現できる。
+
+$$
+\frac{ \partial f }{ \partial y \partial x } = \frac{f(x+h, y+h) - f(x, y+h)-f(x+h, y) + f(x, y)}{h^{2}}
+$$
+
+Rで計算するには、これまでと同じようにそのまま利用すれば良い。ここでは、$f(x,y)=x^2 * y^3$の$x=3, y=1$を計算してみる。
+
+```{r}
+h <- 0.01
+
+f <- function(x, y){
+  return(x^2 * y^3)
+}
+
+x <- 3
+y <- 1
+
+pd <- function(x, y){
+  res <- (f(x + h, y + h) - f(x, y + h) - f(x + h, y) + f(x, y)) / h^2
+  return(res)
+}
+
+pd(x, y)
+```
+
+さきほど同様に、この結果をRの組み込み関数を使って検証すると、近似的な解が得られている。偏微分は`D(D(f, y),x)`とすれば良いらしい。
+
+```{r}
+pd <- D(D(expression(x^2 * y^3), 'y'), 'x')
+# print(eval(expression(d)))
+eval(pd)
+```
+
+先程の2変数関数を可視化しておく。見えにくいが、$x=3, y=1$の位置でポイントを打ち込んでいる。
+
+```{r}
+library(plot3D)
+y <- x <- seq(-10, 10, length=60)
+f <- function(x, y) x^2 * y^3
+z <- outer(x, y, f)
+
+persp3D(
+  x = x,
+  y = y,
+  z = z,
+  color.palette = heat.colors,
+  phi = 45,
+  theta = 200,
+  main = "3D perspective")
+points3D(x = 3, y = 1, z = f(3, 1),
+         col = "red", size = 10, 
+         add = T)
+```
+  

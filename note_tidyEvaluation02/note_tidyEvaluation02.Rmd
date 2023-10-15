@@ -1,0 +1,166 @@
+---
+title: "RのTidy evaluation_02"
+pagetitle: "RのTidy evaluation_02"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+## はじめに
+この記事は[Tidy evaluation](https://tidyeval.tidyverse.org/)をもとにTidy evaluationについて学習した内容を自分の備忘録としてまとめたものです。
+
+### quote or symbol
+#### Quote and unquote
+tidyevalを利用して関数を作成するための基本的なプロセスであり、`quote`と`unquote`はそのプロセスを構成する関数。
+
+- `enquo()`:自動的にその引数をクオートするために使用。
+- `!!`:引数のクオートを外すのに使用。
+
+グループごとに平均を計算する関数`grouped_mean()`を作成したいとする。この関数では、グループの単位となる`group_var`と`summary_var`をうまく評価させることで、汎用的な関数を作る必要がある。
+
+```
+grouped_mean <- function(data, group_var, summary_var) {
+  data %>%
+    group_by(group_var) %>%
+    summarise(mean = mean(summary_var))
+}
+```
+
+さっそくこの関数を使用してみるが、うまくいかない。`Column group_var is unknown`がないとエラーを返されているが、こちらとしては、`group_var = Species`を指定しているので、うまく行ってほしい。
+
+```
+iris %>% grouped_mean(., group_var = Species, summary_var = Sepal.Length)
+ エラー: Column `group_var` is unknown
+```
+
+これを修正するために`enquo()`を使い、入力された表現式をクオートする必要があります。
+
+```
+group_var <- enquo(group_var)
+summary_var <- enquo(summary_var)
+```
+
+そして、これらの変数が他の引用される場所を特定し、`!!`を使って一時的にクオートを外します。
+
+```
+grouped_mean <- function(data, group_var, summary_var) {
+  group_var <- enquo(group_var)
+  summary_var <- enquo(summary_var)
+  
+  data %>%
+    group_by(!!group_var) %>%
+    summarise(mean = mean(!!summary_var))
+}
+
+iris %>% grouped_mean(., group_var = Species, summary_var = Sepal.Length)
+# A tibble: 3 x 2
+  Species     mean
+  <fct>      <dbl>
+1 setosa      5.01
+2 versicolor  5.94
+3 virginica   6.59
+```
+
+これがQuote and unquoteというtidyevalにおける関数作成の基本らしい。
+
+#### Strings instead of quotes
+Quote and unquoteというステップでなくても、文字を使っても問題はないが、単純に文字が使えるわけではない。
+
+```
+var <- "Petal.Length"
+
+ris %>% mutate(., rescaled = !!var * 100)
+ "Petal.Length" * 100 でエラー:  二項演算子の引数が数値ではありません 
+```
+
+このエラーは`qq_show()`で明らかにできる。`100*"character"`になっているので、文字×数値となっているのでエラーが起こる。
+
+```
+rlang::qq_show(iris %>% mutate(., rescaled = !!var * 100))
+iris %>% mutate(., rescaled = "Petal.Length" * 100)
+```
+
+このエラーを回避するために文字をクオートすることでシンボルに変換しないといけない。
+
+```
+"Petal.Length"
+[1] "Petal.Length"
+
+quote(Petal.Length)
+Petal.Length
+
+is.symbol(quote(Petal.Length))
+[1] TRUE
+```
+
+もしくは`sym()`を使って文字型をシンボルに変更できる。
+
+```
+sym("Petal.Length")
+Petal.Length
+
+is.symbol(sym("Petal.Length"))
+[1] TRUE
+```
+
+シンボルを使って書き直すと、文字型を使ってうまく関数を動かすことができる。
+
+```
+grouped_mean2 <- function(data, group_var, summary_var) {
+  group_var <- sym(group_var)
+  summary_var <- sym(summary_var)
+  
+  data %>%
+    group_by(!!group_var) %>%
+    summarise(mean = mean(!!summary_var))
+}
+
+iris %>% grouped_mean2(., group_var = "Species", summary_var = "Sepal.Length")
+# A tibble: 3 x 2
+  Species     mean
+  <fct>      <dbl>
+1 setosa      5.01
+2 versicolor  5.94
+3 virginica   6.59
+```
+
+こうすることで、予め文字型で指定していても、関数内部で`sym()`は文字をシンボル化してくれて、`!!`が一時的にクオートを外すことができる。
+
+```
+grp_var <- "Species"
+sum_var <- "Sepal.Length"
+
+iris %>% grouped_mean2(., grp_var, sum_var)
+# A tibble: 3 x 2
+  Species     mean
+  <fct>      <dbl>
+1 setosa      5.01
+2 versicolor  5.94
+3 virginica   6.59
+```
+
+

@@ -1,0 +1,294 @@
+---
+title: "RのTidy evaluation_03"
+pagetitle: "RのTidy evaluation_03"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+## はじめに
+この記事は[Tidy evaluation](https://tidyeval.tidyverse.org/)をもとにTidy evaluationについて学習した内容を自分の備忘録としてまとめたものです。
+
+### Dealing with multiple arguments
+前回の記事では、1つのグループ化変数と1つの変数を受け取り、グループ化された平均を計算する関数を作成したが、無論、複数のグループ化変数を使いたいときはたくさんあります。
+
+複数の変数をクオートしてアンクオートすることは、1つの場合とほとんど同じですが、使う演算子が変わったりします。
+
+#### `...`(dot-dot-dot)
+`...`(dot-dot-dot)は引数をいくつでも受け入れてくれるすごく便利なやつ。例えば、`...`に渡されたすべての引数は、自動的にクオートされてリストとして返されます。引数の名前はそのリストの名前になります。
+
+```
+capture <- function(data, ...) {
+  dots <- enquos(...)
+  dots
+}
+
+capture(mtcars, 1 + 2, important_name = letters)
+<list_of<quosure>>
+
+[[1]]
+<quosure>
+expr: ^1 + 2
+env:  global
+
+$important_name
+<quosure>
+expr: ^letters
+env:  global
+```
+
+引数を変更していない場合に`...`を使って、別の関数に渡したいだけの場合、`...`を使えばいい。なので、`grouped_mean()`の引数の並びを変えて理解しやすいように`...`の前に、他の引数をとれるようにします。
+
+```
+grouped_mean <- function(data, summary_var, ...) {
+  summary_var <- enquo(summary_var)
+  
+  data %>%
+    group_by(...) %>%
+    summarise(mean = mean(!!summary_var))
+}
+
+mtcars %>% grouped_mean(., mpg, cyl, gear)
+# A tibble: 8 x 3
+# Groups:   cyl [3]
+    cyl  gear  mean
+  <dbl> <dbl> <dbl>
+1     4     3  21.5
+2     4     4  26.9
+3     4     5  28.2
+4     6     3  19.8
+5     6     4  19.8
+6     6     5  19.7
+7     8     3  15.0
+8     8     5  15.4
+
+ mtcars %>% grouped_mean(., disp, cyl, am, vs)
+# A tibble: 7 x 4
+# Groups:   cyl, am [6]
+    cyl    am    vs  mean
+  <dbl> <dbl> <dbl> <dbl>
+1     4     0     1 136. 
+2     4     1     0 120. 
+3     4     1     1  89.8
+4     6     0     1 205. 
+5     6     1     0 155  
+6     8     0     0 358. 
+7     8     1     0 326  
+```
+
+#### Unquote multiple arguments
+`!!`と`!!!`の違いを確認します。`!!!`はリストの各要素を取得し、独立した引数としてそれらのクオートを外す一方で、`!!`の場合はリストとしてまとめられます。このような違いがあるため、`!!!`は複数のクオートされたリスト引数のクオートを外すために必要です。
+
+```
+vars <- list(
+  quote(cyl),
+  quote(am)
+)
+
+rlang::qq_show(group_by(!!vars))
+group_by(<list: cyl, am>)
+
+rlang::qq_show(group_by(!!!vars))
+group_by(cyl, am)
+```
+
+なので、複数の引数を取るのに、`!!`を使っているとうまくいきませんし、`enquo()`ではなく`enquos()`に変更する必要があります。
+
+```
+grouped_mean2 <- function(data, summary_var, ...) {
+  summary_var <- enquo(summary_var)
+  group_vars  <- enquo(...)
+  
+  data %>%
+    group_by(!!group_vars) %>%
+    summarise(mean = mean(!!summary_var))
+}
+
+mtcars %>% grouped_mean2(., disp, cyl, am, vs)
+ enquo(...) でエラー:  使われていない引数 (am, vs) 
+```
+
+複数の引数が`...`から流れてきているので、`group_by(!!group_vars)`ではなく`group_by(!!!group_vars)`
+に変更する必要があります。
+
+```
+grouped_mean2 <- function(data, summary_var, ...) {
+  summary_var <- enquo(summary_var)
+  group_vars  <- enquos(...) #modify
+  
+  data %>%
+    group_by(!!!group_vars) %>% #modify
+    summarise(mean = mean(!!summary_var))
+}
+mtcars %>% grouped_mean2(., disp, cyl, am, vs)
+
+# A tibble: 7 x 4
+# Groups:   cyl, am [6]
+    cyl    am    vs  mean
+  <dbl> <dbl> <dbl> <dbl>
+1     4     0     1 136. 
+2     4     1     0 120. 
+3     4     1     1  89.8
+4     6     0     1 205. 
+5     6     1     0 155  
+6     8     0     0 358. 
+7     8     1     0 326  
+```
+
+### Modifying names
+関数がデータフレームに新しい列を作成するとき(`mutate()`とかはそうですね)、列の意味を反映する名前をつけるにはどうすればよいのか。さっきの`grouped_mean2`の場合、`mean`になっているが、どうなってこうなったのか知りたい。
+
+例えば、名前を与えなければ、`mean(Sepal.Length)`というように表現式がそのまま名前になっている。
+
+```
+iris %>% group_by(Species) %>% summarise(mean(Sepal.Length))
+# A tibble: 3 x 2
+  Species    `mean(Sepal.Length)`
+  <fct>                     <dbl>
+1 setosa                     5.01
+2 versicolor                 5.94
+3 virginica                  6.59
+```
+
+ココらへんを操作するには、`quo_name()`を適用することで名前を調整する。`quo_name()`は引き受けたquosureの名前をそのまま引き受ける。
+
+```
+var1 <- quo(Sepal.Length)
+var2 <- quo(mean(Sepal.Length))
+
+quo_name(var1)
+[1] "Sepal.Length"
+
+quo_name(var2)
+[1] "mean(Sepal.Length)"
+```
+
+なるほど、これは`enquo()`でも同じか確認しておく。当たり前だか、問題ない。
+
+```
+arg_name <- function(var) {
+  var <- enquo(var)
+  
+  quo_name(var)
+}
+
+arg_name(Sepal.Length)
+[1] "Sepal.Length"
+
+arg_name(mean(Sepal.Length))
+[1] "mean(Sepal.Length)"
+```
+
+では、これを複数の引数でも動作するように拡張していく。やり方は先程と同じで`...`と`enquos()`を使います。`named = TRUE`は名前がない場合にそのまま名前に引受けるオプションです。
+
+```
+args_names <- function(...) {
+  vars <- enquos(..., .named = TRUE)
+  names(vars)
+}
+
+args_names(avg = mean(height), weight)
+[1] "avg"    "weight"
+```
+
+あとは関数内でクオートされているもののクオートを外せば行けそうです。やってみると、エラーが返されます。
+
+```
+namae <- "Mike"
+args_names(!!namae = 1)
+ エラー:  予想外の '=' です  in "args_names(!!namae ="
+```
+
+どうやら`=`が有効ではないようで、それを解消するために`:=`という演算子が用意されています。
+
+```
+args_names(!!namae := 1)
+[1] "Mike"
+```
+
+では、先程の`grouped_mean2()`の名前を修正できるようにコードを変更します。`summary_nm`で名前を受け取るのと、`!!summary_nm`のクオート外し、`:=`で変更できるようにするところが修正点です。
+
+```
+grouped_mean2 <- function(data, summary_var, ...) {
+  summary_var <- enquo(summary_var)
+  group_vars  <- enquos(...)
+  
+  summary_nm <- quo_name(summary_var)
+  summary_nm <- paste0("AVG_", summary_nm)
+  
+  data %>%
+    group_by(!!!group_vars) %>%
+    summarise(!!summary_nm := mean(!!summary_var)) #:=　と　!!summary_nm
+}
+
+mtcars %>% grouped_mean2(., disp, cyl, am, vs)
+
+# A tibble: 7 x 4
+# Groups:   cyl, am [6]
+    cyl    am    vs AVG_disp
+  <dbl> <dbl> <dbl>    <dbl>
+1     4     0     1    136. 
+2     4     1     0    120. 
+3     4     1     1     89.8
+4     6     0     1    205. 
+5     6     1     0    155  
+6     8     0     0    358. 
+7     8     1     0    326  
+```
+
+同じようにグループ化変数の名前も変更できます。`enquos(..., .named = TRUE)`で複数の引数を引き受け、名前を書き換えます。あとはいつもどおり、`!!!group_vars`でクオートを外します。
+
+```
+grouped_mean3 <- function(data, summary_var, ...) {
+  summary_var <- enquo(summary_var)
+  group_vars  <- enquos(...)
+  
+  summary_nm <- quo_name(summary_var)
+  summary_nm <- paste0("AVG_", summary_nm)
+  group_vars <- enquos(..., .named = TRUE)
+  names(group_vars) <- paste0("GROUP_", names(group_vars))
+  
+  data %>%
+    group_by(!!!group_vars) %>%
+    summarise(!!summary_nm := mean(!!summary_var))
+}
+mtcars %>% grouped_mean3(., disp, cyl, am, vs)
+
+# A tibble: 7 x 4
+# Groups:   GROUP_cyl, GROUP_am [6]
+  GROUP_cyl GROUP_am GROUP_vs AVG_disp
+      <dbl>    <dbl>    <dbl>    <dbl>
+1         4        0        1    136. 
+2         4        1        0    120. 
+3         4        1        1     89.8
+4         6        0        1    205. 
+5         6        1        0    155  
+6         8        0        0    358. 
+7         8        1        0    326 
+```
+
+いろいろ頭を使いますが、なんとなくtidyevalでの関数作成の方法がわかった気がします。

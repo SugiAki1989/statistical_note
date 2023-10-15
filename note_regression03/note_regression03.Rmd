@@ -1,0 +1,128 @@
+---
+title: "GLMの誤差構造とリンク関数の視覚化~ポアソン回帰分析~"
+pagetitle: "GLMの誤差構造とリンク関数の視覚化~ポアソン回帰分析~"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 1280,
+                      out.height = 720,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+数年前に書いたものをそのまま転記している。ポアソン回帰分析の誤差構造とリンク関数の視覚化するスクリプト。
+
+```{r eval=FALSE}
+n <- 2
+X <- cars$speed 
+Y <- cars$dist
+df <- data.frame(X,Y)
+mat_x <- seq(min(X)-2, max(X)+2, length = n)
+mat_y <- seq(min(Y), max(Y), length = n)
+
+#ベースとなる3次元空間
+mat <- persp(x = mat_x,
+             y = mat_y,
+             z = matrix(0, n, n), 
+             zlim = c(0, 0.2), #zの高さ
+             theta = 30, #アングル
+             phi = 15,
+             ticktype = "detailed",
+             box = FALSE)
+
+#ポアソン回帰分析
+fit_poisson <- glm(Y ~ X,
+                   data = cars,
+                   family = poisson(link = "log"))
+
+
+x  <- seq(min(X), max(X), length = 50)
+
+#予測値をプロット
+#type = "response"はexp(y)を返す。
+fit_line <- trans3d(x = x, 
+                    y = predict(fit_poisson, 
+                                newdata = data.frame(X = x),
+                                type = "response"),
+                    z = rep(0, length(x)),
+                    mat)
+
+#95%信頼区間
+upr <- qpois(0.95, 
+            predict(fit_poisson,
+                          newdata = data.frame(X = x),
+                          type="response"))
+lwr <- qpois(0.05, 
+             predict(fit_poisson,
+                     newdata = data.frame(X = x),
+                     type="response"))
+
+upr_line <- trans3d(x, upr, rep(0, length(x)), mat)
+lwr_line <- trans3d(x, lwr, rep(0, length(x)), mat)
+
+#信頼区間を塗りつぶす
+conf_fill <- trans3d(c(x, rev(x)), 
+                     c(upr, rev(lwr)), 
+                     rep(0, 2*length(x)),
+                     mat)
+
+#散布図
+scatter_plt <- trans3d(X, Y, rep(0, length(X)), mat)
+
+#予測値、信頼区間、散布図をプロット
+polygon(conf_fill, 
+        border = NA,
+        col = "#B2D6E7")
+lines(fit_line, lwd = 1)
+lines(upr_line, lty = 1)
+lines(lwr_line, lty = 1)
+points(scatter_plt, pch = 19, col = "#0070B9")
+
+#ポアソン分布の個数
+n <- 10
+mat_x <- seq(min(X), max(X), length = n)
+
+#各x時点でのポアソン回帰分析の予測値
+lambda <- predict(fit_poisson, 
+                newdata = data.frame(X = mat_x),
+                type = "response")
+
+
+for(j in n:1){
+  x_n = 500
+  x = rep(mat_x[j], x_n)
+  y = seq(min(min(Y), qpois(0.05, predict(fit_poisson,newdata=data.frame(X=mat_x[j]),type="response"))),
+          max(Y),
+          length = x_n)
+  y = ceiling(y)
+  z0 = rep(0, x_n)
+  z = dpois(y, lambda[j])
+  fill_pois = trans3d(c(x, x), c(y, rev(y)), c(z, z0), mat)
+  polygon(fill_pois, border = NA, col = "#B2D6E7", density = 40)
+  x_line = trans3d(x,y,z0,mat)
+  lines(x_line, lty = 1)
+  col_line = trans3d(x, y, z, mat)
+  lines(col_line, col = "#0070B9")
+}
+```
+
+
+![](/Users/aki/Documents/statistical_note/note_regression03/viz.png)

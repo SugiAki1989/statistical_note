@@ -1,0 +1,233 @@
+---
+title: "prophetのモデル検証"
+pagetitle: "prophet07"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: TRUE
+    code_folding: "show"
+    highlight: "zenburn"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、下記のドキュメントを参考に、`prophet`パッケージの基本的な使い方をおさらいすることを目的としています。ゆくゆくは外部予測変数を追加したモデルやクロスバリデーション、パラメタチューニングなどなど、モデルを発展させながら使用方法をまとめていきます。
+
+- [Prophet | Forecasting at scale](https://facebook.github.io/prophet/docs/quick_start.html#r-api)
+
+モデルの数理部分は下記の`prophet`に関する論文やブログ記事を参照願います。非常にわかりやすいです。
+
+- [Forecasting at scale](https://peerj.com/preprints/3190/)
+- [Prophet入門【理論編】Facebookの時系列予測ツール](https://www.slideshare.net/hoxo_m/prophetfacebook)
+- [Prophetのモデル式を1から理解する](https://devblog.thebase.in/entry/2019/12/20/110000_1)
+- [fb Prophetの解剖で学ぶベイズ時系列モデリング](https://ill-identified.hatenablog.com/entry/2018/05/28/020224)
+
+# ライブラリと関数の読み込み
+
+```{r}
+library(prophet)
+library(tidyverse)
+
+head_tail <- function(data, n = 5){
+  stopifnot(is.data.frame(data))
+  head(data, n = n) %>% print()
+  cat(paste(rep("-", 100), collapse = ""), "\n")
+  tail(data, n = n) %>% print()
+}
+```
+
+# モデル検証
+
+今回はProphetのモデル検証についてまとめていきます。Prophetには時系列クロスバリデーションを行うための関数が予め用意されているので、ここではその`cross_validation()`を使うことにします。
+
+`cross_validation()`は、下記の手順で行われます。
+
+- `initial`引数でモデルの学習する期間を指定します。`initial`の終了時点がカットオフポイントになります。
+- `horizon`引数で予測範囲を指定します。
+- `period`引数でカットオフポイントを置く間隔を指定します。
+
+例えば、下記のように指定した場合、730日分のデータで学習し、そこから365日分の予測を行います。そして、カットオフポイントを180日ごとにずらして、再度予測を行います。これを繰り返すことでクロスバリデーションを行います。
+
+```
+cross_validation(m, initial = 730, period = 180, horizon = 365, units = 'days')
+```
+
+実際に`cross_validation()`を使ってみます。`cross_validation()`の説明のために、わかりやすいサンプルデータを作って使うことにします。
+
+```{r}
+df <- tibble(
+  ds = seq(as.Date("2021-01-01"), by = "day", length.out = 300),
+  y = runif(300)
+)
+head_tail(df)
+```
+
+`cross_validation()`を使うためには、まずはモデルを学習させる必要があるので、学習されたモデルを作ってきます。
+
+```{r}
+m <- prophet(df = df)
+```
+
+このサンプルデータは`2021-10-27`まであるということを念頭に、1日目(`2021-01-01`)から200日目(`2021-07-29`)までのデータで学習します。そして、201日目(`2021-07-30`)から20日分(`horizon`)の予測を行います。予測が終わったら、次に10日分カットオフをずらして(`period`)して、211日目(`2021-08-09`)から20日分(`horizon`)の予測を行います。予測が終わったら、先程同様、10日分カットオフをずらして(`period`)して、221日目(`2021-08-19`)から20日分(`horizon`)の予測を行います。
+
+```{r}
+df_cv <- cross_validation(m, initial = 200, period = 10, horizon = 20, units = 'days')
+head_tail(df_cv)
+```
+
+言葉ではわかりにくいかもしれないのですが、下記の結果を見たほうが早いかもしれません。
+
+```{r}
+df_cv %>% 
+  dplyr::group_by(cutoff) %>% 
+  dplyr::summarise(
+    start = min(ds),
+    end = max(ds),
+    cnt = n()
+    ) %>% 
+  dplyr::mutate(
+    lag_cutoff = lag(cutoff),
+    diff = difftime(cutoff, lag_cutoff)
+    )
+```
+
+`performance_metrics()`を使用することで、クロスバリデーションの結果を一般的な精度指標と共に表示してくれます。ただの乱数を振っているサンプルデータでは、精度指標のイメージがつきにくいかもしれないので、データを変更しておきます。
+
+```{r}
+# Githubのprophetのリポジトリからサンプルデータをインポート
+base_url <- 'https://raw.githubusercontent.com/facebook/prophet/master/examples/'
+data_path <- paste0(base_url, 'example_wp_log_R.csv')
+df <- readr::read_csv(data_path) %>% dplyr::arrange(ds) %>% dplyr::filter(ds >= "2011-01-01" & ds <= "2012-12-31")
+m <- prophet(df)
+df_cv <- cross_validation(m, initial = 120, period = 30, horizon = 5, units = 'days')
+df_perform <- performance_metrics(df_cv, rolling_window = 0.1)
+df_perform 
+```
+
+`performance_metrics()`は各クロスバリデーションのスライスの開始日からの日数ごとにグルーピングし、精度指標を計算しています。
+
+```{r}
+df_perform %>%
+  dplyr::select(horizon, mae) %>% 
+  dplyr::bind_cols(
+  df_cv %>%
+    dplyr::group_by(cutoff) %>%
+    dplyr::mutate(date_idx = row_number(),
+                  mae = abs(y - yhat)) %>%
+    dplyr::ungroup() %>%
+    dplyr::group_by(date_idx) %>%
+    dplyr::summarise(my_mae = mean(mae))
+  )
+  # rolling_windowの値に応じて、平均か移動平均に変更される
+  # %>% mutate(ma2 = slider::slide_vec(.x = mean_mae, .f = mean, .before = 2))
+```
+
+場合によっては数値が一致しない場合がありますが、それは`performance_metrics()`の`rolling_window`の値に応じて、`performance_metrics()`が移動平均を使用するためです。`mae()`の中身を見ると、条件分岐で平均か移動平均かを決定してるようです。
+
+```
+# https://github.com/facebook/prophet/blob/17dbb86ab023e451dc40da343def788c9cda745c/R/R/diagnostics.R#L486
+#' @keywords internal
+mae <- function(df, w) {
+  ae <- abs(df$y - df$yhat)
+  if (w < 0) {
+    return(data.frame(horizon = df$horizon, mae = ae))
+  }
+  return(rolling_mean_by_h(x = ae, h = df$horizon, w = w, name = 'mae'))
+}
+```
+
+`plot_cross_validation_metric()`を使うことで、精度指標を可視化できます。予測期間が短い場合、x軸が`Horizon(days)`ではなく`Horizon(hours)`となりますが、このグラフが表現していることは、最初の25時間時点のMAEは0.08であり、時間が経過するとともにMAEは悪化していき、120時間時点のMAEは0.12となることを意味しています。
+
+```{r}
+plot_cross_validation_metric(df_cv, metric = "mae")
+```
+
+`plot_cross_validation_metric()`は、もちろん`mae`以外の指標も可視化できます。
+
+# パラメタチューニング
+
+`modeltime`パッケージや`Tidymodels`パッケージの関数を利用すれば、より簡単にパラメタチューニングが行えるのかもしれませんが、現状、勉強不足で知らないので、自分で書いていくことにします。ですが、パラメタを用意して順番にモデルを学習させていくだけです。
+
+ここでは`changepoint_prior_scale`と`seasonality_prior_scale`を調整することにします。Prophetのドキュメントにも記載されている通り、チューニングしても精度改善が見込めない指標もありますので、それらの指標は後で触れることにします。
+
+```{r}
+changepoint_prior_scale <- seq(0.0, 0.5, 0.2)
+changepoint_prior_scale[[1]] <- changepoint_prior_scale[[1]] + 0.01
+
+seasonality_prior_scale <- seq(0.0, 10.0, 5)
+seasonality_prior_scale[[1]] <- seasonality_prior_scale[[1]] + 0.1
+
+param_grid <- expand_grid(
+  changepoint_prior_scale, 
+  seasonality_prior_scale
+)
+mean_mae <- vector(mode = "integer", length = nrow(param_grid))
+
+for (i in 1:nrow(param_grid)) {
+  c <- param_grid$changepoint_prior_scale[[i]]
+  s <- param_grid$seasonality_prior_scale[[i]]
+  
+  cat('iteration', i, ':', 'changepoint_prior_scale:', c, ' / ', 'seasonality_prior_scale:', s, '\n')
+  
+  set.seed(1989)
+  m <- prophet(df, changepoint.prior.scale = c, seasonality.prior.scale = s)
+  df_cv <- cross_validation(m, initial = 120, period = 30, horizon = 5, units = 'days')
+  df_perform <- performance_metrics(df_cv, metrics = "mae")
+  mean_mae[[i]] <- mean(df_perform$mae)
+}
+
+df_tuning <- cbind(param_grid, mean_mae)
+df_tuning
+```
+
+1番MAEが小さい結果を取り出したいときは、`which.min()`が便利です。
+
+```{r}
+df_tuning[which.min(df_tuning$mean_mae), ]
+```
+
+Prophetには、調整を検討したほうが良いパラメタがあります。下記のドキュメントを参考に、調整したほうが良いパラメタに絞って、まとめておきます。ベイズ最適化でパラメタをチューニングしている記事もありましたので、記載しておきいます。
+
+- [Diagnostics](https://facebook.github.io/prophet/docs/diagnostics.html#cross-validation)
+- [Bayesian Hyperparameter Optimization for Time Series](https://rstudio-pubs-static.s3.amazonaws.com/351073_677a795d25d9418a843640940a2dacf5.html)
+
+## changepoint_prior_scale
+
+最も影響のあるパラメタです。トレンドの柔軟性、特にトレンドの変化点でトレンドがどの程度変化するかを決定するパラメタです。小さすぎると、トレンドが不十分になり、大きすぎると、トレンドが過剰適合します。最も極端な場合、トレンドが毎年の季節性を捉えてしまう可能性があります。デフォルトの0.05です。0.001から0.5の範囲が妥当なチューニング範囲とのことです。
+
+## seasonality_prior_scale
+
+このパラメタは、季節性の柔軟性を制御するパラメタ。値が大きいと、季節性が大きな変動にフィットし、値が小さいと季節性の大きさが小さくなります。デフォルトは10です。チューニングの妥当な範囲は0.01から10です。
+
+## holidays_prior_scale
+
+休日効果の柔軟性を制御するパラメタ。`Seasonality_prior_scale`と同様に、デフォルトは10です。`seasonality_prior_scale`の場合と同様に、0.01から10の範囲で調整できます。
+
+# セッション情報
+
+```{r}
+sessionInfo()
+```
+
+
+

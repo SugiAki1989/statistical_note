@@ -1,0 +1,279 @@
+---
+title: "TidyModels: modeltime"
+pagetitle: "TidyModels: modeltime"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+`tidymodels`パッケージの使い方をいくつかのノートに分けてまとめている。`tidymodels`パッケージは、統計モデルや機械学習モデルを構築するために必要なパッケージをコレクションしているパッケージで、非常に色んなパッケージがある。ここでは、今回は`modeltime`パッケージについてまとめていく。モデルの数理的な側面や機械学習の用語などは、このノートでは扱わない。
+
+下記の公式ドキュメントや`tidymodels`パッケージに関する書籍を参考にしている。
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+## `modeltime`パッケージの目的
+
+`modeltime`パッケージは、時系列モデルの構築を効率よく行うためのパッケージで、`tidymodels`パッケージと組み合わせて時系列モデルを作成する際に使用される。時系列予測のための体系的なワークフローを提供し、時系列ブーストモデルなど新しいアルゴリズムもカバーしている点が特徴的。
+
+- [modeltime](https://business-science.github.io/modeltime/articles/getting-started-with-modeltime.html#step-2---create-fit-multiple-models)
+
+上記のサイトをなぞりながら、不明点を追記しながらまとめていく。
+
+## モデルの作成
+
+まずは必要なパッケージを読み込んでおく。
+
+```{r}
+library(tidymodels)
+library(modeltime)
+library(tidyverse)
+library(lubridate)
+library(timetk)
+``` 
+
+`modeltime`パッケージの基本的なワークフローは下記の通り。丸括弧内には作業と対応する関数名を表示している。
+
+- データを学習データ、テストデータに分割
+- 複数のモデルを作成してフィッティング。そして、モデルテーブルに追加(`modeltime_table`関数)
+- モデルをテストデータに合わせて調整(`modeltime_calibrate`関数)
+- テストセットの予測と精度評価を行なう(`modeltime_forecast`関数、`modeltime_accuracy`関数)
+- モデルをフルデータで再学習(`modeltime_refit`関数)
+- 将来予測を行う(`modeltime_forecast`関数)
+
+ここで利用するデータは`timetk`パッケージ内の`m4_monthly`データセットで、コンペティションで使用されたデータ。ここでは`id`が`M750`の部分を使用する。
+
+データは、1990-01-01から始まり、2015-06-01まである。レコード数は306レコードで、間隔は月単位のデータになっている。
+
+```{r}
+m750 <- m4_monthly %>% filter(id == "M750")
+m750 %>% 
+  summarise(start_date = min(date), end_date = max(date), records = n())
+```
+
+`timetk`パッケージには、`plot_time_series`関数が用意されており、時系列データ簡単に可視化できる。そのため、`ggplot2`パッケージの関数を分析者が記述する必要がない。引数は沢山用意されており、グラフを柔軟にカスタマイズできる。
+
+```{r}
+m750 %>%
+  plot_time_series(.data = ., .date_var = date, .value = value, .interactive = FALSE)
+```
+
+モデルを構築する前に、データを分割しておく。クロスバリデーションなどは次回のノートで扱うのでは、ここではシンプルに時系列データを分割する。`rsplit`クラスの分割データは、`tk_time_series_cv_plan`関数でデータフレームに変換できる。
+
+今回は学習データが、1990-01-01から2012-11-01(22年10ヶ月)で、テストデータが2012-12-01から2015-06-01(2年6ヶ月)である。
+
+```{r}
+splits <- initial_time_split(m750, prop = 0.9)
+df_train <- splits %>% training()
+df_test <- splits %>% testing()
+
+bind_rows(
+  df_train %>% summarise(start_date = min(date), end_date = max(date), records = n()),
+  df_test %>% summarise(start_date = min(date), end_date = max(date), records = n())
+)
+```
+
+そのまま`plot_time_series_cv_plan`関数に渡すことで、分割データの状態を可視化できる。
+
+```{r}
+splits %>%
+  tk_time_series_cv_plan() %>%
+  plot_time_series_cv_plan(date, value, .interactive = FALSE,
+                           .title = "Time Series Validation Plan")
+```
+
+データの準備が整ったので、次は、モデルを設定する。`modeltime`パッケージのメリットは複数のモデルを効率よく管理し、評価し、再学習までを一気通貫で実行できる点。ここでは基本的なARIMAモデルとFaceBookが開発したProphetモデル、Prophet Boostモデル、ランダムフォレストの4つを設定する。
+
+```{r}
+model_fit_arima <- arima_reg() %>%
+    set_engine(engine = "auto_arima") %>% 
+    fit(value ~ date, data = df_train)
+
+model_fit_prophet <- prophet_reg(seasonality_yearly = TRUE) %>%
+    set_engine(engine = "prophet") %>% 
+    fit(value ~ date, data = df_train)
+
+list(model_fit_arima, model_fit_prophet)
+```
+
+機械学習モデルは、`tidymodels`パッケージの流れでレシピやワークフローを利用できる。
+
+```{r}
+recipe <- recipe(value ~ date, df_train) %>%
+  step_timeseries_signature(date) %>%
+  step_rm(
+    contains("am.pm"),
+    contains("hour"),
+    contains("minute"),
+    contains("second"),
+    contains("xts")
+  ) %>%
+  step_fourier(date, period = 365, K = 5) %>%
+  step_dummy(all_nominal())
+
+recipe %>% prep() %>% bake(df_train)
+```
+
+レシピが完成したら、ワークフローを使ってフィッティングしておく。機械学習アルゴリズムは通常、日付・日時を処理する方法を知らないため、日付列を削除する必要がある。
+
+```{r}
+model_randomforest <- rand_forest(trees = 1000, min_n = 50, mtry = 15) %>%
+  set_engine("ranger") %>% 
+  set_mode("regression")
+
+model_fit_randomforest <- workflow() %>%
+  add_model(model_randomforest) %>%
+  add_recipe(recipe %>% step_rm(date)) %>%
+  fit(df_train)
+
+model_fit_randomforest
+``` 
+
+最後にProphet Boostモデルのフィッティングを行なう。
+
+```{r}
+model_prophet_boost <- prophet_boost(seasonality_yearly = TRUE) %>%
+  set_engine("prophet_xgboost") 
+
+model_fit_prophet_boost <- workflow() %>%
+  add_model(model_prophet_boost) %>%
+  add_recipe(recipe) %>%
+  fit(df_train)
+
+model_fit_prophet_boost
+``` 
+
+モデルのフィッティングが完了したらモデルテーブルに追加する(`modeltime_table`関数)。これは、予測ワークフローの一部として使用されるため、必要な手順である。
+
+```{r}
+models_tbl <- modeltime_table(
+    model_fit_arima,
+    model_fit_prophet,
+    model_fit_prophet_boost,
+    model_fit_randomforest
+)
+models_tbl
+```
+
+モデルテーブルにモデルを登録したら、テストデータでモデルを検証する。これは`modeltime_calibrate`関数で行なうことができる。
+
+```{r}
+calibration_tbl <- models_tbl %>%
+    modeltime_calibrate(new_data = df_test)
+
+calibration_tbl
+```
+
+これを実行すると、テストデータの観測値とモデルの予測値と残差が記録される。
+
+```{r}
+# ARIMA Model
+calibration_tbl %>% 
+  pluck(".calibration_data", 1)
+```
+
+テストデータでの精度評価を行なう。これは`modeltime_forecast`関数で行える。`modeltime_forecast`関数は、データセットを観測値、モデル1(ARIMA)の予測値、モデル2(prophet)の予測値、モデル3(Prophet Boost)、モデル4(RandomForest)の予測値という順でレコードを積み上げたデータフレームを返す。
+
+```{r}
+calibration_tbl %>%
+    modeltime_forecast(
+        new_data = df_test,
+        actual_data = m750
+        )
+```
+
+また、`plot_modeltime_forecast`関数でテストデータを可視化できる。
+
+```{r}
+calibration_tbl %>%
+    modeltime_forecast(
+        new_data = df_test,
+        actual_data = m750
+        ) %>%
+    plot_modeltime_forecast(.interactive = FALSE)
+```
+
+評価指標の具体的な数値は`modeltime_accuracy`関数で計算できる。この関数は、一般的な精度指標を一気に計算できる
+
+- `MAE`: 平均絶対誤差
+- `MAPE`: 平均絶対パーセント誤差
+- `MASE`: 平均絶対スケール誤差
+- `SMAPE`: 対称平均絶対パーセント誤差
+- `RMSE`: 2乗平均平方根誤差
+- `RSQ`: R2乗
+
+評価指標を見る限り、テストデータに対しては、Prophet Boostモデルのほうが優秀である。
+
+```{r}
+calibration_tbl %>%
+    modeltime_accuracy() %>%
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+
+この結果から、Prophet Boostモデルで、フルデータセットを再学習させて、将来の予測を行なうことがよいとわかる。この作業は`modeltime_refit`関数で実行できる。
+
+この際に特定のモデルを取り出す必要はなく、モデルテーブルで管理しているモデルを使って予測できる。ここでは1年先を予測する。
+
+```{r}
+refit_tbl <- calibration_tbl %>%
+    modeltime_refit(data = m750)
+
+refit_tbl %>%
+    modeltime_forecast(h = "1 years", actual_data = m750) %>%
+    plot_modeltime_forecast(.interactive = FALSE)
+```
+
+Prophet Boostモデルだけでよいのであれば、モデルテーブルから取り除けば良い。
+
+```{r}
+refit_tbl_only_arima <- calibration_tbl %>%
+    filter(.model_id == 3) %>% 
+    modeltime_refit(data = m750)
+
+refit_tbl_only_arima %>%
+    modeltime_forecast(h = "1 years", actual_data = m750) %>%
+    plot_modeltime_forecast(.interactive = FALSE)
+```
+
+以上が`modeltime`パッケージの基本的な使い方である。
+
+予測値のデータフレームを参考までに全件出力しておく。
+
+```{r}
+refit_tbl %>%
+    modeltime_forecast(h = "1 years", actual_data = m750) %>% 
+    print(n = 500)
+```
+
+## 参考文献
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+

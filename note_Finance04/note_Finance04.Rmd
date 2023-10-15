@@ -1,0 +1,108 @@
+---
+title: "損益決算書をウォーターフォールチャートで可視化する"
+pagetitle: "損益決算書をウォーターフォールチャートで可視化する"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートでは損益決算書をウォーターフォールチャートで可視化することを目的としている。ウォーターフォールチャートを作ってくれるパッケージはあるものの、再現したい形とは少し異なっているので自作した内容をまとめた。
+
+
+## サンプルデータ
+
+損益決算書(profit & loss statement)は言わずもがななので割愛する。今回使用するデータは[EDINET](https://disclosure2.edinet-fsa.go.jp/WZEK0040.aspx?S100POA3,,)にアップされている良品計画の有価証券報告書から損益計算書の部分の数字をお借りしている。EDINETからはXBRLやcsvの形式でもダウンロードができるが、少し加工が大変そうだったので、今回はPDFを転記することにした。
+
+```{r}
+library(waterfalls)
+library(tidyverse)
+library(scales)
+
+d <- read_csv('~/Desktop/ryohin-keikaku-fy44.csv')
+d2 <- d %>% 
+  select(item3, amount,type) %>% 
+  filter(!is.na(amount)) %>% 
+  mutate(amount = if_else(type == 'out', -1*amount, amount))
+d2
+```
+
+## ウォーターフォールチャート
+
+ウォーターフォールチャートが作れるパッケージ`waterfalls`を利用して可視化する。ちなみに`waterfall`という単数形の名前のパッケージも存在しているので注意。
+
+```{r}
+waterfall(d2, calc_total = TRUE)
+```
+
+これは思い通りには可視化できなていない。今回のデータは、営業収益から営業原価を引いた営業総利益も同時に可視化したい。しかし、パッケージでは、このような使い方はおそらく想定されておらず、営業総利益がそのまま足しこまれてしまっている。そのほかの部分も同様に、計算が誤ったままになっている。そもそもウォーターフォールチャートの使い方とは異なる可能性があるが。
+
+このあたりの調整が行うためには自分で作成する方法しかないっぽいので、自作することにした。`geom_rect`関数を利用するので、そのための開始点や終了点を前処理しておく。
+
+```{r}
+d3 <- d2 %>% 
+  mutate(
+    id = row_number(),
+    end = cumsum(if_else(id == 1 | type != 'net', amount, 0)),
+    start = lag(end, 1, 0),
+    start = if_else(type == 'net', 0, start),
+    item3 = fct_reorder(item3, id),
+    type = fct_relevel(type, 'out', 'net', 'in')
+  ) 
+d3
+```
+
+あとはこのデータを加工すれば、狙い通りの可視化が実現できる。
+
+```{r}
+ggplot(d3, aes(item3, fill = type)) + 
+  geom_rect(aes(x = item3, xmin = id - 0.4, xmax = id + 0.4, ymin = end, ymax = start), col = 'black') + 
+  geom_text(aes(x = id, y = if_else(type == 'out', start, end), label = amount),
+            size = 3, hjust = 0.5, vjust = -0.5) + 
+  scale_y_continuous(labels = label_comma()) + 
+  scale_fill_manual(values = c('net' = '#f8f8f8', 'in' = '#68a1ff', 'out' = '#f87268')) +
+  labs(title = '株式会社良品計画-連結損益計算書-', 
+       subtitle = '自2021年9月1日 至2022年8月31日',
+       x = '費目', y = '単位:100万円') + 
+  theme_bw() + 
+  theme(text = element_text(size = 10, family='Droid Sans Japanese'),
+        axis.text.x = element_text(angle = 60, hjust = 1),
+        legend.position = 'none',
+        plot.title = element_text(size = 15, hjust = 0.5),
+        plot.subtitle = element_text(size = 10, hjust = 0.5))
+```
+
+
+
+## 参考文献
+
+- [有価証券報告書](https://ssl4.eir-parts.net/doc/7453/yuho_pdf/S100POA3/00.pdf)
+- [損益計算書（P/L）とは？項目別の見方やポイント一覧・事例をわかりやすく解説](https://biz.moneyforward.com/accounting/basic/130/)
+- [Waterfall charts in ggplot2 with waterfalls package](https://r-charts.com/flow/waterfall-chart/)
+- [ggplot2: Waterfall Charts](https://www.r-bloggers.com/2010/05/ggplot2-waterfall-charts/)
+- [Convert Dataframe to make Waterfall Chart in ggplot2](https://stackoverflow.com/questions/43050698/convert-dataframe-to-make-waterfall-chart-in-ggplot2)

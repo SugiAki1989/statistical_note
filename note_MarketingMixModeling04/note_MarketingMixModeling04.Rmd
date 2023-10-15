@@ -1,0 +1,554 @@
+---
+title: "Robyn R Demoを動かす"
+pagetitle: "Robyn R Demoを動かす"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+Marketing Mix Modeling(MMM)のシリーズでは、Meta社(Facebook)が開発したRobynパッケージのドキュメントをなぞりながら、MMMを理解するために必要な知識を整理し、RでMMMを実行するまでをまとめている。基本的には下記の公式ドキュメントを参考にしている。
+
+- [Robyn](https://facebookexperimental.github.io/Robyn)
+
+ここでは、[Robyn R Demo](https://github.com/facebookexperimental/Robyn/blob/main/demo/demo.R)をなぞりながら、mmmへの理解を進めていく。シードが固定できず、至るところにシードの設定があるが、それは私の理解不足によるもの。
+
+現状、動けばいいのであれば使えるが、MMMの多目的最適化の部分や、そもそものパッケージへの理解があまり進んでないので、積極的には使いづらい。少しづつ今後もMMMへの理解を深めたい…。
+
+## ライブラリの準備
+
+`Robyn`パッケージを利用するには、`Robyn`パッケージのインストールは必須だが、追加で`reticulate`パッケージが必要。`reticulate`パッケージはPythonをR環境で実行するために必要なライブラリで、Robynは最適化を行う際にNevergradを利用するため、この際にPythonが必要になる。インストールする方法はpip、condaの2パターンあり、pipでやると、M1 MacBook環境で作業をしている関係か、下記のエラーが表示される。
+
+```
+Error: /Library/Frameworks/Python.framework/Versions/3.9/lib/python3.9/config-3.9-darwin/libpython3.9.dylib - dlopen(/Library/Frameworks/Python.framework/Versions/3.9/lib/python3.9/config-3.9-darwin/libpython3.9.dylib, 0x000A): tried: '/Library/Frameworks/Python.framework/Versions/3.9/lib/python3.9/config-3.9-darwin/libpython3.9.dylib' (mach-o file, but is an incompatible architecture (have (x86_64), need (arm64e))), '/Library/Frameworks/Python.framework/Versions/3.9/Python' (mach-o file, but is an incompatible architecture (have (x86_64), need (arm64e))), '/System/Library/Frameworks/Python.framework/Versions/3.9/Python' (no such file)
+```
+
+ネット情報や今話題のChatGPT先生の返事からエラー文を察するに下記のような感じだと思われるが、そんな技術力はもってないので諦めた。
+
+```
+拙訳: 
+Pythonのライブラリが異なるアーキテクチャでコンパイルされているため、RからPythonを呼び出すことができない。具体的には、Pythonライブラリがx86_64アーキテクチャでコンパイルされており、Mac M1のARM64アーキテクチャと互換性がないため、エラーが発生。解決策としては、PythonライブラリをMac M1のARM64アーキテクチャに再コンパイルするか、ARM64アーキテクチャで動作するPythonインタープリタを使用する。
+```
+
+なので、conda経由でnevergradを利用できるようにした。pip、condaのインストール方法は下記に記載がある。
+
+- [facebookexperimental/Robyn](https://github.com/facebookexperimental/Robyn/blob/main/demo/install_nevergrad.R)
+
+```{r}
+library(reticulate)
+## set conda env -- これは公式ドキュメントには記載がないが、セットしないと使えない
+use_condaenv("r-reticulate")
+Sys.setenv(RETICULATE_PYTHON = "~/Library/r-miniconda-arm64/envs/r-reticulate/bin/python")
+py_config() 
+```
+
+## Step 0: Setup environment
+
+まずは必要なライブラリを読み込む。デモの流れに沿って、ライブラリが最新かどうかを確認する。ライブラリのバージョンは下記より確認でき、現時点では`Version: 3.10.3.9000`が最新版。
+
+- [facebookexperimental/Robyn](https://github.com/facebookexperimental/Robyn/blob/main/R/DESCRIPTION#L4)
+
+
+他にもマルチコアや出力ファイルの設定を行う。
+
+```{r}
+library(Robyn)
+
+## Force multi-core use when running RStudio
+Sys.setenv(R_FUTURE_FORK_ENABLE = "true")
+options(future.fork.enable = TRUE)
+
+# Set to FALSE to avoid the creation of files locally
+create_files <- TRUE
+
+packageVersion("Robyn")
+```
+
+## Step 1: Load data
+
+今回利用するデータは、パッケージに同梱している`dt_simulated_weekly`というデータ。期間は2015-11-23から2019-11-11で、その期間における広告費用、収益、イベント情報が「週次」単位で記録されている。
+
+```{r}
+## Check simulated dataset or load your own dataset
+data("dt_simulated_weekly")
+head(dt_simulated_weekly)
+```
+
+`prophet`パッケージの祝日データフレームも読み込んでおく。残念なことに日本の祝日情報は含まれていないので、祝日情報が必要であれば自分で用意する必要がある。その場合は、`zipangu`パッケージの関数を利用するなり、行政のオープンデータなどから作れば良い。
+
+```{r}
+## Check holidays from Prophet
+# 59 countries included. If your country is not included, please manually add it.
+# Tipp: any events can be added into this table, school break, events etc.
+data("dt_prophet_holidays")
+head(dt_prophet_holidays)
+
+# Directory where you want to export results to (will create new folders)
+robyn_directory <- "~/Desktop"
+```
+
+## Step 2a: For first time user: Model specification in 4 steps
+### 2a-1: First, specify input variables
+
+モデリングを行うには`robyn_inputs()`関数を実行すればよいのだが、引数が非常に多い。ただ、`robyn_inputs()`関数は、実行するための準備を行う関数で、モデリングできるわけではない。この関数は、モデル初期構築のために、すべてのモデルパラメータを入力し、入力の正しさをチェックするための関数と説明される。
+
+```{r}
+InputCollect <- robyn_inputs(
+  dt_input = dt_simulated_weekly,
+  dt_holidays = dt_prophet_holidays,
+  date_var = "DATE", # date format must be "2020-01-01"
+  dep_var = "revenue", # there should be only one dependent variable
+  dep_var_type = "revenue", # "revenue" (ROI) or "conversion" (CPA)
+  prophet_vars = c("trend", "season", "holiday"), # "trend","season", "weekday" & "holiday"
+  prophet_country = "DE", # input one country. dt_prophet_holidays includes 59 countries by default
+  context_vars = c("competitor_sales_B", "events"), # e.g. competitors, discount, unemployment etc
+  paid_media_spends = c("tv_S", "ooh_S", "print_S", "facebook_S", "search_S"), # mandatory input
+  paid_media_vars = c("tv_S", "ooh_S", "print_S", "facebook_I", "search_clicks_P"), # mandatory.
+  # paid_media_vars must have same order as paid_media_spends. Use media exposure metrics like
+  # impressions, GRP etc. If not applicable, use spend instead.
+  organic_vars = "newsletter", # marketing activity without media spend
+  # factor_vars = c("events"), # force variables in context_vars or organic_vars to be categorical
+  window_start = "2016-01-01",
+  window_end = "2018-12-31",
+  adstock = "geometric" # geometric, weibull_cdf or weibull_pdf.
+)
+print(InputCollect)
+```
+
+引数の解説は下記の通り。
+
+|引数|内容|
+|:---|:---|
+|`dt_input`|分析に使用するデータフレーム|
+|`dt_holidays`|祝日情報のデータフレーム|
+|`date_var`|日付変数を指定する。毎日、毎週、毎月のデータがサポートされており、YYYY-MM-DD形式で渡す必要がある。|
+|`dep_var`|従属変数を指定する。1つのみ。|
+|`dep_var_type`|従属変数のタイプを指定する。`revenue`であればROI、`conversion`であればCPAが計算される。|
+|`prophet_vars`|`c("trend", "season", "weekday", "holiday")`のいずれかを指定する。|
+|`prophet_signs`|`c("default", "positive", "negative")`のいずれかを選択。`prophet_vars`の係数の符号を制御する。|
+|`prophet_country`|祝日データフレームの国を指定する。|
+|`context_vars`|競合他社、価格とプロモーション、気温、失業率などの変数を指定する。|
+|`context_signs`|`c("default", "positive", "negative")`のいずれかを選択。`context_vars`の係数の符号を制御する。|
+|`paid_media_spends`|ペイドメディアの費用。`paid_media_vars`と同じ順序、同じ長さである必要がある。|
+|`paid_media_vars`|費用以外のインプレッション、クリック、GRPなどを使用する場合に利用。`paid_media_spends`と同じ順序、同じ長さである必要がある。|
+|`paid_media_signs`|`c("default", "positive", "negative")`のいずれかを選択。`paid_media_vars`の係数の符号を制御する。|
+|`organic_vars`|ニュースレターの配信、プッシュ通知、ソーシャルメディアへの投稿など費用を伴わないマーケティング活動の変数を指定する。|
+|`organic_signs`|`c("default", "positive", "negative")`のいずれかを選択。`organic_vars`の係数の符号を制御する。|
+|`factor_vars`|`organic_vars`または`context_vars`の提供された変数のうち、どの変数を因子として強制的に使用するかを指定する。|
+|`adstock`|`geometric`、`weibull_cdf`、`weibull_pdf`のいずれかを選択。ワイブル分布を利用すると推定時間がかかるので注意。|
+|`hyperparameters`|ハイパーパラメータの下界と上界を指定する。リスト内の要素の名前は、`hyper_names()`の出力と同じでなければならない。|
+|`window_start`, `window_end`|モデリング期間の開始日と終了日を設定する。アドストックの効果を得るためにデータの最初の日付を除く方がよい。|
+|`calibration_input`|キャリブレーションを行うために使用する。|
+|`json_file`|事前エクスポート済みのインプットJSONファイルを指定する。|
+
+### 2a-2: Second, define and add hyperparameters
+
+`robyn_inputs()`関数を実行した後は、ハイパーパラメタを設定していく。`hyper_names()`関数で設定するべきパラメタの一覧が表示できる。これらはアドストック変換やdiminishing returnsによる変換の際に使用されるパラメタなどが含まれる。下記の通り、他にもいくつかのパラメタが含まれる場合がある。
+
+- Adstock parameters (theta or shape/scale)
+- Saturation parameters (alpha/gamma)
+- Regularisation parameter (lambda). No need to specify manually
+- Time series validation parameter (train_size)
+
+
+```{r}
+hyper_names(adstock = InputCollect$adstock, all_media = InputCollect$all_media)
+```
+
+ハイパーパラメタの範囲については、Meta社から推奨範囲が提供されている。`hyper_limits()`関数で指定できる範囲を調べることができる。ワイブル分布を用いたアドストック変換についてはここでは扱わない。
+
+- Geometric adstock: thetaは減衰率を表す。TVは`c(0.3, 0.8)`, OOH/Print/Radioは`c(0.1, 0.4)`、digital は`c(0,0.3)`が目安。週次を日次に変換するには、パラメータを1/7乗すれば変換できる。つまり、日次で減衰率30%であれば週次では`0.3^(1/7)=0.84`とする。
+
+- Hill function for saturation: ヒル関数のalphaは指数関数とS字の間の曲線の形状を制御し、推奨範囲は`c(0.5, 3)`。alphaが大きいほど、S字型になる。小さくすると、C字型になる。gammaは、屈折点を制御し、推奨範囲は`c(0.3, 1)`。gammaが大きいほど、応答曲線の変曲点が遅くなる。
+
+- Regularization for ridge regression: Lambdaは正則化回帰のペナルティ項。Lambdaは、デフォルトで`c(0, 1)`の範囲に設定され、`lambda_max`と`lambda_min_ratio`で適切にスケールされるので、ユーザーの手動定義は必要ない。
+
+- Time series validation: `robyn_run()`で`ts_validation = TRUE`のとき、`train_size`はトレーニング、バリデーション、サンプル外テストに使用するデータの割合を定義する。例えば、`train_size = 0.7`とすると、`val_size`と`test_size`はそれぞれ0.15となる。このハイパーパラメタはカスタマイズ可能で、デフォルトの範囲は`c(0.5, 0.8)` で`c(0.1, 1)` の間にある必要がある。
+
+```{r}
+# Example hyperparameters ranges for Weibull CDF adstock
+# facebook_S_alphas = c(0.5, 3)
+# facebook_S_gammas = c(0.3, 1)
+# facebook_S_shapes = c(0, 2)
+# facebook_S_scales = c(0, 0.1)
+
+# Example hyperparameters ranges for Weibull PDF adstock
+# facebook_S_alphas = c(0.5, 3)
+# facebook_S_gammas = c(0.3, 1)
+# facebook_S_shapes = c(0, 10)
+# facebook_S_scales = c(0, 0.1)
+
+hyperparameters <- list(
+  facebook_S_alphas = c(0.5, 3),
+  facebook_S_gammas = c(0.3, 1),
+  facebook_S_thetas = c(0, 0.3),
+  print_S_alphas = c(0.5, 3),
+  print_S_gammas = c(0.3, 1),
+  print_S_thetas = c(0.1, 0.4),
+  tv_S_alphas = c(0.5, 3),
+  tv_S_gammas = c(0.3, 1),
+  tv_S_thetas = c(0.3, 0.8),
+  search_S_alphas = c(0.5, 3),
+  search_S_gammas = c(0.3, 1),
+  search_S_thetas = c(0, 0.3),
+  ooh_S_alphas = c(0.5, 3),
+  ooh_S_gammas = c(0.3, 1),
+  ooh_S_thetas = c(0.1, 0.4),
+  newsletter_alphas = c(0.5, 3),
+  newsletter_gammas = c(0.3, 1),
+  newsletter_thetas = c(0.1, 0.4),
+  train_size = c(0.5, 0.8)
+)
+
+```
+
+### 2a-3: Third, add hyperparameters into robyn_inputs()
+
+`robyn_inputs()`関数に設定済みの`robyn_inputs`オブジェクトとハイパーパラメタの一覧を渡し、オブジェクトを更新する。デモの流れに沿っているので、再更新しているが、予めハイパーパラメタのリストがあれば一度で済む。
+
+```{r}
+InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
+print(InputCollect)
+```
+
+デモではここで、モデルキャリブレーションの話が出てくるが、今回は扱わない。キャリブレーションについては、下記を参照のこと。
+
+- [2a-4: Fourth (optional), model calibration / add experimental input](https://github.com/facebookexperimental/Robyn/blob/main/demo/demo.R#L209)
+
+キャリブレーションの結果をモデルに反映させる場合は、`robyn_inputs()`関数の`calibration_input`に渡すことで反映させることができる。
+
+```
+InputCollect <- robyn_inputs(InputCollect = InputCollect, calibration_input = calibration_input)
+```
+
+また、ここでまでのモデルの設定内容を`robyn_write()`関数で書き出してjsonファイルで管理できる。
+
+```
+robyn_write(InputCollect, dir = "~/Desktop")
+----------------------------------------------
+{
+  "InputCollect": {
+    "date_var": ["DATE"],
+    "dayInterval": [7],
+    "intervalType": ["week"],
+    "dep_var": ["revenue"],
+    "dep_var_type": ["revenue"],
+    "prophet_vars": ["trend", "season", "holiday"],
+    "prophet_signs": ["default", "default", "default"],
+    "prophet_country": ["DE"],
+    "context_vars": ["competitor_sales_B", "events"],
+    "context_signs": ["default", "default"],
+    "paid_media_vars": ["tv_S", "ooh_S", "print_S", "facebook_I", "search_clicks_P"],
+    "paid_media_signs": ["positive", "positive", "positive", "positive", "positive"],
+    "paid_media_spends": ["tv_S", "ooh_S", "print_S", "facebook_S", "search_S"],
+    "mediaVarCount": [5],
+    "exposure_vars": ["facebook_I", "search_clicks_P"],
+    "organic_vars": ["newsletter"],
+    "organic_signs": ["positive"],
+    "all_media": ["tv_S", "ooh_S", "print_S", "facebook_S", "search_S", "newsletter"],
+    "all_ind_vars": ["trend", "season", "holiday", "competitor_sales_B", "events", "tv_S", "ooh_S", "print_S", "facebook_S", "search_S", "newsletter"],
+    "factor_vars": ["events"],
+    "unused_vars": [],
+    "window_start": ["2016-01-04"],
+    "rollingWindowStartWhich": [7],
+    "window_end": ["2018-12-31"],
+    "rollingWindowEndWhich": [163],
+    "rollingWindowLength": [157],
+    "refreshAddedStart": ["2016-01-04"],
+    "adstock": ["geometric"],
+    "hyperparameters": {
+      "facebook_S_alphas": [0.5, 3],
+      "facebook_S_gammas": [0.3, 1],
+      "facebook_S_thetas": [0, 0.3],
+      "print_S_alphas": [0.5, 3],
+      "print_S_gammas": [0.3, 1],
+      "print_S_thetas": [0.1, 0.4],
+      "tv_S_alphas": [0.5, 3],
+      "tv_S_gammas": [0.3, 1],
+      "tv_S_thetas": [0.3, 0.8],
+      "search_S_alphas": [0.5, 3],
+      "search_S_gammas": [0.3, 1],
+      "search_S_thetas": [0, 0.3],
+      "ooh_S_alphas": [0.5, 3],
+      "ooh_S_gammas": [0.3, 1],
+      "ooh_S_thetas": [0.1, 0.4],
+      "newsletter_alphas": [0.5, 3],
+      "newsletter_gammas": [0.3, 1],
+      "newsletter_thetas": [0.1, 0.4],
+      "train_size": [0.5, 0.8]
+    },
+    "calibration_input": {},
+    "custom_params": [],
+    "version": ["Robyn (dev) v3.10.3.9000 [R-4.2.2]"]
+  },
+  "OutputCollect": {
+    "conv_msg": []
+  }
+}
+
+```
+
+## Step 3: Build initial model
+
+モデリングは`robyn_run()`関数が行う。内部で`robyn_mmm()`関数を呼び出している。この関数は、ハイパーパラメータのサンプルを生成するためにNevergradを実行し、各ループ内でメディアの変換を行い、リッジ回帰を適用し、オプションでモデルを校正し、応答を分解して、モデリングの結果を収集する。計算処理で1番時間がかかるのはこの部分。
+
+```{r, include=FALSE}
+OutputModels <- robyn_run(
+  InputCollect = InputCollect, # feed in all model specification
+  cores = parallel::detectCores()-1, # NULL defaults to (max available - 1)
+  iterations = 2000, # 2000 recommended for the dummy dataset with no calibration
+  trials = 5, # 5 recommended for the dummy dataset
+  ts_validation = TRUE, # 3-way-split time series for NRMSE validation.
+  add_penalty_factor = FALSE, # Experimental feature. Use with caution.
+  seed = 1989
+)
+```
+
+`robyn_run()`関数の引数の説明は下記の通り。
+
+|引数|内容|
+|:---|:---|
+|`InputCollect`|`robyn_object`を指定する。|
+|`dt_hyper_fixed`|古いモデル結果をロードする場合に使用する。|
+|`json_file`|エクスポートしたJSONファイルをインポートする場合に指定する。|
+|`ts_validation`|`TRUE`に設定すると、Robynは時系列データを分割して検証をする。`ts_validation = FALSE`の場合、`nrmse_train`が目的関数となり、`ts_validation = TRUE`の場合、`nrmse_val`が目的関数になる。|
+|`add_penalty_factor`|`glmnet`の`penalty.factor`に、nevergradで最適化されるペナルティファクターのハイパーパラメータを追加する際に使用する。|
+|`refresh`|`robyn_refresh()`で使用する場合は`TRUE`を設定する。|
+|`seed`|nevergradの乱数シード。|
+|`quiet`|メッセージを表示するかどうか。|
+|`cores`|デフォルトは`parallel::detectCores() - 1`で設定される。|
+|`trials`|`nevergrad_algo = "TwoPointsDE"`の場合の推奨トライアル数は5。|
+|`iterations`|`nevergrad_algo = "TwoPointsDE"`の場合の推奨イテレーション数は2000。|
+|`nevergrad_algo`|デフォルトは`"TwoPointsDE"`。他にも`c("DE","TwoPointsDE", "OnePlusOne", "DoubleFastGADiscreteOnePlusOne", "DiscreteOnePlusOne", "PortfolioDiscreteOnePlusOne", "NaiveTBPSA", "cGA", "RandomSearch")`のいずれかを選択できる。|
+|`intercept_sign`|`c('non_negative', 'unconstrained')`のいずれかを選択する。デフォルトでは、interceptが負の場合、Robynはinterceptを削除してモデルを再フィットする。大きな正の値を持つ`context_vars`がある場合、`intercept_sign`を `"unconstrained"`に変更することを検討する。|
+
+`OutputModels`をプリントすると、モデリングに使用した設定に関する詳細が確認できる。
+
+```{r}
+print(OutputModels)
+```
+
+モデリングの後は、MOO(multi-objective optimization) convergence plotsを確認することで、DECOMP.RSSDとNRMSEの収束状況を確認できる。このプロットは`robyn_converge()`関数で作られるらしく、下記の2つの基準を満たすかどうかで収束を検討するするとのこと。
+
+- Criteria #1: Last quantile's standard deviation < first 3 quantiles' mean standard deviation
+- Criteria #2: Last quantile's absolute median < absolute first quantile's absolute median - 2 * first 3 quantiles' mean standard deviation
+
+右下に小さく記載があるが、この判定基準からするとDECOMP.RSSDは収束しておらず、NRMSEは収束していると判断されている。
+
+```{r}
+OutputModels$convergence$moo_distrb_plot
+```
+
+次のプロットは多目的最適化をNevergradが実施した結果を表している。横軸にNRMSE、縦軸にDECOMP.RSSDが配置されている。左下にTimeが増えるにつれて遷移していると良いが、NRMSEは小さい値をとっている一方で、DECOMP.RSSDはばらつきが大きく、DECOMP.RSSDの最適化がうまく行っていないことがわかる。
+
+```{r}
+OutputModels$convergence$moo_cloud_plot
+```
+
+時系列バリデーションの結果は下記のように確認できる。`robyn_run()`関数の実行時に時系列検証を有効にした場合、各データセットの収束を可視化するプロットを作成できる。オーバーフィットしていない場合、テストと検証の収束点が近ければ近いほど良いとのこと。
+
+```{r}
+OutputModels$ts_validation_plot
+```
+
+モデルの結果を確認して問題がないようであれば、`robyn_outputs()`関数でローカルファイルに結果を書き出していく。ここで私の理解不足によるものかは不明だが、再現性の問題が勃発する。
+
+```{r}
+set.seed(1989) # 固定されない
+OutputCollect <- robyn_outputs(
+  InputCollect, 
+  OutputModels,
+  pareto_fronts = 1,
+  # min_candidates = 100, # top pareto models for clustering. Default to 100
+  # calibration_constraint = 0.1, # range c(0.01, 0.1) & default at 0.1
+  csv_out = "pareto", # "pareto", "all", or NULL (for none)
+  clusters = TRUE, # Set to TRUE to cluster similar models by ROAS. See ?robyn_clusters
+  export = create_files, # this will create files locally
+  plot_folder = robyn_directory, # path for plots exports and files creation
+  plot_pareto = create_files, # Set to FALSE to deactivate plotting and saving model one-pagers
+  seed = 1989  # 固定されない
+)
+```
+
+結果をプリントすると、エクスポートのために使用した情報がまとまっている。多目的最適化の散布図のパレートフロントのモデルから、100個以上のモデルが選ばれ、そこからクラスタリングされてピックアップされているものだと思われるが、これは正しいかどうかはわからない。`robyn_clusters()`関数の説明には、下記のような説明がある。
+
+> モデルの数を減らし、ブートストラップされた信頼区間を作成し、ユーザーが最も異なる種類のモデル(クラスタ)の中から最も良い(lowest combined errorが小さい)ものをピックアップするのに役立つ。
+
+```{r}
+print(OutputCollect)
+```
+
+何やら色々と書き出されており、`x_xxx_x.png`がレポートで使用するために重要なチャート。モデルが9つ出力されているが、これは`Clusters(k=x)`に記載されているモデルと一致する。ここからモデル選択を行い、予算配分の計算を行っていく。
+
+```
+$ ls -a
+.                                 2_141_3.png
+..                                2_142_4.png
+1_127_3.png                       2_143_1.png
+1_129_2.png                       2_143_2.png
+1_131_5.png                       ROAS_convergence1.png
+1_133_3.png                       RobynModel-inputs.json
+1_137_1.png                       hypersampling.png
+1_137_6.png                       pareto_aggregated.csv
+1_138_4.png                       pareto_alldecomp_matrix.csv
+1_140_7.png                       pareto_front.png
+1_141_5.png                       pareto_hyperparameters.csv
+1_142_6.png                       pareto_media_transform_matrix.csv
+1_143_7.png                       prophet_decomp.png
+2_121_1.png                       raw_data.csv
+2_130_2.png                       ts_validation.png
+2_140_7.png
+```
+
+上記の出力には下記も含まれる。
+
+- pareto_hyperparameters.csv, hyperparameters per Pareto output model
+- pareto_aggregated.csv, aggregated decomposition per independent variable of all Pareto output
+- pareto_media_transform_matrix.csv, all media transformation vectors
+- pareto_alldecomp_matrix.csv, all decomposition vectors of independent variables
+
+## Step 4: Select and save the any model
+
+ここで1つ問題がある。これは私がパッケージの関数への理解が浅い、もしくは、パッケージの問題なのかわからないが、再現性を担保できない。さきほどの`robyn_outputs()`関数のコードでは、シードを関数を実行する前と引数に渡しているが、固定はされず有効ではない。
+
+つまり、毎回実行するたびに結果が変わるため、以降のステップではモデルを選んで指定する必要があるが、モデルを直接文字列でハードコーディングしてしまうと、knitを実行してHTMLファイルを作ろうとすると、モデルが存在しない、というエラーが返されてしまい、HTMLが生成できない。ここではknitでの生成エラーを避けるため、`OutputCollect$clusters$models$solID[[1]]`に存在しているモデルを選択して話をすすめる。
+
+ちなみに、デモには、モデル選択の基準として、すべてのモデルを比較し、あなたのビジネスの実態をほぼ反映しているものを選択する、との記載がある。
+
+```{r}
+## Compare all model one-pagers and select one that mostly reflects your business reality
+select_model <- OutputCollect$clusters$models$solID[[1]] # Pick one of the models from OutputCollect to proceed
+select_model
+```
+
+
+デモに従うと、モデルを書き出す処理があるが、下記の関数はなぜかエラーが出てしまい利用できない。
+
+```
+#### Version >=3.7.1: JSON export and import (faster and lighter than RDS files)
+ExportedModel <- robyn_write(InputCollect, OutputCollect, select_model = select_model, export = create_files)
+Error in OutputModels$convergence : 
+$ operator is invalid for atomic vectors
+```
+
+モデルは直接指定すればエラーが起きない模様。
+
+```
+# エクスポート時
+# ExportedModel <- robyn_write(InputCollect, OutputCollect, select_model = '1_226_4', export = create_files)
+# インポート時
+# json_file <- "~/Desktop/RobynModel-2_284_3.json"
+# json_data <- robyn_read(json_file)
+```
+
+モデルを選択してワンページチャートを作る場合は、`robyn_onepagers()`関数を利用すればよい。
+
+```{r}
+# To plot any model's one-pager:
+myOnePager <- robyn_onepagers(InputCollect, OutputCollect, select_model, export = TRUE)
+myOnePager
+```
+
+一個づつ確認したいときは、下記のようにチャートをインデックスで指定する。
+
+```{r}
+# myOnePager[[select_model]]$patches$plots[[1]]
+# myOnePager[[select_model]]$patches$plots[[2]]
+myOnePager[[select_model]]$patches$plots[[3]]
+```
+
+## Step 5: Get budget allocation based on the selected model above
+
+`robyn_allocator()`関数を利用して、予算配分の最適化を検討する。いくつかのシナリオがあるので、おのおののシナリオはドキュメントを参照するとして、ここでは`max-response`シナリオを採用する。これは、支出が同じという条件のもとで、予算の最適化の計算が行われる。ちなみに`max_response_expected_spend`シナリオは非推奨とのことで`target_efficiency`を使うとのこと。
+
+`channel_constr_low`、`channel_constr_up`は、もとの支出のx%までを許容するかを表す上限下限を設定する。つまり、ビジネスの実態とかけ離れたような最適化は望ましくいため、このような設定ができる。
+
+```{r}
+AllocatorCollect1 <- robyn_allocator(
+  InputCollect = InputCollect,
+  OutputCollect = OutputCollect,
+  select_model = select_model,
+  date_range = NULL, # Default last month as initial period
+  total_budget = NULL, # When NULL, default is total spend in date_range
+  channel_constr_low = 0.7,
+  channel_constr_up = c(1.2, 1.5, 1.5, 1.5, 1.5),
+  # channel_constr_multiplier = 3,
+  scenario = "max_response",
+  export = create_files
+)
+```
+
+結果をプリントすると、シナリオの詳細が出力される。計算期間は2018-12-10から2018-12-31の4週間で、収益増に関する記述は`Total Response Increase (Optimized): xx.x%`の部分にかかれている。
+
+```{r}
+print(AllocatorCollect1)
+```
+
+例えば下記のTVの例があったとする(これは上記とは異なる)。実際の支出(Initial spend share)は67.4％だったのを、最適な支出(Optimized bounded)として73.7%に引き上げる。それにともない、実際の収益シェア(Initial response share)は63.4%だったが、最適化された収益は63.1%となり、支出は増やすが、収益シェアは減る。実際の収益は157.1Kから171.6Kとなって、9.2%増加する、という感じ。
+
+```
+- tv_S:
+  Optimizable bound: [-30%, 20%],
+  Initial spend share: 67.4% -> Optimized bounded: 73.7%
+  Initial response share: 63.4% -> Optimized bounded: 63.1%
+  Initial abs. mean spend: 157.1K -> Optimized: 171.6K [Delta = 9.2%]
+```
+
+困ったことに、バージョンの問題か、ドキュメントに掲載されているチャートとは異なるチャートが出力される。もしくは私が利用する関数を間違っている可能性がある。
+
+```{r}
+plot(AllocatorCollect1)
+```
+
+## Step 6: Model refresh based on selected model and saved results
+
+データが新たに追加されたときに、モデルを更新する方法も用意されている。ただ、仮にデータの更新期間が長く、ほとんど新しい状態とみなせる場合や新しい変数が追加される場合は、モデルを再構築するほうが望ましいとされる。
+
+下記のように、モデルをリフレッシュする前に、モデルをJsonファイルにエクスポートしておく必要がある。そして、それを呼び出す必要がある。
+
+新しくデータが追加された`dt_simulated_weekly`を指定する。`refresh_steps`は13週分なので、以前のデータのお尻から13週分更新することを意味する。
+
+```
+json_file <- "~/Desktop/Robyn_202211211853_init/RobynModel-1_100_6.json"
+RobynRefresh <- robyn_refresh(
+  json_file = json_file,
+  dt_input = dt_simulated_weekly,
+  dt_holidays = dt_prophet_holidays,
+  refresh_steps = 13,
+  refresh_iters = 1000, # 1k is an estimation
+  refresh_trials = 1
+)
+```
+
+## 参考文献
+
+- [Robyn Features](https://facebookexperimental.github.io/Robyn/docs/features)
+- [Robyn Analysts guide to MMM](https://facebookexperimental.github.io/Robyn/docs/analysts-guide-to-MMM)
+- [Robyn R demo](https://github.com/facebookexperimental/Robyn/blob/main/demo/demo.R)
+
+
+
+

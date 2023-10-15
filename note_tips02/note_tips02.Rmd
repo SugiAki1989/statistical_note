@@ -1,0 +1,157 @@
+---
+title: "tidyr::fill()を作る"
+pagetitle: "tidyr::fill()を作る"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+
+## はじめに
+`tidyr::fill()`を自分で実装してみる、という話。`tidyr::fill()`は、前または後ろの要素を使用して、カラムの`NA`を埋めてくれる便利な関数。値が繰り返されず、値が変更された場合にのみ記録されるログのようなデータでは本当に便利。
+
+## tidyr::fill()とは
+`tidyr::fill()`は下記のように機能する。便利な関数である。
+
+```{r}
+library(tidyverse)
+
+x <- c(NA,NA,'a',NA,NA,NA,'b','c','d',NA,NA,'e',NA) 
+tibble::tibble(x1 = x, x2 = x, x3 = x) %>% 
+  tidyr::fill(x2, .direction = 'down') %>% 
+  tidyr::fill(x3, .direction = 'up')
+```
+
+## 実装方針
+実装方針は下記の画像の通り。まずは`NA`を含んでいるベクトルに対して、`NA`ではないインデックスを取得する。インデックスの先頭に`1`を追加し、`NA`ではないインデックス間の差を計算する。この後に、`x`のインデックスに対応する要素の値を、`NA`ではないインデックス間の差の数分、値をリピートさせる。つまり、元のベクトルの`NA`を埋めるのではなく、「`NA`を埋めたベクトルを生成するための情報を元のベクトルから取得する」ということになる。入力チェックもろもろはいったんやらない。
+
+![](/Users/aki/Documents/statistical_note/note_tips02/fill.png)
+
+```{r}
+na_fill <- function(x, updown = TRUE){
+  
+  # if updown arg is FALSE, reverse vaector
+  if(updown == FALSE){
+    x <- rev(x)
+  }
+  # get not NA index & add first postion
+  ind <- which(!is.na(x))
+  ind <- c(1, ind)
+  
+  # get repeat count num
+  len_x <- length(x) + 1
+  rep_times <- diff(c(ind, len_x))
+  
+  # make filluped vector
+  x <- rep(x[ind], times = rep_times)
+  
+  # if updown arg is FALSE, reverse vaector to put it back
+  if(updown == FALSE){
+    x <- rev(x)
+  }
+
+  return(x)
+}
+```
+
+これで最低限は実装できているので、動くはず・・・。ということで実行した結果が下記の通りで、期待通りに機能しているように見える。
+
+```{r}
+UpDown <- na_fill(x, updown = TRUE)
+DownUp <- na_fill(x, updown = FALSE)
+DownUp_UpDown <- na_fill(DownUp, updown = TRUE)
+UpDown_DownUp <- na_fill(UpDown, updown = FALSE)
+
+tibble(
+  x, UpDown, UpDown_DownUp
+) 
+
+tibble(
+  x, DownUp, DownUp_UpDown
+)
+```
+
+この発想がすぐに思いつかないし、実装もまだまだなので、まだまだ力が足りていない・・・ことを実感しました。ついでに`rep()`も関数の最後に使っているので、やっておく。
+
+```{r}
+my_repeat <- function(x, repeat_vec){
+  index <- 1
+  res <- vector(mode = typeof(x), length = sum(repeat_vec))
+  
+  for (i in seq_along(repeat_vec)){
+    for (j in 1:repeat_vec[i]){
+      res[index] <- x[i]
+      index <- index + 1
+    }
+  }
+  
+  return(res)
+}
+
+rv <- c(3,2,1)
+x <- c(1,2,3)
+my_repeat(x = x, repeat_vec = rv)
+```
+
+
+```{r}
+s <- c('a','b','c')
+my_repeat(x = s, repeat_vec = rv)
+```
+
+```{r}
+l <- c(TRUE, FALSE, TRUE)
+my_repeat(x = l, repeat_vec = rv)
+```
+
+## Pythonで実装してみる
+`numpy`は使わない前提でやってみる。つらい…苦しい感がにじみ出ている。
+
+```Python
+list = [None, None, 'a', None, None, None, 'b', 'c', 'd', None, None, 'e', None]
+
+def fill_na(vector):
+    len_vec = len(vector)
+    val_ind = [i for i in range(len_vec) if vector[i] is not None]
+    val_ind.insert(0, 0)
+    val_ind.append(len_vec)
+    # print('val_ind : {}'.format(val_ind))
+    # ind : [0, 2, 6, 7, 8, 11, 13]
+    len_ind = len(val_ind)
+    diff_vec = [val_ind[i+1] - val_ind[i] for i in range(len_ind - 1)]
+    # print('diff_vec: {}'.format(diff_vec))
+    # diff_vec: [2, 4, 1, 1, 3, 2]
+    base_vec = [vector[val_ind[i]] for i in range(len_ind-1)]
+    # print('base_vec: {}'.format(base_vec))
+    # base_vec: [None, 'a', 'b', 'c', 'd', 'e']
+    result = [item for item, repeat_count in zip(base_vec, diff_vec) for i in range(repeat_count)]
+    return result
+
+
+print('Pre : {}'.format(list))
+print('Post: {}'.format(fill_na(list)))
+# Pre  : [None, None, 'a', None, None, None, 'b', 'c', 'd', None, None, 'e', None]
+# Post : [None, None, 'a', 'a' ,  'a',  'a', 'b', 'c', 'd',  'd',  'd', 'e',  'e']
+```

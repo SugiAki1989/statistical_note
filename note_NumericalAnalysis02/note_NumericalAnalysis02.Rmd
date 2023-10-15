@@ -1,0 +1,340 @@
+---
+title: "Rで数値積分を行う"
+pagetitle: "Rで数値積分を行う"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではRを使った数値積分の方法をまとめておく。
+
+## ラグランジュ補完
+コンピューターは無限を扱えないので、簡単に積分ができない。そのため、直線や曲線のいくつかの点を利用して、間を補間することで積分を行う。数式説明の部分は下記の参照先の内容をまとめているだけなので、下記を見たほうが良い。
+
+- [ラグランジュ補間多項式](https://www.youtube.com/watch?v=p4RZwv7dQVQ)
+- [【VOICEROID解説】ラグランジュ補間数値解析#2](https://www.youtube.com/watch?v=LUaSmq24-Oo&list=PLlkT4dE5-CoftUJxZXtc1WF_teKyWpI8W&index=2)
+- [【VOICEROID解説】ラグランジュ補間数値解析#2補足編](https://www.youtube.com/watch?v=pTCA_kJ77kk&list=PLlkT4dE5-CoftUJxZXtc1WF_teKyWpI8W&index=4)
+
+数式説明の部分は[【VOICEROID解説】ラグランジュ補間数値解析#2](https://www.youtube.com/watch?v=LUaSmq24-Oo&list=PLlkT4dE5-CoftUJxZXtc1WF_teKyWpI8W&index=2)を参考にさせていただき、自分の理解のために、ラグランジュ補間の内容をまとめておく。数式説明の部分が終わった後にRで実装する。
+
+例えば$n$個の$(x_{1},y_{1}),..,(x_{n},y_{n})$の組があり、全ての点を通る補間関数$f(x)$は多項式によって得られる。2点の補間関数であれば1次の多項式、3点の補間関数であれば2次の多項式から得られるので、$n$点の補間関数であれば$n-1$次の多項式で補完できる。つまり、下記の係数$a_{0},...,a_{n}$を計算できれば、補間関数が得られる。
+
+$$
+f(x) = a_{0}x^{0} + a_{1}x^{1} + a_{2}x^{2} + ... + a_{n-1}x^{n-1}
+$$
+これを行列を使って表記すると、
+
+$$
+\begin{eqnarray}
+\left(
+  \begin{array}{cccc}
+    y_{ 1 } \\
+    y_{ 2 } \\
+    \vdots  \\
+    y_{ n } 
+  \end{array}
+\right)
+=
+\left(
+  \begin{array}{cccc}
+    1 & x_{ 1 } & x^{2}_{ 1 } & \ldots & x^{n-1}_{ 1 }  \\
+    1 & x_{ 2 } & x^{2}_{ 2 } & \ldots & x^{n-1}_{ 2 }  \\
+    \vdots & \vdots & \vdots  & \ddots & \vdots \\
+    1 & x_{ n } & x^{2}_{ n } & \ldots & x^{n-1}_{ n }
+  \end{array}
+\right)
+\left(
+  \begin{array}{cccc}
+    a_{ 0 } \\
+    a_{ 1 } \\
+    \vdots  \\
+    a_{ n-1 } 
+  \end{array}
+\right)
+\end{eqnarray}
+$$
+
+
+ここで、これらを行列で表すと、
+
+$$
+\begin{eqnarray}
+\boldsymbol{Y} = 
+\left(
+  \begin{array}{cccc}
+    y_{ 1 } \\
+    y_{ 2 } \\
+    \vdots  \\
+    y_{ n } 
+  \end{array}
+\right)
+,
+\boldsymbol{X} = 
+\left(
+  \begin{array}{cccc}
+    1 & x_{ 1 } & x^{2}_{ 1 } & \ldots & x^{n-1}_{ 1 }  \\
+    1 & x_{ 2 } & x^{2}_{ 2 } & \ldots & x^{n-1}_{ 2 }  \\
+    \vdots & \vdots & \vdots  & \ddots & \vdots \\
+    1 & x_{ n } & x^{2}_{ n } & \ldots & x^{n-1}_{ n }
+  \end{array}
+\right)
+,
+\boldsymbol{a} = 
+\left(
+  \begin{array}{cccc}
+    a_{ 0 } \\
+    a_{ 1 } \\
+    \vdots  \\
+    a_{ n-1 } 
+  \end{array}
+\right)
+\end{eqnarray}
+$$
+
+であり、この逆行列$X^{-1}$を利用すれば、係数$a_{0},...,a_{n}$が計算できる。
+
+
+$$
+\begin{eqnarray}
+\boldsymbol{a} = \boldsymbol{X}^{-1} \boldsymbol{Y}
+\end{eqnarray}
+$$
+
+任意の$x$の多項式$f(x) = a_{0}x^{0} + a_{1}x^{1} + a_{2}x^{2} + ... + a_{n-1}x^{n-1}$について、この式の関係を用いて表し、係数ベクトルを代入すれば、下記のように変形できる。
+
+$$
+f(x) = (1 \ x^{1} \ x^{2} \ \ldots  \ x^{n-1} ) \left(
+  \begin{array}{cccc}
+    a_{ 0 } \\
+    a_{ 1 } \\
+    \vdots  \\
+    a_{ n-1 } 
+  \end{array}
+\right)
+= (1 \ x^{1} \ x^{2} \ \ldots  \ x^{n-1} )\boldsymbol{X}^{-1} \left(
+  \begin{array}{cccc}
+    y_{ 1 } \\
+    y_{ 2 } \\
+    \vdots  \\
+    y_{ n } 
+  \end{array}
+\right)
+$$
+
+$L(x)$という形の$x$の関数にすると、
+
+$$
+(1 \ x^{1} \ x^{2} \ \ldots  \ x^{n-1} )\boldsymbol{X}^{-1} \equiv L_{1}(x),...,L_{n}(x)
+$$
+
+多項式はこのように表現される。
+
+$$
+f(x) = L_{1}(x)y_{1} + ... + L_{n}(x)y_{n}
+$$
+
+つまり、各$L_{k}$は、
+
+$$
+\begin{eqnarray}
+L_{k} &=& \frac{F_{k}(x)}{F_{k}(x_{k})} \\
+F_{k} &=& \frac{(x-x_{1})(x-x_{2}) \dots (x-x_{n})}{(x-x_{k})} \\
+\end{eqnarray}
+$$
+
+となり、これをラグランジュ補間という。$k=1, n = 3$の具体例で考えると、
+
+$$
+L_{1} = \frac{F_{1}(x)}{F_{1}(x_{1})} = \frac{(x-x_{1})(x-x_{2})(x-x_{3})}{(x-x_{1})} \frac{(x_{1}-x_{1})} {(x_{1}-x_{1})(x_{1}-x_{2})(x_{1}-x_{3})} =  \frac{(x-x_{2})(x-x_{3})}{(x_{1}-x_{2})(x_{1}-x_{3})}
+$$
+
+となる。
+
+[【VOICEROID解説】ラグランジュ補間数値解析#2](https://www.youtube.com/watch?v=LUaSmq24-Oo&list=PLlkT4dE5-CoftUJxZXtc1WF_teKyWpI8W&index=2)でも実際の数値例を用いてわかりやすく解説されているが、ここでは[ラグランジュ補間多項式](https://www.youtube.com/watch?v=p4RZwv7dQVQ)の例をお借りして、具体的な計算を進める。$(1,2),(2,4),(3,7)$の数値例でラグランジュ補間を行う。
+
+$$
+\begin{eqnarray}
+L_{1} &=& \frac{(x-x_{2})(x-x_{3})}{(x_{1}-x_{2})(x_{1}-x_{3})} = \frac{(x-2)(x-3)}{(1-2)(1-3)}\\
+L_{2} &=& \frac{(x-x_{1})(x-x_{3})}{(x_{2}-x_{1})(x_{2}-x_{3})} = \frac{(x-1)(x-3)}{(2-1)(2-3)} \\
+L_{3} &=& \frac{(x-x_{1})(x-x_{2})}{(x_{3}-x_{1})(x_{3}-x_{2})} = \frac{(x-1)(x-2)}{(3-1)(3-2)}
+\end{eqnarray}
+$$
+
+より、多項式が得られる。
+
+$$
+\begin{eqnarray}
+f(x) &=& y_{1}L_{1} + y_{2}L_{2} + y_{3}L_{3} \\
+&=& 2 \frac{(x-2)(x-3)}{(1-2)(1-3)} + 4 \frac{(x-1)(x-3)}{(2-1)(2-3)} + 7\frac{(x-1)(x-2)}{(3-1)(3-2)}
+\end{eqnarray}
+$$
+ここからはRで実装してラグランジュ補間を行う。
+
+```{r}
+library(tidyverse)
+X <- c(1, 2, 3)
+Y <- c(2, 4, 7)
+
+L <- function(x) {
+  
+  F_inner <- function(index) {
+    # x=1でindex=1のときx_vecは(2 3)xk=1
+    # (x-x_vec)は(1-2, 1-3)、
+    # (xk-x_vec)は(1-2, 1-3)、
+    # (x-x_vec)/(xk - x_vec)は(1-2, 1-3)/(1-2, 1-3)となり
+    # prod((1-2, 1-3)/(1-2, 1-3))となる
+    # F_innerをでたあとにY[i]*prod((1-2, 1-3)/(1-2, 1-3))として計算される。
+    x_vec = X[-index]
+    xk = X[index]
+    inner_r = prod((x - x_vec) / (xk - x_vec))
+    return(inner_r)
+  }
+  
+  vec = c()
+  for (i in 1:length(X)) {
+    vec = c(vec, Y[i] * F_inner(i))
+  }
+  r = sum(vec)
+  return(r)
+}
+
+x_line = seq(min(X)-1, max(X)+1, 0.01)
+pre = c()
+for (i in 1:length(x_line)) {
+  pre = c(pre, L(x_line[i]))
+}
+
+df <- tibble(x_line, pre)
+df
+```
+
+うまく補完できていることがわかる。
+
+```{r}
+ggplot() + 
+  geom_line(data = df, aes(x_line, pre), col = 'gray') +
+  geom_point(data = tibble(X,Y), aes(X, Y), col = 'tomato') +
+  scale_x_continuous(breaks = seq(0,max(X), 1)) +
+  scale_y_continuous(breaks = seq(0,15, 1)) +
+  theme_classic() +
+  labs(title = 'Lagrange\'s interpolation formula', x = 'x', y = 'y')
+```
+
+## ニュートン・コーツの公式
+
+- [VOICEROID解説】ニュートン・コーツの公式 数値解析#4](https://www.youtube.com/watch?v=pTCA_kJ77kk&list=PLlkT4dE5-CoftUJxZXtc1WF_teKyWpI8W&index=4)
+
+さきほど同様に上記の動画の数式説明を自分の理解のためにまとめたあとに、Rで実装する。
+
+ニュートン・コーツの公式は、積分したい区間を$N$等分して有限個の点として表す。$N$個の点をつなぎ合わせる補間関数を計算する。その補間関数を積分することで、もとの関数を数値積分する方法。
+
+例えば曲線があったときに7個に離散化すると$(x_{0},y_{0}),..,(x_{6},y_{6})$が得られる。そして前回まとめたラグランジュ補間多項式を求める。
+
+$$
+P(x) = L_{1}(x)y_{1},...,L_{n}(x)y_{n}
+$$
+
+もとの関数$f(x)$ではなく、ラグランジュ補間多項式$P(x)$を積分する。
+
+$$
+\begin{eqnarray}
+\int_{x_{0}}^{x_{6}}f(x) dx &\approx& \int_{x_{0}}^{x_{6}}P(x) dx \\
+&=& \int_{x_{0}}^{x_{6}} (L_{1}(x)y_{1} + ... + L_{n}(x)y_{n}) dx \\
+&=& \int_{x_{0}}^{x_{6}}\sum_{i=0}^{6} L_{i}(x)y_{i} dx \\
+&=& \sum_{i=0}^{6} y_{i} \int_{x_{0}}^{x_{6}} L_{i}(x) dx
+\end{eqnarray}
+$$
+
+一般化すると、ニュートン・コーツの公式は下記の通り表現できる。
+
+$$
+\int_{x_{0}}^{x_{n}}f(x) dx  \approx \sum_{i=0}^{n} y_{i} \int_{x_{0}}^{x_{n}} L_{i}(x) dx
+$$
+
+$n=1$の時、ニュートン・コーツの公式は台形公式となる。台形公式についは下記がわかりやすい。
+
+- [数値積分－台形則](https://www.youtube.com/watch?v=nm606d4s2NQ&list=PLZxjsvw39Ev5jWOu_cceu6JXb365wJ475&index=9)
+
+$$
+\int_{x_{0}}^{x_{n}}f(x) dx  \approx \frac{1}{2}(y_{0}+y_{n})(x_{1}-x_{0})
+$$
+
+ラグランジュ補間は両端での誤差が大きくなる傾向があり、ニュートン・コーツの公式でもラグランジュ補間が使われている関係で、$n$が大きくなると誤差が大きくなりやすいため、この問題を解消するために、区間を分けて台形公式を繰り返して、結果を足し合わせることで計算する合成積分公式が提案されている。$n=2$のときはシンプソンの公式と呼ばれる。
+
+合成積分公式は下記の通り表現できる。
+
+$$
+\begin{eqnarray}
+\int_{x_{0}}^{x_{n}}f(x) dx &=& \int_{x_{0}}^{x_{1}}f(x) dx + \int_{x_{1}}^{x_{2}}f(x) dx +... + \int_{x_{n-1}}^{x_{n}}f(x) dx \\
+&=& \frac{1}{2}(y_{0}+y_{1})(x_{1}-x_{0}) + \frac{1}{2}(y_{1}+y_{2})(x_{2}-x_{1}) +... + \frac{1}{2}(y_{n-1}+y_{n})(x_{n}-x_{n-1}) \\
+\end{eqnarray}
+$$
+
+$(x_{1}-x_{0}), (x_{2}-x_{1}), ..., (x_{n}-x_{n-1})$はすべて同じ幅なので$h$として表せる。
+
+$$
+\begin{eqnarray}
+\int_{x_{0}}^{x_{n}}f(x) dx &=& \int_{x_{0}}^{x_{1}}f(x) dx + \int_{x_{1}}^{x_{2}}f(x) dx +... + \int_{x_{n-1}}^{x_{n}}f(x) dx \\
+&=& \frac{1}{2}(y_{0}+y_{1})(x_{1}-x_{0}) + \frac{1}{2}(y_{1}+y_{2})(x_{2}-x_{1}) +... + \frac{1}{2}(y_{n-1}+y_{n})(x_{n}-x_{n-1}) \\
+&=& \frac{h}{2}((y_{0}+y_{1}) + (y_{1}+y_{2}) + ... + (y_{n-1}+y_{n})) \\
+&=& \frac{h}{2} \sum_{i=0}^{n}(y_{i-1}+y_{i})
+\end{eqnarray}
+$$
+
+ここからはRで実装していく。$f(x)=x^2$を0から10まで積分する。
+
+```{r}
+f_func <- function(x) {
+  z <- x^2
+  return(z)
+}
+
+h <- 0.01
+start_point <- 0
+end_point <- 10
+x <- seq(start_point, end_point, h)
+f <- f_func(x)
+
+integrated_f <- c()
+for (j in 1:length(x)-1) {
+    integrated_f <- c(integrated_f, f[j+1] + f[j])
+    }
+
+integrated_f <- (h / 2) * sum(integrated_f)
+integrated_f
+```
+
+Rの組み込み関数を使って同じ設定で積分すると、うまく近似できていることがわかる。
+
+```{r}
+res <- integrate(f_func, start_point, end_point)
+res$value
+```
+
+wolframalphaの力を借りれば、可視化表現が手に入る。
+
+- [x^2 を0から10まで積分](https://ja.wolframalpha.com/input?i=x%5E2+%E3%82%920%E3%81%8B%E3%82%8910%E3%81%BE%E3%81%A7%E7%A9%8D%E5%88%86)

@@ -1,0 +1,243 @@
+---
+title: "RのTidy evaluation_0"
+pagetitle: "RのTidy evaluation_0"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+## はじめに
+この記事は[Tidy evaluation](https://tidyeval.tidyverse.org/)をもとにTidy evaluationについて学習した内容を自分の備忘録としてまとめたものです。
+
+### おさらい
+Tidy Evaluationで重要だと思っている`Quosure`。これは「**表現式を評価せずに、評価させるべき環境を記憶する**」という考え方。`expr`が未評価の表現式で、`env`が表現が評価される環境を表す。
+
+```R:R
+library(rlang)
+
+quo(x + y)
+<quosure>
+expr: ^x + y
+env:  global
+
+quo(z)
+<quosure>
+expr: ^z
+env:  global
+```
+
+足し算関数を定義して、`Quosure`の挙動をもう少し理解してみる。`expr: ^x + y`が表現式、`env:0x113292a00`が環境となってる。つまり、`0x113292a00`の環境で`x + y`が評価されるようになっている。
+
+```R:R
+add <- function(x, y){
+  quo(x + y)
+}
+
+add(100, 1)
+<quosure>
+expr: ^x + y
+env:  0x113292a00
+```
+
+`eval_tidy()`で表現式を評価してみると、期待通りに動いてくれる。つまり`x=100`、`y=1`は`0x113292a00`という環境に情報が残される。
+
+```R:R
+eval_tidy(add(100, 1))
+[1] 101
+```
+
+Tidy Evaluationでもう1つ重要だと思われる`Unquote`という考え方。これは、表現式をクオートしたものを一時的にクオート外すことができる機能。`!!(bang-bang)`演算子でアンクオートできる。
+
+```
+x <- 1
+y <- 101
+
+quo(add(x, y))
+<quosure>
+expr: ^add(x, y)
+env:  global
+
+quo(add(!!x, !!y))
+<quosure>
+expr: ^add(1, 101)
+env:  global
+```
+
+### 関数化する
+関数を定義するときに、これらの考え方を利用する。`mpg`というデータには、`year`というカラムが存在する。
+
+```
+mpg %>% head(3)
+# A tibble: 3 x 11
+  manufacturer model displ  year   cyl trans      drv     cty   hwy fl    class  
+  <chr>        <chr> <dbl> <int> <int> <chr>      <chr> <int> <int> <chr> <chr>  
+1 audi         a4      1.8  1999     4 auto(l5)   f        18    29 p     compact
+2 audi         a4      1.8  1999     4 manual(m5) f        21    29 p     compact
+3 audi         a4      2    2008     4 manual(m6) f        20    31 p     compact
+```
+
+これを、そのまま実行してみると、エラーが返されが、クオートしておけば、評価は実行されないので、エラーは返されない。
+
+```
+year
+ エラー:  オブジェクト 'year' がありません 
+
+quo(year)
+<quosure>
+expr: ^year
+env:  global
+```
+`dplyr`の`filter()`で`year`を使っても、エラーが返されない。これは、`mpg`というデータセットの環境内で、`year`が評価されているから。
+
+```
+mpg %>% 
+  filter(year > 2007) %>% 
+  head(3)
+
+# A tibble: 3 x 11
+  manufacturer model displ  year   cyl trans drv     cty   hwy fl   
+  <chr>        <chr> <dbl> <int> <int> <chr> <chr> <int> <int> <chr>
+1 audi         a4      2    2008     4 manu… f        20    31 p    
+2 audi         a4      2    2008     4 auto… f        21    30 p    
+3 audi         a4      3.1  2008     6 auto… f        18    27 p    
+```
+
+フィルターを関数化してみるとエラーが返される。
+
+```
+quo_filter <- function(df, expr){
+  quo_expr <- quo(expr)
+  list(df %>% filter(quo_expr) %>% head(3),
+       quo_expr)
+}
+エラー: Argument 2 filter condition does not evaluate to a logical vector
+```
+
+`quo()`は関数内の入力をそのまま評価するため、`enquo()`が必要。`base::substitute()`みたいな感じ。
+
+```
+quo_env <- function(col) {
+  print(quo(col))
+  print(enquo(col))
+  environment()
+}
+
+quo_env(x + y)
+<quosure>
+expr: ^col
+env:  0x11f883b60
+
+<quosure>
+expr: ^x + y
+env:  global
+
+<environment: 0x11f883b60>
+```
+
+`quo_filter()`を修正します。なので、`year`というのはグローバル環境では知られていません・・・なので、`enquo()`で評価を遅らせて、評価すべき環境とタイミングで`!!`でクオートを外すことで、評価させる、みたいなイメージ。あってるかな…。
+
+```
+quo_filter <- function(df, expr){
+  quo_expr <- enquo(expr)
+  list(df %>% filter(!!quo_expr) %>% head(3),
+       quo_expr)
+}
+
+quo_filter(mpg, year > 2007)
+[[1]]
+# A tibble: 3 x 11
+  manufacturer model displ  year   cyl trans drv     cty   hwy
+  <chr>        <chr> <dbl> <int> <int> <chr> <chr> <int> <int>
+1 audi         a4      2    2008     4 manu… f        20    31
+2 audi         a4      2    2008     4 auto… f        21    30
+3 audi         a4      3.1  2008     6 auto… f        18    27
+# … with 2 more variables: fl <chr>, class <chr>
+
+[[2]]
+<quosure>
+expr: ^year > 2007
+env:  global
+```
+
+同時に`quosure`も出力してみたが、このときに`env:global`なのが気になる。下記のように`mpg`の環境`env:  0x11dcbf770`で評価するよ、見たく表示されないのかな…ここらへんの知識がまだ私には足りていない。おそらく、`df %>%`が前にくることで、環境をセットしているのだろう…けど、うまい方法がわからない。
+
+```
+mpg %>% vars(., year > 2007)
+<list_of<quosure>>
+
+[[1]]
+<quosure>
+expr: ^.
+env:  0x11dcbf770
+
+[[2]]
+<quosure>
+expr: ^year > 2007
+env:  0x11dcbf770
+```
+
+って直しても、１つ目は`env:  0x11dd67dc8`なんだけど、２つ目は`env:  global`になるのよな…。
+
+```
+quo_filter <- function(df, expr){
+  quo_expr <- enquo(expr)
+  list(df %>% filter(!!quo_expr) %>% head(3),
+       df %>% vars(!!quo_expr))
+}
+
+quo_filter(mpg, year > 2007)
+[[1]]
+# A tibble: 3 x 11
+  manufacturer model displ  year   cyl trans drv     cty   hwy
+  <chr>        <chr> <dbl> <int> <int> <chr> <chr> <int> <int>
+1 audi         a4      2    2008     4 manu… f        20    31
+2 audi         a4      2    2008     4 auto… f        21    30
+3 audi         a4      3.1  2008     6 auto… f        18    27
+# … with 2 more variables: fl <chr>, class <chr>
+
+[[2]]
+<list_of<quosure>>
+
+[[1]]
+<quosure>
+expr: ^.
+env:  0x11dd67dc8
+
+[[2]]
+<quosure>
+expr: ^year > 2007
+env:  global
+```
+わからないことがどんどん増える〜。
+
+下記のサイトでは、nグラムを簡単に作成できる関数をtidyevalを使って紹介されています。
+
+[https://www.onceupondata.com/2017/08/12/my-first-steps-into-the-world-of-tidyeval/?utm_content=buffer7e280&utm_medium=social&utm_source=twitter.com&utm_campaign=buffer:embed:cite]
+
+
+
+

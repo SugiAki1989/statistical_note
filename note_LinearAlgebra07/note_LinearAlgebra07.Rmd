@@ -1,0 +1,215 @@
+---
+title: "データ分析と線形代数06"
+pagetitle: "LinearAlgebra06"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: ""
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    number_sections: FALSE
+    code_folding: "show"
+    highlight: "zenburn"
+    theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+::: {.update-right}
+UPDATE: `r Sys.time()`
+:::
+
+<h1>線形代数とデータ分析</h1>
+線形代数のおらさいメモ。<a href="https://qiita.com/wasabayes/private/ef81b2d38dde0cc79e4f">Qiita</a>にも、データ分析に必要な線形代数のおさらい記事を投稿しました。
+<h2>共分散行列</h2>
+変数同士の分散と共分散を行列としてまとめた行列。
+```{r}
+library(mvtnorm)
+library(tidyverse)
+
+#行列
+A <- matrix(c(1,1,2,1,1,3,4,4,2,1,
+              3,2,3,2,2,4,1,4,3,2,
+              1,1,1,2,2,1,2,1,2,2,
+              1,3,1,1,2,1,3,2,4,1,
+              4,1,1,1,3,3,4,4,2,4,
+              5,3,5,5,2,5,4,4,4,1,
+              26,22,27,34,28,20,18,30,23,32), 10, 7)
+```
+このような行列の偏差行列を考える。偏差行列は各列の平均で各列の要素を除算したもの。
+```{r}
+#偏差行列
+AA <- sweep(A, 2, apply(A, 2, mean)) 
+AA
+
+```
+「偏差行列を転置した行列」と「偏差行列」を掛け合わせると、分散をN倍した行列となる。
+```{r}
+#n倍のt(偏差行列)*偏差行列
+t(AA) %*% AA
+
+```
+この行列を行数=ベクトルの長さで割れば共分散行列となる。cov()と同じ。
+```{r}
+#共分散行列に戻すためにn-1(不偏分散)で割る
+cov_mat <- (t(AA)  %*% AA)/(nrow(A)-1)
+round(cov_mat,2)
+
+
+round(cov(A),2)
+
+```
+共分散行列から相関行列に変換するために標準偏差の対角行列を用いて変換する。
+```{r}
+cor_mat <- sqrt(diag(1/diag(cov_mat))) %*% cov_mat%*% sqrt(diag(1/diag(cov_mat)))
+round(cor_mat,2)
+
+
+round(cor(A),2)
+
+```
+逆のパターン。相関行列から共分散行列。
+```{r}
+#相関行列→共分散行列
+diag_mat <- diag(apply(A, 2, sd)) #SDが対角成分にある対角行列
+cov_mat2 <- diag_mat %*% cor_mat %*% diag_mat 
+round(cov_mat2,2)
+
+```
+<h2>線形写像</h2>
+表現行列をベクトルにかけることでベクトルを写す。下記では、ベクトルを45°回転させる。
+```{r}
+#45°回転させる表現行列
+A = matrix(c(cos(pi/4), sin(pi/4), -sin(pi/4), cos(pi/4)),2,2)
+B = matrix(c(1,0,0,1),2,2)
+res <- A %*% B
+xend1 <- B[1,1] ; yend1 <- B[2,1]
+xend2 <- B[1,2] ; yend2 <- B[2,2]
+res11 <- res[1,1] ; res21 <- res[2,1]
+res12 <- res[1,2] ; res22 <- res[2,2]
+
+ggplot() + 
+  geom_segment(aes(x = 0, y = 0, xend = xend1, yend = yend1),
+               arrow = arrow(), col = "Gray", size = 1) + 
+  annotate("text", x = xend1, y = yend1+0.1, label = "b1", size = 7) +
+  geom_segment(aes(x = 0, y = 0, xend = res11, yend = res21),
+               arrow = arrow(), col = "Black", size = 1) + 
+  annotate("text", x = res11, y = res21+0.1, label = "A*b1", size = 7) +
+  geom_curve(aes(x = xend1/3, y = yend1/3, xend = res11/3, yend = res21/3),
+             arrow = arrow(), col = "Gray", size = 1, curvature = .25) +
+  geom_segment(aes(x = 0, y = 0, xend = xend2, yend = yend2),
+               arrow = arrow(), col = "Gray", size = 1) +
+  annotate("text", x = xend2, y = yend2+0.1, label = "b2", size = 7) +
+  geom_segment(aes(x = 0, y = 0, xend = res12, yend = res22),
+               arrow = arrow(), col = "Black", size = 1) +
+  annotate("text", x = res12, y = res22+0.1, label = "A*b2", size = 7) +
+  geom_curve(aes(x = xend2/3, y = yend2/3, xend = res12/3, yend = res22/3),
+             arrow = arrow(), col = "Gray", size = 1, curvature = .25) +
+  coord_fixed(ratio = 1) +
+  ylim(c(-0.2,1.25)) + xlim(c(-1, 1.2)) + 
+  theme_bw()
+```
+つまりこのように回転させている。
+```{r}
+linear_trans <- function(a, b, c, d){
+  Represent <- matrix(c(a, b, c, d), nrow = 2, ncol = 2)
+  data <- c() 
+  for (i in seq(0,2,0.1)){ 
+    subdata <- c() 
+    for(j in seq(0,2,0.1)){ 
+      Vec <- c(i, j) 
+      Mapping <- Represent %*% Vec
+      temp <- c(Vec, Mapping)
+      subdata <- rbind(subdata, temp) 
+    }
+    data <- rbind(data, subdata) 
+  }
+  return(data)
+}
+
+df <- linear_trans(cos(pi/4), sin(pi/4), -sin(pi/4), cos(pi/4)) #45°回転
+pre  <- data.frame(df) %>% select(X1,X2) %>% mutate(id = "pre")
+df <- data.frame(df) %>% select(X3,X4) %>% rename(X1 = X3, X2 = X4) %>% mutate(id = "post") %>% bind_rows(pre)
+
+ggplot(df, aes(x = X1, y = X2, col = id)) + 
+  geom_point() +
+  coord_fixed(ratio = 1) + 
+  theme_bw()
+```
+<h2>固有値と固有ベクトル</h2>
+主成分分析では固有値が出てくる。計算方法によって異なりますが、下記は共分散行列から固有値、固有ベクトルを計算した例。固有値ベクトルは、直交回転する表現行列と同じなので、回転後の図も掲載。固有値の総和は全分散と等しく、固有ベクトルを用いた直交行列の回転には、各次元の分散が順番に大きくなる性質があるので、分散を最も大きくなるような軸を見つけ、点を捉え直すことで、順に分散が大きな軸で成分を表現する。
+```{r}
+library(mvtnorm)
+library(gridExtra)
+sig <- matrix(c(1,0.8,0.8,1), ncol = 2) 
+d <- rmvnorm(n = 5000, mean = c(0,0), sigma = sig)
+d <- scale(d)
+
+cov_mat <- cov(d[,1:2])
+eig <- eigen(cov_mat)
+
+c1 <- d %>% 
+  as_data_frame() %>% 
+  ggplot(., aes(d[,1], d[,2])) + 
+  geom_point(alpha = 0.1) + 
+  geom_segment(aes(x = 0, y = 0, 
+                   xend = eig$vectors[1,1], yend = eig$vectors[2,1]),
+               arrow = arrow(), col = "#0070B9", size = 1) + 
+  geom_segment(aes(x = 0, y = 0, 
+                   xend = eig$vectors[1,2], yend = eig$vectors[2,2]),
+               arrow = arrow(), col = "#0070B9", size = 1) +
+  coord_fixed(ratio = 1) + 
+  theme_bw()
+
+#固有値ベクトルで直交回転
+dd <- d %*% eig$vectors
+
+c2 <- dd %>% 
+  as_data_frame() %>% 
+  ggplot(., aes(dd[,1], dd[,2])) + 
+  geom_point(alpha = 0.1) + 
+  geom_segment(aes(x = 0, y = 0, xend = 1, yend = 0),
+               arrow = arrow(), col = "#0070B9", size = 1) + 
+  geom_segment(aes(x = 0, y = 0, xend = 0, yend = 1),
+               arrow = arrow(), col = "#0070B9", size = 1) +
+  ylim(c(-5,5)) + xlim(c(-5,5)) + coord_fixed(ratio = 1) + 
+  theme_bw()
+
+grid.arrange(c1, c2, ncol = 2) 
+```
+分散が最大になる固有ベクトルを探すイメージ。各ポイントから垂線をおろし、その座標での分散が最大になる軸＝固有ベクトル。
+```{r}
+set.seed(1234)
+sig <- matrix(c(1,0.8,0.8,1), ncol = 2) 
+d <- rmvnorm(n = 100, mean = c(0,0), sigma = sig)
+d <- round(scale(d),1)
+
+eigen_vec <- c(eigen(cov(d))$vectors[1,1],
+               eigen(cov(d))$vectors[2,1])
+
+conv <- as.matrix(d) %*% eigen_vec
+xx <- conv * eigen_vec[1] #垂線足のx座標
+yy <- conv * eigen_vec[2] #垂線足のy座標
+id <- which.max(d[,2]) 
+
+d %>% as.data.frame() %>% 
+  ggplot(., aes(d[,1], d[,2])) + 
+  geom_abline(slope = eigen_vec[2] / eigen_vec[1], linetype = 2) + 
+  geom_segment(aes(x = xx, y = yy, xend = d[,1], yend = d[,2]), col = "gray") +
+  geom_segment(aes(x = 0, y = 0, xend = d[id,1], yend = d[id,2]), arrow = arrow(), col = "red") +
+  geom_segment(aes(x = xx[id], y = yy[id], xend = d[id,1], yend = d[id,2]), arrow = arrow(), col = "red") +
+  geom_segment(aes(x = 0, y = 0, xend = xx[id], yend = yy[id]), arrow = arrow(), col = "red") +
+  geom_point(size = 3) +
+  coord_fixed(ratio = 1) + 
+  theme_bw()
+```

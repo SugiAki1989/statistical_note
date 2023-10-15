@@ -1,0 +1,551 @@
+---
+title: "テキストデータの特徴量エンジニアリング"
+pagetitle: "テキストデータの特徴量エンジニアリング"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+お断り。昔運営していたブログ、勉強会の資料、メモなどわわまとめた物なので、統一感がありません。
+
+# はじめに
+テキストデータに対する特徴量エンジニアリングの方法としてのSVD、トピックモデリングに焦点をあてる。SVDとはなにか？そして、トピックモデリングで特徴量をどのように作るのか、このあたりが今回の記事の内容。
+
+## SVD
+SVDとは、特異値分解(Singular value decomposition:SVD)と呼ばれるもので、行列を分解する方法の1つ。詳しくWikipediaの[特異値分解のページ](https://ja.wikipedia.org/wiki/%E7%89%B9%E7%95%B0%E5%80%A4%E5%88%86%E8%A7%A3)を見てもらうとして、ここでは簡単におさらいする。
+
+行列 \\( X \\)があったとして、この行列\\( X \\)を\\( USV^{t} \\)の3つの行列に分解する方法が特異値分解。このとき、\\( U \\)のことを左特異行列、\\( S \\)のことを特異値行列、\\(  V ^{ t }\\)のことを右特異行列と呼ぶ。
+
+なにがありがたいかというと、行列のランクを落としたとしても、元の行列に近似できるという点。つまり、低ランク近似行列(low rank approximation)を作成することが可能。言葉だけだと理解し難いので、実際に見てみる。
+
+```R:R
+mat <- matrix(c(1,2,3,
+                6,4,5,
+                8,9,7,
+                10,11,12,
+                13,14,15), 5, 3, byrow = TRUE)
+mat
+     [,1] [,2] [,3]
+[1,]    1    2    3
+[2,]    6    4    5
+[3,]    8    9    7
+[4,]   10   11   12
+[5,]   13   14   15
+```
+
+この行列に対して特異値分解を行い、ランクを2に落として、低ランク近似行列を作成する。多少の誤差はあるものの、ランクを落としたにもかかわらず、元の行列に近似できている。
+
+```R:R
+fit <- svd(mat)
+u2 <- fit$u[,1:2]
+d2 <- diag(fit$d[1:2])
+v2 <- fit$v[,1:2]
+mat2 <- u2 %*% d2 %*% t(v2)
+round(mat2,2)
+      [,1]  [,2]  [,3]
+[1,]  1.07  1.88  3.05
+[2,]  5.30  5.12  4.55
+[3,]  8.49  8.21  7.31
+[4,]  9.99 11.01 11.99
+[5,] 12.96 14.06 14.98
+```
+
+## 文書単語行列
+ここで、文書と単語からなる文書単語行列(Document-Term Matrix:DTM)を考える。例えばこのような行列。doc1には、watchが2回、soccerが3回出現している。この行列を見る限り、doc1とdoc2では、「サッカーを見る」というトピック、doc3とdoc4では、「ボールを蹴る」というトピックが考えられそう。つまり、「doc1とdoc2」「doc1とdoc2」はまとまりとして考えることができそう。
+
+```R:R
+X <- matrix(data = c(2,3,0,0,0,
+                     2,0,2,0,0,
+                     0,0,0,2,2,
+                     0,0,0,3,1), 4,5, byrow = TRUE)
+rownames(X) <- paste0("doc",1:nrow(X))
+colnames(X) <- c("watch","soccer","football","kick","ball")
+
+X
+     watch soccer football kick ball
+doc1     2      3        0    0    0
+doc2     2      0        2    0    0
+doc3     0      0        0    2    2
+doc4     0      0        0    3    1
+```
+
+![](/Users/aki/Documents/statistical_note/note_tips29/img1.png)
+
+
+しかし、1つ問題がありそうです。それは、doc2をsoccerで検索してもヒットしませんし、doc1をfootballで検索してもヒットしません。watchという両方の文書に登場する単語を使って、文書をまとめたいところです。このような問題に対して、文書単語行列にSVDを適用することで、共起していない単語の共起性を見つけ出すことができます。ランクは先ほどと同じ2です。結果を見るとわかりますが、kickという単語の共起性からこのsoccerとfootballの単語の潜在的共起性を抽出できていることがわかります。
+
+```R:R
+fit_svd <- svd(X)
+u2 <- fit_svd$u[,1:2]
+d2 <- diag(fit_svd$d[1:2])
+v2 <- fit_svd$v[,1:2]
+
+X2 <- u2 %*% d2 %*% t(v2)
+X2[X2 < 0] <- 0
+rownames(X2) <- paste0("doc",1:4)
+colnames(X2) <- c("watch","soccer","football","kick","ball")
+
+round(X2,2)
+     watch soccer football kick ball
+doc1  2.38   2.29     0.85 0.00 0.00
+doc2  1.32   1.27     0.47 0.00 0.00
+doc3  0.00   0.00     0.00 2.36 1.37
+doc4  0.00   0.00     0.00 2.68 1.55
+```
+
+ちなみに、文書単語行列に特異値分解することを潜在的意味解析(Latent semantic analysis:LSA)と呼んだりする。
+
+## 打ち切り型特異値分解
+もう少し特異値分解を深掘りする。文書単語行列に対して特異値分解を行うと、画像のように分解できる。その際に、分解された左特異行列は、文書とトピックを表す行列になる。そして、特異行列はトピックの重要度の大きさを表現しているとも考えられるので、適当なランクで次元を削減すれば、文書とトピックの関連性の特徴量として、利用ができそう。文書単語行列はテキストの数が多くなるにつれて、列数が膨大に膨れ上がってしまうので、この行列を特異値分解することで、次元を削減し、特徴量として利用。
+
+![](/Users/aki/Documents/statistical_note/note_tips29/img2.png)
+
+実際にRでやってみる。データセットは有名なspamデータ。kaggleのサイトなどからダウンロード可能。文書が5572行、termsが9070列の文書単語行列です。ここでは重み付きtf-idf変換を施した文書単語行列。
+
+```R:R
+library(tidyverse)
+library(tidytext)
+library(rsvd)
+
+df <- read_csv("spam.csv", 
+               col_types = cols(X5 = col_skip(),
+                                X4 = col_skip(),
+                                X3 = col_skip(),
+                                v2 = col_character(),
+                                v1 = col_factor(levels = c("ham", "spam")))) %>% 
+  rename(y = v1, texts = v2) %>% 
+  mutate(id = row_number())
+  
+dtm_mat <- df %>% 
+  mutate(texts = if_else(texts %in% c(":-) :-)", ":)"), "NA", as.character(texts))) %>% 
+  unnest_tokens(word, texts) %>% 
+  count(id, word) %>% 
+  cast_dtm(document = id, term = word, value = n, weighting = tm::weightTfIdf)
+
+dtm_mat
+<<DocumentTermMatrix (documents: 5572, terms: 9070)>>
+Non-/sparse entries: 79474/50458566
+Sparsity           : 100%
+Maximal term length: 42
+Weighting          : term frequency - inverse document frequency (normalized) (tf-idf)
+```
+
+9070列の文書単語行列を200次元に削減して特徴量を生成。これを特徴量としてモデリングすることも可能。
+
+```R:R
+dtm_mat <- as(as.matrix(dtm_mat), "CsparseMatrix")
+s <- rsvd(A = dtm_mat, nu = 200, k = 200, nv = 200)
+u200 <- s$u
+d200 <- diag(s$d)
+s2 <- u200 %*% d200
+feature <- s2[,1:200]
+dim(feature)
+[1] 5572  200
+```
+
+ちなみにPythonではもっと簡単にできるようなので、参考までに記載します。公式ドキュメントは[こちら](https://scikit-learn.org/stable/modules/generated/sklearn.decomposition.TruncatedSVD.html)。Pythonでは、TfidfVectorizer()したあとにTruncatedSVD()を適用。Rでも再現しておく。
+
+```R:R
+library(rsvd)
+
+mat <- matrix(c(1,2,3,
+                6,4,5,
+                8,9,7,
+                10,11,12,
+                13,14,15), 5, 3, byrow = TRUE)
+
+mat
+    [,1] [,2] [,3]
+[1,]    1    2    3
+[2,]    6    4    5
+[3,]    8    9    7
+[4,]   10   11   12
+[5,]   13   14   15
+
+fit_py <- rsvd(A = mat, nu = 2, nv = 2, k = 2)
+u2 <- fit_py$u
+d2 <- diag(fit_py$d)
+
+feature_py <- u2 %*% d2 
+feature_py
+
+          [,1]       [,2]
+[1,]  3.519066 -1.2629313
+[2,]  8.617578  0.8890108
+[3,] 13.821974  1.4118075
+[4,] 19.094237 -0.6401991
+[5,] 24.285960 -0.4326217
+
+#------------------------------------------------
+# Python
+#------------------------------------------------
+
+import numpy as np
+from sklearn.decomposition import TruncatedSVD
+
+X = np.array([[1, 2, 3],
+             [6, 4, 5],
+             [8, 9, 7],
+             [10,11,12],
+             [13,14,15]])
+print(X)
+array([[ 1,  2,  3],
+       [ 6,  4,  5],
+       [ 8,  9,  7],
+       [10, 11, 12],
+       [13, 14, 15]])
+       
+svd = TruncatedSVD()
+svd.fit(X)
+X = svd.transform(X)
+
+print(X)
+array([[  3.51906599,  -1.26293131],
+       [  8.61757804,   0.88901082],
+       [ 13.82197368,   1.41180747],
+       [ 19.09423661,  -0.64019912],
+       [ 24.28596015,  -0.43262172]])
+```
+
+## トピックモデリング
+打ち切り型特異値分解で特徴量を作成しても良いのですが、特異値分解された値が負の値を取る場合もあったり、うまく文書を分解できないときもある。そのような場合に、潜在的ディリクレ配分法(Latent Dirichlet Allocation:LDA)を使い、トピックモデリングを行うことも手法としてはあり。
+
+潜在的ディリクレ配分法の原則は2つ。「すべての文書はトピックの組み合わせ」「すべてのトピックは単語の組み合わせ」であると考える。文書は何らかのトピックに属しており、各トピックには頻出する単語があり、単語はトピック間で共有される、ということ。
+
+潜在的ディリクレ配分法では、個々の文書を形成するトピックの組み合わせ、背景にDirichlet分布を仮定し、確率を推定しながら、個々のトピックの関連する単語組み合わせを探していくことが可能。
+
+![](/Users/aki/Documents/statistical_note/note_tips29/img3.png)
+
+`{topicmodels}`の`LDA()`を使用し、文書-単語行列とトピック数を指定すれば、トピックモデリングが可能。ここではトピック数を10とする。
+
+```R:R
+library(topicmodels)
+
+df_dtm <- df %>% 
+  mutate(texts = if_else(texts %in% c(":-) :-)", ":)"), "NA", as.character(texts))) %>% 
+  unnest_tokens(word, texts) %>% 
+  count(id, word) %>% 
+  cast_dtm(document = id, term = word, value = n)
+
+df_dtm <- as(as.matrix(df_dtm), "CsparseMatrix")
+
+df_lda <- LDA(df_dtm, k = 10, control = list(seed = 1234))
+df_lda
+A LDA_VEM topic model with 10 topics.
+
+```
+文書-トピック確率を見てみます。これは、文書をトピックの組み合わせとしてモデリングしているようなものです。`tidy()`でmatrix="gamma"を指定することで確認できます。この例であれば、文書1(=document1)がトピック1に属する確率は6%であることがわかります。
+
+```R:R
+tidy(df_lda, matrix = "gamma")
+# A tibble: 55,720 x 3
+   document topic   gamma
+   <chr>    <int>   <dbl>
+ 1 1            1 0.0665 
+ 2 2            1 0.0169 
+ 3 3            1 0.00367
+ 4 4            1 0.00999
+ 5 5            1 0.00859
+ 6 6            1 0.00368
+ 7 7            1 0.129  
+ 8 8            1 0.00448
+ 9 9            1 0.00448
+10 10           1 0.00404
+# … with 55,710 more rows
+```
+
+例えば文書100番の詳細を確認してみます。トピック7に属する確率が51%で、トピック2に属する確率が30%となっている。
+
+```R:R
+tidy(df_lda, matrix = "gamma") %>%
+    filter(document == 100)
+
+# A tibble: 10 x 3
+   document topic   gamma
+   <chr>    <int>   <dbl>
+ 1 100          1 0.00999
+ 2 100          2 0.308  
+ 3 100          3 0.00999
+ 4 100          4 0.111  
+ 5 100          5 0.01000
+ 6 100          6 0.00999
+ 7 100          7 0.511  
+ 8 100          8 0.00999
+ 9 100          9 0.00999
+10 100         10 0.0100 
+```
+
+こんな感じでトピック数を指定して、文書が各トピックにどれくらいの確率で所属するかを特徴量とすることもできる。
+
+```R:R
+future <- tidy(df_lda, matrix = "gamma") %>%
+  spread(key = topic, value = gamma) %>% 
+  mutate(document = as.numeric(document)) %>% 
+  arrange(document) %>% 
+  select(-document) %>% 
+  set_names(., paste0("topic", 1:ncol(.))) %>% 
+  mutate(id = row_number())
+
+future
+# A tibble: 5,572 x 11
+    topic1  topic2  topic3  topic4  topic5  topic6  topic7  topic8  topic9 topic10    id
+     <dbl>   <dbl>   <dbl>   <dbl>   <dbl>   <dbl>   <dbl>   <dbl>   <dbl>   <dbl> <int>
+ 1 0.0665  0.00576 0.00575 0.00575 0.00575 0.692   0.00575 0.201   0.00576 0.00575     1
+ 2 0.0169  0.0169  0.155   0.0169  0.0169  0.709   0.0169  0.0169  0.0169  0.0169      2
+ 3 0.00367 0.00367 0.00368 0.00368 0.925   0.00367 0.00367 0.0457  0.00367 0.00368     3
+ 4 0.00999 0.00999 0.207   0.00998 0.00998 0.713   0.00999 0.00998 0.00998 0.00998     4
+ 5 0.00859 0.422   0.00858 0.00858 0.00858 0.00858 0.421   0.0965  0.00859 0.00858     5
+ 6 0.00368 0.331   0.00368 0.247   0.127   0.0643  0.212   0.00368 0.00368 0.00368     6
+ 7 0.129   0.00709 0.00710 0.00709 0.00709 0.00709 0.296   0.00710 0.438   0.0951      7
+ 8 0.00448 0.00448 0.00448 0.00449 0.00448 0.498   0.00448 0.00449 0.00448 0.466       8
+ 9 0.00448 0.00448 0.00448 0.00449 0.387   0.00448 0.00448 0.00448 0.00448 0.577       9
+10 0.00404 0.00404 0.0729  0.895   0.00404 0.00404 0.00404 0.00404 0.00404 0.00404    10
+# … with 5,562 more rows
+```
+
+## おまけ：{tidytext}
+簡単に{tidytext}の使い方をおさらいしておく。`{tidytext}`を使うことで、テキストデータもいわゆるtidyな形式で持つことができるようになります。今回使用するサンプルデータはおなじみのスパムのデータ。こちらの[SMS Spam Collection Dataset](https://www.kaggle.com/uciml/sms-spam-collection-dataset)からダウンロードできます。
+
+```R:R
+library(tidytext)
+library(tidyverse)
+
+df <- read_csv("spam.csv", 
+               col_types = cols(X5 = col_skip(),
+                                X4 = col_skip(),
+                                X3 = col_skip(),
+                                v2 = col_character(),
+                                v1 = col_factor(levels = c("ham", "spam")))) %>% 
+  rename(y = v1, texts = v2) %>% 
+  mutate(id = row_number())
+
+train_df <- df %>% slice(1:5000)
+```
+
+まずは`{tidytext}`の基本的な関数である`unnest_tokens()`を使ってテキストデータをtidyな形式に変換します。この関数はテキスト「単語単位」で分解して、1行1単語のunnest形式に変換してくれます。「単語単位」だけではなく、文章やNグラム単位でも指定可能です。tidyな形式に変換したあとは、`{tidytext}`に付属しているストップワードやセンチメントの辞書などを利用して、様々な分析を行うことが可能。
+
+```R:R
+head(train_df)
+# A tibble: 6 x 3
+  y     texts                                                                                                        id
+  <fct> <chr>                                                                                                     <int>
+1 ham   Go until jurong point, crazy.. Available only in bugis n great world la e buffet... Cine there got amore…     1
+2 ham   Ok lar... Joking wif u oni...                                                                                 2
+3 spam  Free entry in 2 a wkly comp to win FA Cup final tkts 21st May 2005. Text FA to 87121 to receive entry qu…     3
+4 ham   U dun say so early hor... U c already then say...                                                             4
+5 ham   Nah I don't think he goes to usf, he lives around here though                                                 5
+6 spam  "FreeMsg Hey there darling it's been 3 week's now and no word back! I'd like some fun you up for it stil…     6
+
+train_df %>% 
+     unnest_tokens(word, texts)
+# A tibble: 78,366 x 3
+   y        id word     
+   <fct> <int> <chr>    
+ 1 ham       1 go       
+ 2 ham       1 until    
+ 3 ham       1 jurong   
+ 4 ham       1 point    
+ 5 ham       1 crazy    
+ 6 ham       1 available
+ 7 ham       1 only     
+ 8 ham       1 in       
+ 9 ham       1 bugis    
+10 ham       1 n        
+# … with 78,356 more rows
+```
+
+次は、「文書-単語行列:DTM」を作りましょう。「文書-単語行列」というのは、「各行は1つの文書を表す」「各列は1つの単語を表す」「値は、出現頻度数を表す」という特徴をもつデータ構造。「文書-単語行列」を作成するにあたり3つの関数が主に使用される。
+
+はじめに、cast_sparse()は、{Matrix}パッケージのスパースDTM行列を返す。次に、cast_dfm()は{quanteda}パッケージのdmfオブジェクトを返す。最後に、cast_dtm()は、{tm}パッケージのDocumentTermMatrixオブジェクトを返す。
+
+また、文書-単語行列は、`tidy()`と`cast()`という関数を使って加工していくことになります。`tidy()`は文書-単語行列を整理された1行1単語、出現頻度のunnest形式に変換し、`cast()`は、unnest形式から文書-単語行列の形式に変換。この例では、Sparsityが100%なので、ほとんどが0のスパース行列です。Maximal term lengthが42なので、最長の文字列が42であることがわかる。
+
+```R:R
+train_df %>% 
+  mutate(texts = if_else(texts %in% c(":-) :-)", ":)"), "NA", as.character(texts))) %>% 
+  unnest_tokens(word, texts) %>% 
+  count(id, word) %>% 
+  cast_dtm(document = id, term = word, value = n)
+  
+<<DocumentTermMatrix (documents: 5000, terms: 8586)>>
+Non-/sparse entries: 71544/42858456
+Sparsity           : 100%
+Maximal term length: 42
+Weighting          : term frequency (tf)
+```
+
+`tidy()`をDTMに適用すればunnest形式に戻せますが、頻度が0のものは削除されているので注意が必要です。
+
+```R:R
+train_df_dtm <- train_df %>% 
+  mutate(texts = if_else(texts %in% c(":-) :-)", ":)"), "NA", as.character(texts))) %>% 
+  unnest_tokens(word, texts) %>% 
+  count(id, word) %>% 
+  cast_dtm(document = id, term = word, value = n) %>% 
+  tidy()
+
+train_df_dtm
+# A tibble: 71,544 x 3
+   document term      count
+   <chr>    <chr>     <dbl>
+ 1 1        amore         1
+ 2 1        available     1
+ 3 234      available     1
+ 4 385      available     1
+ 5 435      available     1
+ 6 463      available     1
+ 7 1051     available     1
+ 8 1384     available     1
+ 9 1866     available     1
+10 2116     available     1
+# … with 71,534 more rows
+```
+
+文書-単語行列を作成する際にtf-idf変換も適用できる。tf-idf変換は、重み付け方法の1つで、あまり登場しない単語に重みをつけることで単語の特徴を捉える方法。つまり、tf-idfは文書内での出現頻度と全体での出現頻度の割合を用いて、全体ではあまり出現しないが、特定の文書にだけ頻出する語句の重みを高くする手法。これにより、文書をより特徴付ける単語の数値を大きくすることができる。
+
+ここでは重み付きtf-idf変換を実行します。Weighting:term frequency - inverse document frequency (normalized) (tf-idf)となっていることからも、重み付けが行われたことがわかる。
+
+```R:R
+train_df_dtm <- train_df %>% 
+  mutate(texts = if_else(texts %in% c(":-) :-)", ":)"), "NA", as.character(texts))) %>% 
+  unnest_tokens(word, texts) %>% 
+  count(id, word) %>% 
+  cast_dtm(document = id, term = word, value = n, weighting = tm::weightTfIdf)
+
+train_df_dtm
+<<DocumentTermMatrix (documents: 5000, terms: 8586)>>
+Non-/sparse entries: 71544/42858456
+Sparsity           : 100%
+Maximal term length: 42
+Weighting          : term frequency - inverse document frequency (normalized) (tf-idf)
+```
+
+unnest形式でもtf-idf変換も適用できます。
+
+```R:R
+train_df %>% 
+   mutate(texts = if_else(texts %in% c(":-) :-)", ":)"), "NA", as.character(texts))) %>% 
+   unnest_tokens(word, texts) %>% 
+   count(id, word) %>% 
+   bind_tf_idf(document = id, term = word, n = n)
+
+# A tibble: 71,544 x 6
+      id word          n    tf   idf tf_idf
+   <int> <chr>     <int> <dbl> <dbl>  <dbl>
+ 1     1 amore         1  0.05  8.52  0.426
+ 2     1 available     1  0.05  5.68  0.284
+ 3     1 buffet        1  0.05  7.82  0.391
+ 4     1 bugis         1  0.05  6.73  0.336
+ 5     1 cine          1  0.05  6.57  0.329
+ 6     1 crazy         1  0.05  6.03  0.302
+ 7     1 e             1  0.05  4.17  0.209
+ 8     1 go            1  0.05  3.07  0.153
+ 9     1 got           1  0.05  3.17  0.159
+10     1 great         1  0.05  3.95  0.198
+```
+## おまけ：文書の類似性
+文書単語行列の低ランク近似行列を作る際に、単語の頻度をそのまま利用するのか、tf-idfのような変換を施したほうが文書をうまくまとめることができるのか、確認しておく。類似度の比較にはコサイン類似度を使用。
+
+この例では、「文書1と2」「文書3と4」「文書5と6」という感じ分けれそう。
+
+```R:R
+library(tm)
+df <- data.frame(doc = paste0("doc",1:6),
+                 text = c("watch watch watch soccer soccer soccer stadium",
+                          "watch watch football football stadium",
+                          "play kick ball play kick ball kick ball",
+                          "play kick ball play kick ball kick kick",
+                          "soccer ticket friend ticket friend friend friend",
+                          "football friend friend friend friend stadium"))
+
+df$doc <- as.character(df$doc)
+df$text <- as.character(df$text)
+
+corp <- Corpus(VectorSource(df$text)) 
+dtm <- as.matrix(DocumentTermMatrix(corp)) 
+dtm
+    Terms
+Docs soccer stadium watch football ball kick play friend ticket
+   1      3       1     3        0    0    0    0      0      0
+   2      0       1     2        2    0    0    0      0      0
+   3      0       0     0        0    3    3    2      0      0
+   4      0       0     0        0    2    4    2      0      0
+   5      1       0     0        0    0    0    0      4      2
+   6      0       1     0        1    0    0    0      4      0
+```
+
+では、特異値分解を行う。
+
+```R:R
+fit_svd <- svd(dtm)
+u3 <- fit_svd$u[,1:3]
+d3 <- diag(fit_svd$d[1:3])
+v3 <- fit_svd$v[,1:3]
+
+X2 <- u3 %*% d3 %*% t(v3)
+rownames(X2) <- paste0("doc",1:nrow(X2))
+colnames(X2) <- colnames(dtm)
+cos <- simil(X2, method = "cosine", diag = TRUE)
+round(cos, 2)
+     doc1 doc2 doc3 doc4 doc5 doc6
+doc1   NA                         
+doc2 1.00   NA                    
+doc3 0.00 0.00   NA               
+doc4 0.00 0.00 1.00   NA          
+doc5 0.12 0.17 0.00 0.00   NA     
+doc6 0.11 0.16 0.00 0.00 1.00   NA
+```
+
+次は重み付けtf-idfを実行した文書単語行列。結果を見ると「文書1と2」の「文書5と6」のコサイン類似度が下がっているので、文書としては類似性は下がっている。つまりtf-idfで文書の単語に重み付けたことで文書をより特徴づけられた結果とも言えるかもしれない。
+
+```R:R
+corp <- Corpus(VectorSource(df$text)) 
+dtm <- as.matrix(DocumentTermMatrix(corp, control = list(weighting = weightTfIdf))) 
+
+fit_svd <- svd(dtm)
+u3 <- fit_svd$u[,1:3]
+d3 <- diag(fit_svd$d[1:3])
+v3 <- fit_svd$v[,1:3]
+
+X2 <- u3 %*% d3 %*% t(v3)
+rownames(X2) <- paste0("doc",1:nrow(X2))
+colnames(X2) <- colnames(dtm)
+cos <- simil(X2, method = "cosine", diag = TRUE)
+round(cos, 2)
+     doc1 doc2 doc3 doc4 doc5 doc6
+doc1   NA                         
+doc2 1.00   NA                    
+doc3 0.00 0.00   NA               
+doc4 0.00 0.00 1.00   NA          
+doc5 0.07 0.09 0.00 0.00   NA     
+doc6 0.13 0.15 0.00 0.00 1.00   NA
+```
+
+## 参考サイト
+
+- [潜在的意味解析における特異値分解](http://nocotan.github.io/%E6%A9%9F%E6%A2%B0%E5%AD%A6%E7%BF%92/2017/01/12/lsa_svd-copy.html)
+- [トピックモデルLSA/LSIとpLSA/pLSIとLDA](http://www.sakurai.comp.ae.keio.ac.jp/classes/infosem-class/2015/10TopicModels.pdf)
+- [潜在意味分析(特異値分解)](http://www.jmp.com/japan/support/help/13/ba-text-explorer-16.shtml)
+

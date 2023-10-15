@@ -1,0 +1,247 @@
+---
+title: "ベイジアンABテストのはなし"
+pagetitle: "ベイジアンABテストのはなし"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、いまさらではあるがベイジアンABテストの使い方を簡単にまとめておく。頻度主義とか、ベイズ主義とか、そのあたりの詳しい議論や数理的な側面は私のような一般人では立ち行かないトピックなので、統計学を専門とされている方にお譲りするとして、ここではベイジアンフレームワークのもとでのABテストを扱う方法をまとめておく。
+
+一般的なABテストな問題点からはじめ、`bayesAB`パッケージの基本的な使い方の紹介、ベイジアンフレームワークのもとでのABテストの利点と問題点をまとめておく。ベイズだから問題点がないわけではない。
+
+5年前ほど前に今はなきブログに書いた内容をもとに修正、加筆しておく。`bayesAB`パッケージの詳細は下記の通り。
+
+- [BayesAB](https://github.com/FrankPortman/bayesAB)
+- [BAYESAB: A NEW R PACKAGE FOR BAYESIAN AB TESTING](https://fportman.com/writing/bayesab-a-new-r-package-for-bayesian-ab-testing/)
+- [BAYESAB 0.7.0 + A PRIMER ON PRIORS](https://fportman.com/writing/bayesab-0-dot-7-0-plus-a-primer-on-priors/)
+
+## 一般的なABテスト
+
+一般的な検定を用いてABテストを行う際、サンプルサイズに関して、**「個人的」**には1つの困難が毎回伴う。それは、サンプルサイズ設計において、効果量(例えばコンバージョンレートなどの)を決めないといけない点。
+
+効果量については[別のノート](https://sugiaki1989.github.io/statistical_note/note_pvalue05/note_pvalue05.html)で扱っているので、ここでは詳しく扱わないが、例えば、$\alpha=0.05$、$1-\beta=0.80$として、パターンAが5％で、新しいパターンBが5％くらい高くなるだろうと見込んで10％とすると、およそ各グループで434人くらいをサンプリングすればよいということになる。
+
+```{r}
+alpha <- 0.05
+power <- 0.80
+power.prop.test(n = NULL, 
+                p1 = 0.05, 
+                p2 = 0.10, 
+                sig.level = alpha,
+                power = power,
+                alternative = 'two.sided'
+                )
+```
+
+
+アカデミックな研究であれば、研究論文の過去の実験結果などから参考にできるかもしれないが、ビジネスだとそう簡単に参照にできる数字がなかったりする(ある場合も勿論ある)。それよりも何よりも、効果量という概念自体がビジネスサイドの万人に受け入れられない問題もある。広告であればサンプルサイズが足らない事例は少ないかもしれないが、設計したサンプルサイズが集まるまで、検定はできない。
+
+## `bayesAB`パッケージ
+
+ベイジアンフレームワークのもとで、ABテストを実行できるパッケージとして`bayesAB`がある。ベイズ統計の数理的な側面はここでは扱わないので、良き参考書に巡りあってください。今だとこちらの[標準 ベイズ統計学](https://www.asakura.co.jp/detail.php?book_code=12267)でしょうか。
+
+さておき、パッケージの使い方は簡単で、`bayesTest()`関数に、事前分布の設定とデータを渡せばよい。とくに事前情報がないので、ここでの事前分布の設定は無情報事前分布を利用。事前情報を利用することのの利点は下記の分析を読むとわかるので、下記を読んでください。女性の生理を題材に、妊娠しているかどうかを、事前分布を利用して、確率を推定するベイジアンモデルの話です。
+
+- [A Bayesian Model to Calculate Whether My Wife is Pregnant or Not](https://www.sumsar.net/blog/2015/11/a-bayesian-model-to-calculate-whether-my-wife-is-pregnant/)
+
+```{r}
+library(tidyverse)
+library(scales) 
+library(bayesAB)
+
+set.seed(1)
+# aのほうがレートが高い設定
+a <- rbinom(100, 1, .20)
+b <- rbinom(100, 1, .15)
+ab <- bayesTest(a,
+                b,
+                priors = c('alpha' = 1, 'beta' = 1),
+                n_samples = 1e5,
+                distribution = 'bernoulli')
+```
+
+`print()`を利用することで、ABテストの要約値を得られる。
+
+```{r}
+print(ab)
+```
+
+`summary()`を利用することで、事後予想損失(Posterior Expected Loss)の情報が得られる。この結果をもとに、ABテストを早期に停止するかどうかを決定できる。`P(A > B) by (0)%:`の部分にある通り、aをbと比較した際に、aが57%の確率で良い効果をもたらすと判断できる。
+
+```{r}
+summary(ab)
+```
+
+57%がどこから計算されたかというと、今回はモンテカルロサンプリングを100000回行っており、aとbの各試行の事後分布の値の比を計算して、bよりもaが優れている確率を計算していると思われる。
+
+```{r}
+sim_len <- length(ab$posteriors$Probability$A)
+sum(ab$posteriors$Probability$A / ab$posteriors$Probability$B > 1)/sim_len
+```
+
+この結果をわかりやすくしたのが下記の図。赤がaで、青がb。aがbよりも優れている場合、`(a-b)/b`はプラス、反対のaがbよりも劣っている場合、場合はマイナスになるため、このような可視化が可能になる。
+
+```{r}
+plot(ab)[3]
+```
+
+数字でイメージするとわかりよい。aがbよりも優れている場合はプラスになっている。
+
+```{r}
+aa <- seq(0, 0.10, 0.01)
+bb <- sort(aa, decreasing = TRUE)
+res <- (aa-bb)/bb
+flag <- sign(res)
+data.frame(
+  aa, bb, res, flag
+)
+```
+
+`sumamry`関数から出力される信用区間の`Credible Interval on (A - B) / B for interval length(s) (0.9):`の部分が一番理解しにくい。
+
+```{r}
+summary(ab)$interval
+```
+
+まず、`5%: -0.36`はaをbと比較した際に、aが64%以下の効果を出す(つまり悪化する)確率が5%で、`95%: 0.78`は、aをbと比較した際に、aが178%以上の効果を出す確率が5%。つまり、aをbと比較した際に、aが90%の確率で64%から178%の効果を出すだろうと解釈できる…ぱっと見だと混乱するが、100%を超えているのは相対値だから…という解釈で問題ないはず。
+
+このようにベイジアンABテストであれば、`P(A > B)`と`Credible Interval on (A-B)/B`の2つを利用して、サンプルサイズを設計せずとも、早期から分析を行って実験を停止するかどうかを判断できる。判断できるとはいえ、60%で効果ありなのか、70%で効果ありなのか、80%で効果ありなのかは分析者が決める必要がある。つまり、停止基準が必要になる。停止基準に関して検索してみると、いくつか文献がでてくるものの、効果量と同じく簡単に受け入れられるわけでもなさそうである…。
+
+## ベイジアンABテスト
+
+ここでは、ベイジアンABテストの良さでもある停止基準を動かしながら意思決定を行う実践的(?)な使い方をまとめておく。サンプルデータとして、exploratory社のデータをお借りする。exploratory社の公開資料にベイジアンABテストの資料があり、データカタログに使用しているデータがあったので、それをお借りする。ただ、今回必要なデータは集計済みのデータではなく、集計前のログデータなので、集計値を利用して元の状態に擬似的に戻してから利用する。
+
+- [ベイジアンA/Bテストの使い方](https://exploratory.io/note/GMq1Qom5tS/A-B-wHL0xqZ0tm)
+
+集計データを集計値から擬似的に再現するスクリプトは下記のとおり。日付は14日に限定し、aパターンの方がコンバージョンレートが高くなるようにしている。
+
+```{r}
+# exploratory社のデータカタログからお借りする
+df_ab <- read_csv('https://exploratory.io/public/api/GMq1Qom5tS/A-B-IJp6BcB2/data')
+# uniquePageViewとconversion_rateから集計前を再現するための関数
+vec_gen <- function(x, y){
+  map2(
+    .x = x, 
+    .y = y, 
+    .f = function(x, y){rbinom(n = x, size = 1, prob = y)}
+  ) %>% unlist()
+}
+df_a <- df_ab %>% 
+  dplyr::filter(
+    landingPagePath == '/post?id=11' & 
+      is_signup == TRUE &
+      date >= '2017-06-01' & 
+      '2017-06-15' > date
+    )
+df_b <- df_ab %>% 
+  dplyr::filter(
+    landingPagePath == '/post?id=12' & 
+      is_signup == TRUE &
+      date >= '2017-06-01' & 
+      '2017-06-15' > date
+  )
+
+dt <- seq(as.Date('2023-08-01'), as.Date('2023-08-14'),  by = "day")
+dt_a <- rep(dt, times = df_a$uniquePageView)
+dt_b <- rep(dt, times = df_b$uniquePageView)
+
+set.seed(1989)
+cv_a <- vec_gen(x = df_a$uniquePageView, y = df_a$conversion_rate+0.015)
+cv_b <- vec_gen(x = df_b$uniquePageView, y = df_b$conversion_rate)
+
+df <- union_all(
+  tibble(dt = dt_a, cv = cv_a, flag = 'a'),
+  tibble(dt = dt_b, cv = cv_b, flag = 'b')
+)
+df %>% 
+  group_by(flag) %>% 
+  summarise(
+    avg_cv_rate = mean(cv)
+  )
+```
+
+天下り的に、最終的なコンバージョンレートを時系列で可視化しておく。最終的な結果をABテスト前に確認することは本来は不可能ではある点は注意。ただ、一般的な統計検定を利用する場合は、仮に14日目まで待たないと必要なサンプルサイズが確保できないのであれば、14日目に判断を下すことになる。ベイジアンフレームワークであれば、3日目、5日目、7日目など自由な停止基準で分析して、意思決定に利用できる。ここでは、早期のテストの終了によって、不要な広告費を掛けずにすみ、CV数の増加も見込むことができる。
+
+```{r}
+df %>% 
+  group_by(dt, flag) %>% 
+  summarise(
+    cnt = n(),
+    sum_cv = sum(cv),
+    rate = sum(cv)/n()
+  ) %>% 
+  ggplot(., aes(dt, rate, col = flag)) + 
+  geom_line(size = 1) + 
+  scale_x_date(labels = date_format("%Y/%m/%d"), breaks = date_breaks("1 day")) + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 75, vjust = 0.2, hjust=0.2)) 
+```
+
+仮に3日目でABテストを分析してみたとする。結果をみると、この段階で91%の確率でAパターンのほうがよいと判断できる。停止基準がないことによる難しさは、実務ではわかりようがないが、ここでは本来はAパターンのほうが平均的に優れていないかもしれないが、この段階でAの方が良いと考えてしまい、意思決定を誤ってしまう可能性がある。
+
+```{r}
+set.seed(1989)
+ab3 <- bayesTest(df %>% filter('2023-08-03' >= dt & flag == 'a') %>% pull(cv),
+                df %>% filter('2023-08-03' >= dt & flag == 'b') %>% pull(cv),
+                priors = c('alpha' = 1, 'beta' = 1),
+                n_samples = 1e5,
+                distribution = 'bernoulli')
+plot(ab3)[3]
+```
+
+テストを継続して5日目で分析してみたとする。結果をみると、この段階で69%の確率でAパターンのほうがよいと判断できる。
+
+```{r}
+set.seed(1989)
+ab5 <- bayesTest(df %>% filter('2023-08-05' >= dt & flag == 'a') %>% pull(cv),
+                 df %>% filter('2023-08-05' >= dt & flag == 'b') %>% pull(cv),
+                 priors = c('alpha' = 1, 'beta' = 1),
+                 n_samples = 1e5,
+                 distribution = 'bernoulli')
+plot(ab5)[3]
+```
+
+テストを継続して7日目で分析してみたとする。結果をみると、この段階で95%の確率でAパターンのほうがよいと判断できる。そのため、ここでAパターンのほうが優れていると判断し、Aパターンに広告予算を割り振るという意思決定が可能である。
+
+```{r}
+set.seed(1989)
+ab7 <- bayesTest(df %>% filter('2023-08-07' >= dt & flag == 'a') %>% pull(cv),
+                 df %>% filter('2023-08-07' >= dt & flag == 'b') %>% pull(cv),
+                 priors = c('alpha' = 1, 'beta' = 1),
+                 n_samples = 1e5,
+                 distribution = 'bernoulli')
+plot(ab7)[3]
+```
+
+ベイジアンフレームワークのABテストは、サンプルサイズ設計が必要ではない一方で、停止基準を定める必要がある。また、停止基準を早めすぎてしまうと誤った意思決定にも繋がってしまう。ただ、あくまでも個人的な感覚ではあるが、ビジネスでは正解がないので、意思決定して施策を回し、改善を繰り返すことになるので、ベイジアンフレームワークのABテストの方が、ビジネスでは使いやすいと思う。また、今回はベイズの利点である事前分布をうまく使えていないので、事前分布を利用できればよりよい意思決定ができると思う。
+
+## 参考文献
+
+- [BayesAB](https://github.com/FrankPortman/bayesAB)
+- [BAYESAB: A NEW R PACKAGE FOR BAYESIAN AB TESTING](https://fportman.com/writing/bayesab-a-new-r-package-for-bayesian-ab-testing/)
+- [BAYESAB 0.7.0 + A PRIMER ON PRIORS](https://fportman.com/writing/bayesab-0-dot-7-0-plus-a-primer-on-priors/)
+- [ベイジアンABテストと停止基準について](https://saltcooky.hatenablog.com/entry/2020/07/30/012109)
+- [BayesianABテストを実戦で使ってみた](https://tech.leverages.jp/entry/2019/04/24/113000)

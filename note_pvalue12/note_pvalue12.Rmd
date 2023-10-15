@@ -1,0 +1,192 @@
+---
+title: "母数の不偏性、一致性、有効性について"
+pagetitle: "母数の不偏性、一致性、有効性について"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、母数の不偏性、一致性、有効性をシュミレーションの観点から理解することを目的にする。不偏性、一致性、有効性は必要最低限しか記載していない。
+
+## 母数の良し悪し
+
+母数の良し悪しを考える際に、不偏性、一致性、有効性がでてくる。これらは、母数の推定における推定量(estimator)が持っていると望ましい性質のことで、推定法から推定される推定量が複数あった時に、いずれの方法がより妥当なのかを考える上で役に立つ。細かい部分ではあるが、推定量(estimator)は、推定値(estimate)を求めるための関数のようなもの。
+
+はじめは不偏性(unbiasedness)について。不偏性は、推定量$\hat{\theta}$の期待値が母数$\theta$と一致する場合、その推定量は不偏推定量と呼ばれる。
+
+$$
+E[\hat{\theta}] = \theta
+$$
+
+次は、一致性(consistency)について。不偏性はサンプルサイズ$n$の大きさは関係ない。一致性はサンプルサイズ$n$を増やしたたときに、推定値$\hat{\theta}$が母数へ収束することを意味している性質。数式を見ると何だがややこしいが、サンプルサイズを大きくすると、推定量$\hat{\theta}$と母数$\theta$の差が$\epsilon$のようなとても小さな値よりも大きくなる確率は0ということを表現している。
+
+$$
+\displaystyle \lim_{ n \to \infty } P(|\hat{\theta} - \theta| \gt \epsilon) = 0
+$$
+
+最後に、有効性(efficiency)について。効率性とも呼ばれる。有効性は不偏推定量が複数あった場合に、確率変数である以上ばらつくので、ばらつきが小さい、つまり分散$V[\hat{\theta_{1}}] \lt V[\hat{\theta_{2}}]$ が小さい推定量$\hat{\theta}$が望ましい有効な推定量と考えることができる。
+
+$$
+V[\hat{\theta} ]\ge \frac{1}{E \left[ \left( \frac {\partial \log{f_{\theta}(x)}} {\partial \theta} \right)^{2} \right] } 
+$$
+
+分母の部分はフィッシャー情報量で、有効性を理解するためには、スコア関数、クラメール・ラオの不等式、フィッシャー情報量などを理解する必要がある。フィッシャー情報量に関しては下記がわかりやすい。
+
+- [The Fisher Information](https://www.youtube.com/watch?v=pneluWj-U-o)
+- [わかりやすいフィッシャー情報量](https://yosshiblog.jp/%E3%83%95%E3%82%A3%E3%83%83%E3%82%B7%E3%83%A3%E3%83%BC%E6%83%85%E5%A0%B1%E9%87%8F/)
+
+クラメール・ラオの不等式の下限は、いかなる不偏推定量もフィッシャー情報量の逆数よりも小さくできない、ということを主張している。つまり、推定量の有効性を調べたときに、フィッシャー情報量の逆数と同じであれば、小さくできるところまで小さくなっていると判断できる。
+
+以上が不偏性、一致性、有効性に関する簡単な説明。詳細は長くなるのでここには書き写さないが、統計勉強ノートの「推定タグ」のdate22.7.1あたりのページを参照(これは自分用のメモ)。
+
+以降では、シュミレーションを通じて、平均が$\mu$である母集団正規分布に従うiidの確率変数$X_{1},...,X_{n}$に対して、標本平均が不偏性推定量であり、一致推定量であり、有効推定量であることを確かめる。
+
+## 不偏性のシュミレーション
+
+平均が$\mu$である母集団正規分布に従うiidの確率変数$X_{1},...,X_{n}$の標本平均$\bar{X}=\frac{\sum X_{i}}{n}$は母平均$\mu$の不偏推定量である、という一般的によく見かける説明をシュミレーションする。
+
+```{r}
+library(tidyverse)
+
+# params
+n <- 10 
+mu <- 10
+sigma2 <- 25
+sigma <- sqrt(sigma2)
+sim_n <- 50000
+sim_res <- vector(mode = 'double', length = sim_n)
+
+# purrrパッケージのmap関数を使うと簡単に書ける
+# map_dbl(1:sim_n, ~mean(rnorm(n, mu, sigma)))
+# 個人的には下記のように書きたい
+# sim_res <- map_dbl(
+#   .x = 1:sim_n,
+#   .f = function(x){mean(rnorm(n, mu, sigma))}
+# )
+set.seed(1989)
+for (i in seq_along(sim_res)) {
+  tmp <- rnorm(n, mu, sigma)
+  sim_res[i] <- mean(tmp)
+}
+
+list(
+  mean(sim_res),
+  sd(sim_res)
+)
+```
+
+シュミレーションされた値の平均は$\mu=10$に近いことがわかる。つまり標本平均$\bar{X}=\frac{\sum X_{i}}{n}$は$\mu$の不偏推定量と言える。可視化するとこのようなヒストグラムが得られる。
+
+```{r}
+tibble(
+  sim_index = seq_along(sim_res),
+  sim_res = sim_res
+  ) %>% 
+  ggplot(., aes(sim_res)) + 
+  geom_histogram(alpha = 1/5, col = 'black', bins = 100) +
+  geom_vline(xintercept = mu, col = 'tomato') +
+  scale_x_continuous(
+    breaks = seq(floor(min(sim_res)), floor(max(sim_res)), 1),
+    limits = c(mu-5, mu+5)
+    ) + 
+  labs(title = "Simulation of unbiasedness") + 
+  theme_bw()
+```
+
+## 一致性のシュミレーション
+
+平均が$\mu$である母集団正規分布に従うiidの確率変数$X_{1},...,X_{n}$の標本平均$\bar{X}=\frac{\sum X_{i}}{n}$は母平均$\mu$の一致推定量である、という一般的によく見かける説明をシュミレーションする。
+
+for文でもよいが、`map`関数のほうが簡単に書けるので、ここでは`map`関数を利用する。一致性の場合、シュミレーション回数ごとにサンプルサイズを大きくしていく必要があるので、`map`関数では下記のよう`.x`と`.f`の引数を設定すればよい。
+
+```{r}
+map(.x = 1:5, .f = function(x){round(rnorm(x),2)})
+```
+
+あとはこれを平均して、ベクトルにするために`map_dbl`関数を利用する。
+
+```{r}
+map_dbl(.x = 1:5, .f = function(x){rnorm(x) %>% mean()})
+```
+
+`map`関数を利用してシュミレーションしてみる。
+
+```{r}
+sim_res <- vector(mode = 'double', length = sim_n)
+sim_res <- map_dbl(.x = seq_along(sim_res), .f = function(x){mean(rnorm(x, mu, sigma))})
+tibble(sim_index = seq_along(sim_res), sim_res = sim_res) %>%
+  ggplot(., aes(sim_index, sim_res)) +
+  geom_line() + 
+  geom_hline(yintercept = mu, col = 'tomato') + 
+  scale_x_continuous(
+    breaks = seq(0, sim_n, 5000)
+    ) + 
+  labs(title = "Simulation of consistency") + 
+  theme_bw()
+```
+
+サンプルサイズが大きくなるにつれて、標本平均が母平均に収束している様子がわかる。つまり、標本平均は一致性推定量であることがわかる。
+
+## 有効性のシュミレーション
+
+平均が$\mu$である母集団正規分布に従うiidの確率変数$X_{1},...,X_{n}$の標本平均$\bar{X}=\frac{\sum X_{i}}{n}$は母平均$\mu$の有効推定量である、という一般的によく見かける説明をシュミレーションする。有効性を調べるため推定値として、標本平均値と標本中央値を使用する。
+
+```{r}
+# params
+# n <- 10 
+# mu <- 10
+# sigma2 <- 25
+# sigma <- sqrt(sigma2)
+# sim_n <- 1e6
+sim_res1 <- sim_res2 <- vector(mode = 'double', length = sim_n)
+sim_res1 <- map_dbl(.x = seq_along(sim_res1), .f = function(x){mean(rnorm(n, mu, sigma))})
+sim_res2 <- map_dbl(.x = seq_along(sim_res2), .f = function(x){median(rnorm(n, mu, sigma))})
+
+tibble(sim_index = seq_along(sim_res1), sim_res = sim_res1, estimator = 'mean') %>% 
+  bind_rows(tibble(sim_index = seq_along(sim_res2), sim_res = sim_res2, estimator = 'median')) %>%
+  ggplot(., aes(sim_res, fill = estimator)) + 
+  geom_histogram(alpha = 1/3, position = "identity", col = 'gray', bins = 100) +
+  scale_x_continuous(
+    breaks = seq(floor(min(sim_res)), floor(max(sim_res)), 1),
+    limits = c(mu-10, mu+10)
+    ) + 
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Simulation of efficiency") + 
+  theme_bw()
+```
+
+推定量として標本平均と標本中央値を使用しているが、赤色の標本平均のほうが、青色の標本中央値よりも尖りが鋭く、分散が小さいことがわかる。つまり、標本平均は標本中央値よりも有効な推定量であることがわかる。標本平均は母平均$\mu$の推定量の中で、最小分散不偏推定量であることがわかっている。
+
+```{r}
+list(
+  mean = var(sim_res1),
+  median = var(sim_res2)
+  )
+```
+
+## 参考文献
+
+- [一致性・不偏性・効率性](https://www.jaysong.net/notes/simulation/consistency.html)
+- [【統計検定１級対策】統計的推定と不偏性・一致性・有効性について](https://nkoda-studynote.com/statistics/estimator_properties/)

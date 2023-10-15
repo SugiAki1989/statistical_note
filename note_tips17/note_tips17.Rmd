@@ -1,0 +1,302 @@
+---
+title: "Rのformulaについて"
+pagetitle: "Rのformulaについて"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここではRのformulaについて、備忘録としてまとめておく。[The R Formula Method: The Good Parts](https://rviews.rstudio.com/2017/02/01/the-r-formula-method-the-good-parts/)を参考にしている。
+
+## `formula`
+`formula`オブジェクトとは何かというと、モデリングの際に使っているモデル式の部分のこと。例えば`y ~ x`は`formula`オブジェクトである。
+
+```R:R
+class(y ~ x)
+[1] "formula"
+```
+
+このオブジェクトの面白いところが、環境に束縛されてないということ。つまり、下記のように`formula`を実行してもエラーにならない。
+
+```R:R
+formula(y ~ x)
+y ~ x
+```
+
+直感的には`y`も`x`も定義していないので、下記のようにエラーが返りそうであるが、`formula`オブジェクトはそうならない。
+
+```R:R
+y
+ エラー:  オブジェクト 'y' がありません 
+
+x
+ エラー:  オブジェクト 'x' がありません 
+```
+
+理由は、`formula`オブジェクトはモデルの構造を表しているだけで、変数への束縛はないオブジェクトとのこと。
+
+`formula`オブジェクトは、`model.frame()`を使うことで変数と結び付けられる。`model.frame()`での値との紐付けはあとで行うとして、先に`formula`オブジェクトの作り方をみていく。
+
+これで`formula`オブジェクトは作れる。
+
+```R:R
+f <- formula(y ~ x)
+
+class(f)
+[1] "formula"
+```
+
+他にも、文字型を`formula`オブジェクトに変換するやり方も存在する。
+
+```R:R
+y <- "Sepal.Length"
+X <- c("Sepal.Width",
+       "Petal.Length",
+       "Petal.Width",
+       "Species")
+
+f_pre <- paste(y,
+               paste(X, collapse = " + "),
+               sep = " ~ ")
+
+f <- as.formula(f_pre)
+
+print(f)
+Sepal.Length ~ Sepal.Width + Petal.Length + Petal.Width + Species
+
+class(f)
+[1] "formula"
+```
+
+この`formula`オブジェクトを使って、`model.frame()`でデータを指定することで値と結びつけることができる。
+
+```R:R
+model.frame(formula = f, data = iris)
+    Sepal.Length Sepal.Width Petal.Length Petal.Width    Species
+1            5.1         3.5          1.4         0.2     setosa
+2            4.9         3.0          1.4         0.2     setosa
+[略]
+149          6.2         3.4          5.4         2.3  virginica
+150          5.9         3.0          5.1         1.8  virginica
+```
+
+`lm()`などの裏側では、今見てきたような形で、`formula`オブジェクトが利用されているらしい。
+
+```R:R
+model <- lm(f, data = iris)
+print(model)
+
+Call:
+lm(formula = f, data = iris)
+
+Coefficients:
+      (Intercept)        Sepal.Width       Petal.Length        Petal.Width  
+           2.1713             0.4959             0.8292            -0.3152  
+Speciesversicolor   Speciesvirginica  
+          -0.7236            -1.0235  
+```
+
+ということでfor-loopでも`formula`オブジェクトを使えば、データフレームからベクトルを引っ引っこ抜いてどうこうしなくても、`formula`オブジェクトをいじれば済んでしまったりする。ここでは表示の都合上、`res$coef`だけ表示している。
+
+```R:R
+y <- "Sepal.Length"
+X <- c("Sepal.Width",
+       "Petal.Length",
+       "Petal.Width",
+       "Species")
+
+for (i in 1:4) {
+  f_pre <- paste(y,
+                 paste(X[[i]], collapse = " + "),
+                 sep = " ~ ")
+  
+  f <- as.formula(f_pre)
+  res <- lm(f, data = iris)
+  print(res$coef)
+}
+
+(Intercept) Sepal.Width 
+  6.5262226  -0.2233611 
+(Intercept) Petal.Length 
+  4.3066034    0.4089223 
+(Intercept) Petal.Width 
+  4.7776294   0.8885803 
+(Intercept) Speciesversicolor  Speciesvirginica 
+      5.006             0.930             1.582
+```
+
+ちなみに`{rlang}`の`f_rhs()`や`f_lhs`で`~(チルダ)`の左右を取得できる。
+
+```R:R
+y <- "Sepal.Length"
+X <- c("Sepal.Width",
+       "Petal.Length",
+       "Petal.Width",
+       "Species")
+
+f_pre <- paste(y,
+               paste(X, collapse = " + "),
+               sep = " ~ ")
+
+f <- as.formula(f_pre)
+
+rlang::f_rhs(f)
+Sepal.Width + Petal.Length + Petal.Width + Species
+
+rlang::f_lhs(f)
+Sepal.Length
+```
+
+文字型に変換したければ、`all.vars()`を使うことで変換できる。
+
+```R:R
+all.vars(rlang::f_rhs(f))
+[1] "Sepal.Width"  "Petal.Length" "Petal.Width"  "Species"     
+
+all.vars(rlang::f_lhs(f))
+[1] "Sepal.Length"
+```
+
+なので、`{h2o}`とかのモデリング関数は`X`と`y`を文字型で分けて入れる必要があるので、これらの関数を使えばよい。
+
+```R:R
+library(h2o)
+h2o.init()
+
+h2o_glm_wrapper <- function(formula, data) {
+  
+  y <- all.vars(rlang::f_lhs(formula)) 
+  X <- all.vars(rlang::f_rhs(formula)) 
+  
+  if (X == ".") { 
+    X <- colnames(data)[colnames(data) != y]
+  }
+  
+  data <- as.h2o(data)
+
+  fit <- h2o.glm(x = X, y = y, training_frame = data)
+  print(fit)
+}
+
+h2o_glm_wrapper(formula = Sepal.Width ~ Petal.Width + Petal.Length + Species, 
+                data = iris)
+
+|=================================================================================================| 100%
+  |=================================================================================================| 100%
+Model Details:
+==============
+
+H2ORegressionModel: glm
+Model ID:  GLM_model_R_1571106020541_5 
+GLM Model: summary
+    family     link                               regularization number_of_predictors_total
+1 gaussian identity Elastic Net (alpha = 0.5, lambda = 3.71E-4 )                          5
+  number_of_active_predictors number_of_iterations  training_frame
+1                           5                    1 data_sid_afd5_9
+
+Coefficients: glm coefficients
+               names coefficients standardized_coefficients
+1          Intercept     1.528515                  2.803878
+2     Species.setosa     1.535946                  1.535946
+3 Species.versicolor    -0.183219                 -0.183219
+4  Species.virginica    -0.592361                 -0.592361
+5       Petal.Length     0.145211                  0.256340
+6        Petal.Width     0.608389                  0.463737
+
+H2ORegressionMetrics: glm
+** Reported on training data. **
+
+MSE:  0.08475964
+RMSE:  0.2911351
+MAE:  0.2212693
+RMSLE:  0.07108229
+Mean Residual Deviance :  0.08475964
+R^2 :  0.550854
+Null Deviance :28.30693
+Null D.o.F. :149
+Residual Deviance :12.71395
+Residual D.o.F. :144
+AIC :69.49119
+```
+
+適当な組み合わせでモデルをフィットさせる場合はこんな感じか。
+
+```R:R
+# Sepal.Lengthは目的変数
+cols <- colnames(iris)[2:5]
+cols
+[1] "Sepal.Width"  "Petal.Length" "Petal.Width"  "Species"     
+
+# 説明変数は2つ
+pattern <- combn(length(cols), 2)
+pattern
+     [,1] [,2] [,3] [,4] [,5] [,6]
+[1,]    1    1    1    2    2    3
+[2,]    2    3    4    3    4    4
+
+# 組み合わせごとにフィット
+for (i in 1:ncol(pattern)) {
+  f_pre <- paste("Sepal.Length",
+                 paste(cols[pattern[1,i]], cols[pattern[2,i]], sep = " + "),
+                 sep = " ~ ")
+  
+  cat(f_pre, sep = "\n")
+  
+  f <- as.formula(f_pre)
+  res <- lm(f, data = iris)
+  print(res$coef)
+  cat(paste0(rep("-",80), collapse = ""), sep = "\n")
+}
+
+Sepal.Length ~ Sepal.Width + Petal.Length
+ (Intercept)  Sepal.Width Petal.Length 
+   2.2491402    0.5955247    0.4719200 
+--------------------------------------------------------------------------------
+Sepal.Length ~ Sepal.Width + Petal.Width
+(Intercept) Sepal.Width Petal.Width 
+  3.4573334   0.3990708   0.9721296 
+--------------------------------------------------------------------------------
+Sepal.Length ~ Sepal.Width + Species
+      (Intercept)       Sepal.Width Speciesversicolor  Speciesvirginica 
+        2.2513932         0.8035609         1.4587431         1.9468166 
+--------------------------------------------------------------------------------
+Sepal.Length ~ Petal.Length + Petal.Width
+ (Intercept) Petal.Length  Petal.Width 
+   4.1905824    0.5417772   -0.3195506 
+--------------------------------------------------------------------------------
+Sepal.Length ~ Petal.Length + Species
+      (Intercept)      Petal.Length Speciesversicolor  Speciesvirginica 
+        3.6835266         0.9045646        -1.6009717        -2.1176692 
+--------------------------------------------------------------------------------
+Sepal.Length ~ Petal.Width + Species
+      (Intercept)       Petal.Width Speciesversicolor  Speciesvirginica 
+       4.78044206        0.91690219       -0.06025436       -0.05008589 
+--------------------------------------------------------------------------------
+```
+
+## 参照サイト
+- [The R Formula Method: The Good Parts](https://rviews.rstudio.com/2017/02/01/the-r-formula-method-the-good-parts/)
+- [Non-standard evaluation](https://cran.r-project.org/web/packages/lazyeval/vignettes/lazyeval.html)

@@ -1,0 +1,250 @@
+---
+title: "TidyModels: recipesパッケージ"
+pagetitle: "TidyModels: recipesパッケージ"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+`tidymodels`パッケージの使い方をいくつかのノートに分けてまとめている。`tidymodels`パッケージは、統計モデルや機械学習モデルを構築するために必要なパッケージをコレクションしているパッケージで、非常に色んなパッケージがある。ここでは、今回は`recipes`というパッケージの使い方をまとめていく。モデルの数理的な側面や機械学習の用語などは、このノートでは扱わない。
+
+下記の公式ドキュメントや`tidymodels`パッケージに関する書籍を参考にしている。
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+## `recipes`パッケージの目的
+
+`recipes`パッケージは、`dplyr`パッケージのようなパイプ演算子を使って特徴量エンジニアリングを行うことを可能にするパッケージ。特徴量エンジニアリングの処理をステップに分けて管理することで、学習や評価の際のモデリング、予測の際のモデリングをスムーズに統一した処理を利用して実行できる。
+
+## `recipes`パッケージの実行例
+
+`recipes`パッケージの関数群の基本的な利用方法は下記の通り。お役所の書類の決済手続きのような感じでモデルに必要な情報を決定していく。
+
+- `recipe`: モデルおよび学習データを定義する
+- `step_a`: データの特徴量エンジニアリングの設計を行う
+- `prep`: 処理内容を決定する(必要な統計量などを推定する)
+- `bake`: 特徴量エンジニアリングや処理内容を適用する
+
+```
+# recipe(y ~ x + z, data = train) %>% 
+#   step_a() %>% 
+#   step_b() %>% 
+#   step_c() %>% 
+#   step_d() %>% 
+#   prep() %>% 
+#   bake(new_data = train)
+```
+
+`recipe`関数の引数に含まれる`data`は学習データである必要はなく、このデータは、変数名や型の情報をカタログ化するためにのみ使用される。そのため、モデルを対数変換したいからといって、この段階で変換してはいけない。
+
+```
+# recipe(log(Sepal.Length) ~ ., data = iris)
+# Error in `inline_check()`:
+# ! No in-line functions should be used here; use steps to define baking actions.
+```
+
+また、特徴量エンジニアリングをステップに分けて記述していくことになるが、下記の通りかなり多くの特徴量エンジニアリングの関数が用意されている。[Function reference](https://recipes.tidymodels.org/reference/index.html)には説明付きで一覧があるので、こちらを見るのが良い。
+
+```{r}
+library(recipes)
+grep("step_", ls("package:recipes"), value = TRUE)
+```
+
+では、実際にレシピを組み立てていく。使用するデータは`rsample`パッケージのノートで使用したデータをここでも利用する。数値変換、カテゴリ変換、欠損値補完の例を通じて、`receipe`パッケージへの理解を深める。
+
+```{r}
+library(tidymodels)
+library(tidyverse)
+df_past <- read_csv("https://raw.githubusercontent.com/SugiAki1989/statistical_note/main/note_TidyModels00/df_past.csv")
+set.seed(1989)
+df_initial <- df_past %>% initial_split(prop = 0.8, strata = "Status")
+df_train <- df_initial %>% training()
+df_test <- df_initial %>% testing()
+```
+
+まずは基本的な数値変換手法である、標準化を行ってみる。`step_normalize`関数を利用して、`prep`関数、`bake`関数とつなげていく。他にも、対数変換を行う`step_log()`関数、 ロジット変換を行う`step_logit`関数、平方根変換を行う`step_sqrt`関数、離散化のための`step_discretize`関数、`step_cut`関数もある。
+
+```{r}
+recipe(Status ~ ., data = df_train) %>% 
+  step_normalize(Age) %>% 
+  prep() %>% 
+  bake(new_data = df_train) %>% 
+  select(Age)
+```
+
+複数のカラムを同時に指定することもできる。
+
+```{r}
+recipe(Status ~ ., data = df_train) %>% 
+  step_normalize(Age, Income) %>% 
+  prep() %>% 
+  bake(new_data = df_train) %>% 
+  select(Age, Income)
+```
+
+ここでは全ての数値型を変換したい。そんな時は`all_numeric_predictors`関数を利用する。`all_**`関数も沢山用意されており、特定の型のカラムを処理対象ししてまとめて決定できる。
+
+`all_numeric_predictors`と`all_numeric`の違いは、前者が数値型の説明変数を選択するのに対し、後者は数値型を選択するという違いがある。その他も同様である。
+
+```{r}
+grep("all_", ls("package:recipes"), value = TRUE)
+```
+
+それでは標準化を行う。まずは変換前の`df_train`の中身を見ておく。標準化する前なので、オリジナルのスケールでデータが記録されている。
+
+```{r}
+df_train %>% 
+  select_if(is.numeric)
+```
+
+レシピの手順に従って、データを標準化すると、数値型の列が標準化されていることがわかる。
+
+```{r}
+recipe(Status ~ ., data = df_train) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  prep() %>% 
+  bake(new_data = df_train) %>% 
+  select_if(is.numeric)
+```
+
+次はカテゴリ変換についてもいくつかの関数をまとめておく。ワンホットエンコーディングは`step_dummy(one_hot = TRUE)`で実行できる。`FALSE`で使用すると、ベースカテゴリをおいた上で、ダミー変数化が行われる。下記の例では`fixed`がベースラインカテゴリとなっている。
+
+```{r}
+recipe(Status ~ ., data = df_train) %>% 
+  step_dummy(Job, one_hot = FALSE) %>% 
+  prep() %>% 
+  bake(new_data = df_train) %>% 
+  select(starts_with("Job")) %>% 
+  bind_cols(df_train %>% select(Job))
+```
+
+ワンホットエンコーディングの例はこちら。
+
+```{r}
+recipe(Status ~ ., data = df_train) %>% 
+  step_dummy(Job, one_hot = TRUE) %>% 
+  prep() %>% 
+  bake(new_data = df_train) %>% 
+  select(starts_with("Job")) %>% 
+  bind_cols(df_train %>% select(Job))
+```
+
+お次はラベルエンコーディングを行う。ラベルエンコーディングはラベルを数値にする変換。因子型を数値にスコア化する` step_ordinalscore`関数も用意されているが、ここでは文字型を数値に直し、文字型を因子型にしてから数値型に戻す。まずは、文字型を選択できる`all_nominal_predictors`関数で文字を因子型に変換する。
+
+```{r}
+recipe(Status ~ ., data = df_train) %>% 
+  step_string2factor(all_nominal_predictors()) %>% 
+  prep() %>% 
+  bake(new_data = df_train) %>% 
+  str()
+```
+
+これに`step_mutate_at`関数で数値型への変換を追加する。
+
+```{r}
+recipe(Status ~ ., data = df_train) %>% 
+  step_string2factor(all_nominal_predictors()) %>% 
+  step_mutate_at(Job, fn = ~ as.numeric(.)) %>% 
+  prep() %>% 
+  bake(new_data = df_train) %>% 
+  select(starts_with("Job")) %>% 
+  bind_cols(df_train %>% select(Job))
+```
+
+最後は、欠損値補完の方法をまとめおく。学習データには下記の通り、欠損値がいくつかあることがわかる。
+
+```{r}
+map_int(.x = df_train, .f = function(x){sum(is.na(x))})
+```
+
+欠損値が埋まっているかを確認するために、欠損しているレコードをいくつかサンプリングしておく。
+
+```{r}
+df_train_imp <- df_train %>% 
+  mutate(idx = row_number()) %>% 
+  filter(idx %in% c(350, 385, 391, 413, 497, 512, 539, 590, 1007, 1040)) %>% 
+  select(Status, Marital, Home, Expenses, Income, Assets)
+df_train_imp
+```
+
+まずは基本的な代表値補間方法である平均値補完から始める。平均値補間は`step_impute_mean`関数を利用する。`step_impute_median`関数であれば中央値補間、`step_impute_mode`関数であれば最頻値補間となる。
+
+```{r}
+recipe(Status ~ ., data = df_train_imp) %>% 
+  step_impute_mean(Assets) %>% 
+  step_impute_median(Income) %>% 
+  step_impute_mode(Home) %>% 
+  prep() %>% 
+  bake(new_data = df_train_imp) 
+```
+
+予測補間を行う関数もいくつか用意されているので、ここでは線形回帰予測補間(`step_impute_linear`)、決定木予測補間(`step_impute_bag`)、k近傍予測補間(`step_impute_knn`)の例をまとめておく。説明変数に欠損値が含まれるとエラーになるので注意。
+
+ここでは`Income`の欠損値を`Marital, Expenses`を説明変数としてモデルを作成し、予測値で補間している。
+
+```{r}
+recipe(Status ~ ., data = df_train_imp) %>% 
+  step_impute_linear(Income, impute_with = imp_vars(Marital, Expenses)) %>% 
+  prep() %>% 
+  bake(new_data = df_train_imp) 
+```
+
+`step_impute_linear`関数で`Income`の欠損値を埋めたので、`step_impute_bag`関数では、`Income`を説明変数として利用できる。
+
+```{r}
+recipe(Status ~ ., data = df_train_imp) %>% 
+  step_impute_linear(Income, impute_with = imp_vars(Marital, Expenses)) %>% 
+  step_impute_bag(Assets, impute_with = imp_vars(Marital, Expenses, Income)) %>% 
+  prep(stringsAsFactors = TRUE) %>% 
+  bake(new_data = df_train_imp) 
+```
+
+k近傍予測補間(`step_impute_knn`)であればカテゴリ変数の欠損値も埋めることができる。
+
+```{r}
+recipe(Status ~ ., data = df_train_imp) %>% 
+  step_impute_linear(Income, impute_with = imp_vars(Marital, Expenses)) %>% 
+  step_impute_bag(Assets, impute_with = imp_vars(Marital, Expenses, Income)) %>% 
+  step_impute_knn(Home, impute_with = imp_vars(Expenses, Income, Assets)) %>% 
+  prep() %>% 
+  bake(new_data = df_train_imp)
+```
+
+他にも`caret`パッケージにもあったフィルター系の関数もある。相関が高い列を削除する`step_corr`関数、分散がほぼ0の列を削除する`step_nzv`関数、線形結合を除く`step_lincomb`関数などもある。
+
+まとめきれないので、下記`recipes`パッケージの公式サイトを参照のこと。
+
+- [recipes](https://recipes.tidymodels.org/articles/recipes.html)
+
+## 参考文献
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+

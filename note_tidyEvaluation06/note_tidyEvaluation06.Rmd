@@ -1,0 +1,299 @@
+---
+title: "RのTidy evaluation_06"
+pagetitle: "RのTidy evaluation_06"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+## はじめに
+この記事は[Tidy evaluation](https://tidyeval.tidyverse.org/)をもとにTidy evaluationについて学習した内容を自分の備忘録としてまとめたものです。
+
+### 関数の作成
+ここまで学んだTidy evaluationの知識を使って、関数を作成する。こちらの[第6章 非标准评估](https://bookdown.org/wangminjie/R4EDA/tidyeval.html)で中国の方が書かれている、下記のフラグを立てる関数を書き直すことが目標。
+```R:R
+get_deprivation_df <- function(df, ..., cutoffs) {
+  vars <- rlang::enexprs(...)
+  quos <- purrr::map(vars, function(var) {
+    rlang::quo(dplyr::if_else(!!var < cutoffs[[rlang::as_name(var)]], 1, 0))
+  }) %>%
+    purrr::set_names(nm = purrr::map_chr(vars, rlang::as_name))
+
+  df %>%
+    dplyr::mutate(!!!quos)
+}
+```
+この関数はリストで指定したカットオフ値よりも、各変数の値が小さい場合は1のフラグを立てる関数。なので、下記のようになる。
+```R:R
+df <- tribble(
+  ~id, ~x, ~y, ~z, ~g,
+  #--|--|--|--|--
+  "a", 13.1, 14, 4, 1,
+  "b", 15.2, 7, 5, 0,
+  "c", 12.5, 10, 1, 0,
+  "d", 20, 11, 3, 1
+)
+
+## # A tibble: 4 x 5
+##   id        x     y     z     g
+##   <chr> <dbl> <dbl> <dbl> <dbl>
+## 1 a      13.1    14     4     1
+## 2 b      15.2     7     5     0
+## 3 c      12.5    10     1     0
+## 4 d      20      11     3     1
+
+df %>%
+  get_deprivation_df(x, y, z, cutoffs = cutoffs)
+## # A tibble: 4 x 5
+##   id        x     y     z     g
+##   <chr> <dbl> <dbl> <dbl> <dbl>
+## 1 a         0     0     0     1
+## 2 b         0     1     0     0
+## 3 c         1     1     1     0
+## 4 d         0     1     0     1
+```
+
+### 書き直した版
+この関数を練習のため、関数`flager()`として書き直してみる。下記が書き直した版の関数。`qq_show()`で挙動を確認する。
+
+```R:R
+library(tidyverse)
+library(rlang)
+
+flager <- function(df, flag_vars, cutoffs) {
+  # making name to vals
+  unnamed <- names(flag_vars) == ""
+  flag_vars <- rlang::quos_auto_name(flag_vars)
+  prefixed_nms <- paste0("flg_", names(flag_vars)[unnamed])
+  names(flag_vars)[unnamed] <- prefixed_nms
+  
+  # listing expression
+  flag_vars <- purrr::map(flag_vars, function(var) {
+    expr(if_else(!!var < cutoffs[[!!rlang::quo_text(var)]], 1, 0))})
+
+  rlang::qq_show(
+  df %>% mutate(!!!flag_vars)
+  )
+}
+
+df %>% flager(flag_vars = vars(X = x, y), 
+              cutoffs = list(x = 5, y = 18))
+
+# qq_showの結果
+df %>% 
+  mutate(X = if_else((^x) < cutoffs[["x"]], 1, 0),
+         flg_y = if_else((^y) < cutoffs[["y"]], 1, 0))
+```
+
+まずは`vars()`を用いて外部クオートを利用している。そのため、関数内部でクオートする必要がない。`vars()`の中身は下記の通り。
+
+```R:R
+vars(X = x, y)
+$X
+<quosure>
+expr: ^x
+env:  global
+
+[[2]]
+<quosure>
+expr: ^y
+env:  global
+```
+
+リストで名前を指定していない場合、空文字になるので、そこが`TRUE`となる。
+
+```R:R
+flag_vars=vars(X = x, y)
+names(flag_vars)
+[1] "X" "" 
+```
+
+次に`quos_auto_name()`で値から名前を取得し、`paste0()`でプレフィックスをつける。そして、`flag_vars`の空文字(=`TRUE`)の部分に名前が返される。
+
+```R:R
+paste0("flg_", names(flag_vars)[unnamed])
+[1] "flg_y"
+```
+
+"# listing expression"の部分では、表現式を修正しています。`!!var`の部分はアンクオートして`x`と`y`に変化させ、`cutoffs[[!!rlang::quo_text(var)]]`の部分では、アンクオートされた`x`と`y`を`quo_text()`で文字型に変換しています。
+
+理由はリストのサブセットが、文字型でないといけないからです。一度、`quo_text()`を外して、`qq_show()`で挙動を確認します。
+
+```R:R
+flager <- function(df, flag_vars, cutoffs) {
+  # making name to vals
+  unnamed <- names(flag_vars) == ""
+  flag_vars <- rlang::quos_auto_name(flag_vars)
+  prefixed_nms <- paste0("flg_", names(flag_vars)[unnamed])
+  names(flag_vars)[unnamed] <- prefixed_nms
+  
+  # listing expression
+  flag_vars <- purrr::map(flag_vars, function(var) {
+    expr(if_else(!!var < cutoffs[[!!var]], 1, 0))})
+
+  rlang::qq_show(
+  df %>% mutate(!!!flag_vars)
+  )
+}
+
+df %>% flager(flag_vars = vars(X = x, y), 
+              cutoffs = list(x = 5, y = 18))
+
+df %>% 
+  mutate(X = if_else((^x) < cutoffs[[^x]], 1, 0), 
+         flg_y = if_else((^y) < cutoffs[[^y]], 1, 0))
+```
+
+この状態で`qq_show()`を外して、実行すると、エラーが返ります。
+
+```R:R
+flager <- function(df, flag_vars, cutoffs) {
+  # making name to vals
+  unnamed <- names(flag_vars) == ""
+  flag_vars <- rlang::quos_auto_name(flag_vars)
+  prefixed_nms <- paste0("flg_", names(flag_vars)[unnamed])
+  names(flag_vars)[unnamed] <- prefixed_nms
+  
+  # listing expression
+  flag_vars <- purrr::map(flag_vars, function(var) {
+    expr(if_else(!!var < cutoffs[[!!var]], 1, 0))})
+
+  # rlang::qq_show(
+  df %>% mutate(!!!flag_vars)
+  # )
+}
+
+ cutoffs[[~x]] でエラー:  再帰的な添字操作がレベル 2 で失敗しました
+```
+
+なので、`quo_text()`を挟んでいます。使い方は[こちら](https://edwinth.github.io/blog/dplyr-recipes/)を参考にしました。
+
+```R:R
+quo_to_text <- function(x, var) {
+  var_enq <- enquo(var)
+  glue::glue("The following column was selected: {rlang::quo_text(var_enq)}")
+}
+
+quo_to_text(iris, Species)
+The following column was selected: Species
+
+typeof(quo_to_text(iris, Species))
+[1] "character"
+```
+
+こんな感じで違いがある。
+
+```R:R
+f <- function(x) {
+  a <- expr(!!rlang::quo_text(enquo(x)))
+  typeof(a)
+}
+f(x = A)
+[1] "character"
+
+f <- function(x) {
+  rlang::qq_show(expr(!!rlang::quo_text(enquo(x))))
+}
+f(x = A)
+expr("A")
+
+
+f <- function(x) {
+  a <- expr(!!enquo(x))
+  typeof(a)
+}
+f(x = A)
+[1] "language"
+
+f <- function(x) {
+  rlang::qq_show(expr(!!enquo(x)))
+}
+f(x = A)
+expr(^A)
+```
+
+表現式を修正した`flag_vars`を使って、`mutate()`の中で評価させます。複数なので`!!!(bang-bang-bang)`でアンクオート。
+
+```R:R
+flager <- function(df, flag_vars, cutoffs) {
+  # making name to vals
+  unnamed <- names(flag_vars) == ""
+  flag_vars <- rlang::quos_auto_name(flag_vars)
+  prefixed_nms <- paste0("flg_", names(flag_vars)[unnamed])
+  names(flag_vars)[unnamed] <- prefixed_nms
+  
+  # listing expression
+  flag_vars <- purrr::map(flag_vars, function(var) {
+    expr(if_else(!!var < cutoffs[[!!rlang::quo_text(var)]], 1, 0))})
+
+  # rlang::qq_show(
+  df %>% mutate(!!!flag_vars)
+  # )
+}
+```
+
+それでは、`flager()`を使ってみます。サンプルデータはこれです。
+
+```R:R
+df <- data.frame(id = letters[1:10],
+                 x = 1:10,
+                 y = 11:20)
+
+df
+   id  x  y
+1   a  1 11
+2   b  2 12
+3   c  3 13
+4   d  4 14
+5   e  5 15
+6   f  6 16
+7   g  7 17
+8   h  8 18
+9   i  9 19
+10  j 10 20
+```
+
+ここでは名前付きの`X`で`x < 5`の場合と、名前は自動付与で`y < 18`の場合に1が立つようにします。結果を見る限り、上手く行っていそうですね。
+
+```R:R
+df %>% flager(flag_vars = vars(X = x, y), cutoffs = list(x = 5, y = 18))
+
+   id  x  y X flg_y
+1   a  1 11 1     1
+2   b  2 12 1     1
+3   c  3 13 1     1
+4   d  4 14 1     1
+5   e  5 15 0     1
+6   f  6 16 0     1
+7   g  7 17 0     1
+8   h  8 18 0     0
+9   i  9 19 0     0
+10  j 10 20 0     0
+```
+
+`flager()`はインプットの入力チェックなど、改良する必要がありそうですが、一旦はここまで。
+(Tidy evaluation難しいので、誤りがあるかもしれまん。)

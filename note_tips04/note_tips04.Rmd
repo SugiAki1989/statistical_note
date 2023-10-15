@@ -1,0 +1,93 @@
+---
+title: "クロス集計の頻度からデータフレームを復元するメモ"
+pagetitle: "クロス集計の頻度からデータフレームを復元するメモ"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+クロス集計の頻度からデータフレームを復元するメモ書き。データフレームからクロス集計をするから、復元するも何も、何だそれと思うかもしれないが、クロス集計された状態のデータがスタートで、そこからもとのデータフレームを得たい場合がある。集計されたものをIDレベルで他の列の情報も復元するというのは、不可能だけど、単純に戻すだけならなんとかなる。
+
+## サンプルデータ
+ここではMASSパッケージの`caith`データを利用する。このデータは4行5列のクロス集計されたデータで、スコットランドのケイスネスに住む人々の目と髪の色のデータ。
+
+```{r}
+library(MASS)
+library(tidyverse)
+
+caith
+```
+
+## sliceを使う方法
+クロス集計の表側、表頭の値の組み合わせを持つデータフレームを作成し、クロス集計の値分、`slice()`で行を増幅させる。ここでは、`freq`とか`num`とかを付け加えているが、そこはどうでもいいので、そのままにしておく。
+
+```{r}
+eye <- colnames(caith)
+hair <- rownames(caith)
+df <- tibble(expand_grid(eye, hair), freq = unlist(caith))
+
+df %>%
+  slice(rep(1:n(), times = freq)) %>%
+  mutate(num = 1)
+```
+
+## map()&unnest()を使う方法
+データフレームの中にリストで必要な行数分データを用意し、それを展開する方法。`map()`でなくても`lappy()`でも同じことはできる。
+
+```{r}
+eye <- colnames(caith)
+hair <- rownames(caith)
+df <- tibble(expand_grid(eye, hair), freq = unlist(caith))
+df %>%
+  # lapply(df$freq, function(x){(rep(1, x))})
+  mutate(num = map(.x = freq, .f = function(x){(rep(1, x))})) %>%
+  unnest(num, .drop = FALSE)
+```
+
+`map()`の部分で実行すると、こんな感じになっている。
+
+```{r}
+df %>%
+  mutate(num = map(.x = freq, .f = function(x){(rep(1, x))}))
+
+```
+
+## for-loopで愚直に行く方法
+最近はよく感じるのが、便利なパッケージがこの世からなくなったら、分析できなくなるなぁ〜、ということ。なので、プログラムの3つの制御構造である「順次」「繰り返し」「分岐」をもっとうまく使えるようにならないといけないので、for-loopでも書いておく。というよりも、便利なパッケージがこの世からなくならないけど、自分がやりたいことをやるためには、制御構造がもっと使えるようになる必要ある・・・。
+
+```{r}
+n_col <- colnames(caith)
+n_row <- rownames(caith)
+data <- NULL
+for (i in seq_along(n_row)) {
+  for (j in seq_along(n_col)) {
+    for (k in 1:caith[i, j]){
+      data <- rbind(data, c(n_row[[i]], n_col[[j]]))
+    }
+  }
+}
+as.data.frame(data) %>% dim()
+```

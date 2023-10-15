@@ -1,0 +1,386 @@
+---
+title: "ベイジアンABテストのはなし(理論編)"
+pagetitle: "ベイジアンABテストのはなし(理論編)"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、以前おさらいした[BayesAB](https://github.com/FrankPortman/bayesAB)パッケージの理論的な部分や内側の実装部分への理解を深める。つまり、パッケージを使わなくてもベイジアンフレームワークのもとで、ABテストを行なえるようにすることを目的にする。
+
+ベイジアンフレームワークのもとでABテストを行うためには、ベイズ統計を学ぶ必要がある。ここでは必要最低限の知識をおさらいしておくが、説明が誤っている可能性があるので、詳細や正しい知識に関しては[標準ベイズ統計学](https://www.asakura.co.jp/detail.php?book_code=12267)を参照ください。
+
+## ベイズ統計
+
+ベイズ統計では、事前分布をうまく利用することで、主観的な確信度合いを含めて確率を考えることができる。事前情報がない場合は、無情報事前分布を利用することで、確率を考えることも出来る。頻度論的な統計学では、事象の頻度の反映として、確率を考えている点で異なる。
+
+ベイズ統計は、人間の意思決定のプロセスを表現するのに適している。ある情報をもとに意思決定をしようとした際、新たな情報を手に入れたことで、意思決定の方向性を変えることはよくある。ベイズ統計は、この意思決定のプロセスを表現するのに適している。
+
+実際には、条件付き確率を活用したベイズの定理が基礎として存在する。ベイズの定理がベイズ統計というわけではないが、ベイズのフレームワークで、確率をどのように考えるかを示している。
+
+$$
+P(A|B) = \frac{P(A \cap B)}{P(B)} = \frac{P(B|A) P(A)}{P(B)} = \frac{P(B|A) P(A)}{P(B|A)P(A)+P(B|\bar{A})P(\bar{A})}
+$$
+
+よくある例を通して、ベイズの定理のおさらいしておく。コロナに罹患している(A)人が10%、検査キットではコロナに罹患している人を正しく陽性と判定できる精度(B)を80%とする。このとき、陽性と判定(B)された人がコロナに罹患している確率(A)は、およそ約30.7%となる。数値を当てはめると下記のようになる。
+
+$$
+P(A|B) = \frac{P(B|A) P(A)}{P(B|A)P(A)+P(B|\bar{A})P(\bar{A})} = \frac{0.8 \times 0.1}{0.8 \times 0.1+0.2 \times 0.9} = 0.307
+$$
+
+他にも、迷惑メールの例もみておく。メールは10%が迷惑メール(A)で、90%は通常メール(¬A)だとする。迷惑メール(A)には「出会い」という単語(B)が50%で含まれ、通常メール(¬A)には「出会い」という単語(B)が5%で含まれる。「出会い」という単語(B)が含まれるメールが迷惑メール(A)である確率は約53％となる。数値を当てはめると下記のようになる。
+
+$$
+P(A|B) = \frac{P(B|A) P(A)}{P(B|A)P(A)+P(B|\bar{A})P(\bar{A})} = \frac{0.5 \times 0.1}{0.5 \times 0.1+0.05 \times 0.9} = 0.526
+$$
+
+ベイズの定理を分解すると、3つのパートで構成されていることがわかる。
+
+- $P(A|B)$: 事後確率(posterior)と呼ばれ、事前確率と尤度の積で表される確率を意味する
+- $P(B|A)$: 尤度(likelohood)と呼ばれ、データが観測される確率を意味する
+- $P(A)$: 事前確率(prior)と呼ばれ、データを観察する前の確率を意味する
+
+$P(B)$は事後確率が0-1に収まるようにする規格化定数である。ベイズの定理のお気持ちを察すると、事前に持っている確信度合いに、観察されたデータの確率を掛け合わせて、元の確率を更新する。ただ、実際のところ、事前、事後確率はわからないので、確率分布を利用することになる。確率分布を利用した場合、事後分布、尤度、事前分布と呼ばれる。
+
+ベイジアンフレームワークのABテストにおいて、最低限、必要な確率分布は、二項分布とベータ分布の2つ。これらの分布は共役な関係にあり、ベータ分布は二項分布の共役事前分布である。共役事前分布は、事前分布であるベータ分布に尤度(二項分布)をかけあわせると、事後分布の形が事前分布と同じベータ分布になるような分布のこと。下記の通り、二項分布とベータ分布があったとして、
+
+$$
+\begin{eqnarray}
+p(x|\theta) &=& {}_n \mathrm{ C }_x \theta^{x}(1 - \theta)^{n-x}  \\
+p(\theta) &=& \frac{1}{B(\alpha,\beta)}\theta^{\alpha-1}(1-\theta)^{\beta-1}
+\end{eqnarray}
+$$
+これらの分布をベイズの定理に当てはめて計算すると、ベータ分布に戻る。
+$$
+\begin{eqnarray}
+p(\theta|x) &=& \frac{p(x|\theta)p(\theta)}{p(x)} \\
+&\propto& p(x|\theta)p(\theta) \\
+&\propto& \theta^{(x+\alpha)-1}(1-\theta)^{(n-x+\beta)-1} \\
+&\propto& \theta^{\alpha^{\prime}-1}(1-\theta)^{\beta^{\prime}-1} 
+\end{eqnarray}
+$$
+二項分布とベータ分布の関係がわかったところで、実際に各分布をRで利用してみる。まずは二項分布から。例えば、不正のないコインを投げると50%の確率で表がでて、50%の確率で裏が出る。このようなコインを投げを10回行いたい場合、Rでは下記の通り、`rbinom()`関数を利用すれば良い。
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(bayesAB)
+library(scales)
+
+set.seed(1989)
+rbinom(n = 10, size = 1, prob = 0.5)
+```
+
+このようなコインを投げを10回行う試行を1万回繰り返してシュミレーションすることも簡単にできる。1万回繰り返した結果、不正のないコインであれば、表裏が5回出ることが1番多いことがわかる。
+
+```{r}
+set.seed(1989)
+map(1:10000, function(x){rbinom(n = 10, size = 1, prob = 0.5)}) %>% 
+  map(.x = ., .f = function(x){sum(x)}) %>% 
+  unlist(.) %>% 
+  tibble(x = .) %>% 
+  group_by(x) %>% 
+  count() %>% 
+  mutate(p = n/10000) %>% 
+  ggplot(aes(x, p)) +
+  geom_bar(fill = "#006E4F", stat = 'identity') +
+  scale_x_continuous(breaks = 1:10) +
+  labs(title = "10,000 simulations of 10 coin tosses.") +
+  theme_bw()
+```
+
+コインを10回投げて表が3回出る確率を知りたければ`dbinom()`関数で調べることができる。
+
+```{r}
+dbinom(3, 10, 0.5)
+```
+
+ここまでは、不正のないコインの話をしていたので、確率、つまりパラメタ$p$がわかっている状態であった。ただ、実際のところパラメタ$p$がわかっていることはなく、データがあるが、パラメタ$p$はわからない状態のほうが多い。このようなときに、確率分布を仮定して、データからパラメタ$p$を推定する方法がいくつかあり、その1つに最尤推定法がある。
+
+どのようなコインかわからないが、コインを10回投げて表が3回出たとする。データ自体は手元にあるので、このデータを使って、パラメタ$p$を推定したい。コイン投げは確率$_{n}C_{k}p^{k}(1-p)^{n-k}$(尤度: likelihood)で起こるので、パラメタ$p$を動かして調べると、尤度が一番大きくなるところのパラメタ$p$が今回のコイン投げの現象をうまく表現できるパラメタ$p$と言えそうである。これが最尤推定法のお気持ちである。ちなみに、尤度は確率ではないので注意。
+
+調べてみると、$p=0.3$あたりが最も大きくなっているので、今回使用したコインの表が出る確率は0.3あたりと考えられる。
+
+```{r}
+tibble(
+  p = seq(0, 1, 0.01),
+  y = dbinom(3, size = 10, prob = p)
+  ) %>% 
+  ggplot(aes(p, y)) +
+  geom_line() +
+  labs(title = "10 coin tosses",x = "Probability") + 
+  theme_bw()
+```
+
+尤度と最尤推定法の話はいったん終わりにして、ベータ分布を扱う方法を確認しておく。同じようにに`rbeta()`関数や`dbeta()`関数を利用すれば、ベータ分布から生成される乱数や確率を利用できる。ベータ分布は$\alpha$と$\beta$の組み合わせによって、様々な形状を表現できる面白い確率分布。
+
+```{r}
+x <- seq(0, 1, by = 0.01) 
+params <- tibble(
+  alpha = c(0.5, 1, 2, 5, 8, 9),
+  beta = c(0.5, 1, 8, 5, 1, 3)
+)
+
+calc_beta_dist <- function(alpha, beta) {
+  p <- dbeta(x, alpha, beta)
+  tibble(x = x, y = p, alpha = as.factor(alpha), beta = as.factor(beta))
+}
+
+map2_dfr(params$alpha, params$beta, calc_beta_dist) %>%
+  mutate(alpha_label = paste("α =", alpha),
+         beta_label = paste("β =", beta)) %>% 
+  ggplot(., aes(x = x, y = y)) +
+  geom_line(size = 1) +
+  facet_wrap(~ alpha_label + beta_label) + 
+  labs(title = "Beta Distribution with Different Parameters") +
+  theme_bw()
+```
+
+見てわかる通り、$Beta(1,1)$のときは、どの値も起こりやすさは同じである。つまり、このパラメタのベータ分布を利用しても何の情報を得られない。そのため、このような確率分布のことを無情報事前分布(Noninformative Prior)と呼ぶ。無情報事前分布は現実的にはあまり当てはまらない(すべて同じ確率で発生する事象は稀)ので、情報がないのであれば、弱情報事前分布(Weakly Informative Prior)が利用されることも多い。弱情報事前分布は$Beta(5,5)$のような緩やかな山なりの形をしている分布のこと。
+
+また、ベータ分布は成功回数$\alpha$と失敗回数$\beta$のときの成功確率を表す連続型の確率分布である。尤度の説明で出てきた二項分布は、離散型の確率分布である。つまり、コインを10回投げて表が3回出たのであれば、$Beta(4,8)$のベータ分布でも表現できる。
+
+```{r}
+total_tosses <- 10
+heads <- 3
+tails <- total_tosses - heads
+# beta params
+# heads = alpha - 1
+# tails = beta - 1
+
+alpha <- heads + 1
+beta <- tails + 1
+tibble(
+  p = seq(0, 1, 0.01),
+  y = dbeta(p, alpha, beta)
+  ) %>% 
+  ggplot(aes(p, y)) +
+  geom_line() +
+  labs(title = "Beta Distribution with alpha = 4, beta = 8", x = "Probability", y = "Density") + 
+  theme_bw()
+```
+
+やっと尤度や事前分布のおさらいが終わったので、ここからは事後分布がどのように更新されるか確認していく。これまでの例で扱ってきた尤度の$n=10,x=3$の二項分布はベータ分布$\alpha=4,\beta=8$として表現し、
+事前分布として$\alpha=3,\beta=3$のベータ分布を利用すれば、成功回数と失敗回数は各パラメタの和で計算できるため、$\alpha=7,\beta=11$のベータ分布が事後分布となる。可視化すると、少し尤度が事前分布に引き寄せられていることがわかる。事後分布を可視化したことで、パラメタ$p$がどれくらいにあるのかを確認できる。
+```{r}
+tibble(
+  x = seq(0, 1, 0.01),
+  prior = dbeta(x, 3, 3),
+  likelihood = dbeta(x, 4, 8),
+  posterior = dbeta(x, 7, 11)
+) %>% 
+  pivot_longer(-x, names_to = "type", values_to = "value") %>% 
+  ggplot(aes(x = x, y = value, fill = type)) +
+  geom_ribbon(aes(xmin = x, xmax = x, ymin = 0, ymax = value), alpha = 1/4) +
+  scale_x_continuous(breaks = seq(0, 1, 0.05)) + 
+  labs(title = "Posterior Distribution, Likelihood and Prior Distribution", x = "Probability", y = "Density") + 
+  scale_fill_brewer(palette = "Set1") + 
+  theme_bw()
+```
+
+ここで計算した事後分布のベータ分布のパラメタを利用して、10,000回のサンプリング(モンテカルシュミレーション)を行うことで、パラメタの区間推定ができる。また、この事後分布からパラメタの区間を計算することもでき、両側2.5%づつで区間をとる時、ベイズ統計では95%信用区間(Credible Interval)と呼ばれる。
+
+```{r}
+n_trial <- 10000
+set.seed(1989)
+posterior <- rbeta(n = n_trial, 3 + 4, 3 + 8)
+quantile(posterior, probs = c(0.025, 0.5, 0.975))
+```
+
+少し長かったが、ベイズ統計では尤度(データ)と事前分布(確信度合い)をかけ合わせて、事後分布を計算することで確率を表現する。
+
+## ベイジアンフレームワークのABテスト
+
+ABテストで使用するサンプルデータは[BayesAB](https://github.com/FrankPortman/bayesAB)パッケージのまとめの時に使用したサンプルデータを利用する。日付は14日に限定し、aパターンの方がコンバージョンレートが高くなるようにしている。
+
+```{r}
+# exploratory社のデータカタログからお借りする
+df_ab <- read_csv('https://exploratory.io/public/api/GMq1Qom5tS/A-B-IJp6BcB2/data')
+# uniquePageViewとconversion_rateから集計前を再現するための関数
+vec_gen <- function(x, y){
+  map2(
+    .x = x, 
+    .y = y, 
+    .f = function(x, y){rbinom(n = x, size = 1, prob = y)}
+  ) %>% unlist()
+}
+df_a <- df_ab %>% 
+  dplyr::filter(
+    landingPagePath == '/post?id=11' & 
+      is_signup == TRUE &
+      date >= '2017-06-01' & 
+      '2017-06-15' > date
+    )
+df_b <- df_ab %>% 
+  dplyr::filter(
+    landingPagePath == '/post?id=12' & 
+      is_signup == TRUE &
+      date >= '2017-06-01' & 
+      '2017-06-15' > date
+  )
+
+dt <- seq(as.Date('2023-08-01'), as.Date('2023-08-14'),  by = "day")
+dt_a <- rep(dt, times = df_a$uniquePageView)
+dt_b <- rep(dt, times = df_b$uniquePageView)
+
+set.seed(1989)
+cv_a <- vec_gen(x = df_a$uniquePageView, y = df_a$conversion_rate+0.015)
+cv_b <- vec_gen(x = df_b$uniquePageView, y = df_b$conversion_rate)
+
+df <- union_all(
+  tibble(dt = dt_a, cv = cv_a, flag = 'a'),
+  tibble(dt = dt_b, cv = cv_b, flag = 'b')
+)
+
+head(df, 10)
+```
+
+コンバージョンレートを時系列で可視化するとこのようになる。
+
+```{r}
+df %>% 
+  group_by(dt, flag) %>% 
+  summarise(
+    cnt = n(),
+    sum_cv = sum(cv),
+    rate = sum(cv)/n()
+  ) %>% 
+  ggplot(., aes(dt, rate, col = flag)) + 
+  geom_line(size = 1) + 
+  scale_x_date(labels = date_format("%Y/%m/%d"), breaks = date_breaks("1 day")) + 
+  scale_color_brewer(palette = "Set1") + 
+  theme(axis.text.x = element_text(angle = 75, vjust = 0.2, hjust=0.2))  + 
+  labs(title = "Time series of conversion rate") +
+  theme_bw()
+```
+
+データの準備が整ったので、まずは事前分布を考えるところからはじめる。事前分布の情報がないのであれば弱情報事前分布を利用すればよいが、ここでは参考にできる過去のABテストの結果が手元にあると仮定する。このデータによれば、コンバージョンレートは10%前後であるとされる。これを事前分布に変換するためにベータ分布$Beta(2,10)$を利用する。
+
+```{r}
+prior_alpha <- 2
+prior_beta <- 10
+
+tibble(
+  x = seq(0, 1, 0.01),
+  y = dbeta(x, prior_alpha, prior_beta)
+) %>% 
+  ggplot(., aes(x, y)) +
+  geom_line() + 
+  geom_vline(xintercept = 0.10, linetype = "dashed") + 
+  scale_x_continuous(breaks = seq(0, 1, 0.05)) + 
+  labs(title = "Beta Distribution with alpha = 2, beta = 10", x = "Conversion Rate", y = "Density") + 
+  theme_bw()
+```
+
+観察データからコンバージョンレートを計算しておく。
+
+```{r}
+df_likelihood <- df %>% 
+  group_by(flag) %>% 
+  summarise(
+    count = n(),
+    cv = sum(cv),
+    not_cv = n() - sum(cv),
+    avg_cv_rate = sum(cv)/n(),
+  )
+df_likelihood
+```
+
+事前分布と尤度の準備が整ったので、事後分布を可視化する。分布を見るとパターンAのほうがコンバージョンレートが高いことがわかる。
+
+```{r}
+
+tibble(
+  x = seq(0, 1, 0.0001),
+  a = dbeta(x, prior_alpha + df_likelihood$cv[1], prior_beta + df_likelihood$not_cv[1]),
+  b = dbeta(x, prior_alpha + df_likelihood$cv[2], prior_beta + df_likelihood$not_cv[2])
+) %>% 
+  pivot_longer(-x, names_to = "type") %>% 
+  ggplot(aes(x = x, y = value, fill = type)) +
+  geom_ribbon(aes(xmin = x, xmax = x, ymin = 0, ymax = value), alpha = 1/4) +
+  scale_x_continuous(breaks = seq(0, 1, 0.05)) + 
+  labs(title = "Posterior Probability of Conversion Rate", x = "Conversion Rate", y = "Density") + 
+  scale_fill_brewer(palette = "Set1") + 
+  scale_x_continuous(limits = c(0.09, 0.13), labels = percent_format()) + 
+  theme_bw()
+```
+
+この結果を見る限り、パターンAの方が優れていると言えそう。ただ、パターンBがパターンAよりも優れている部分もある(重複部分)。観測されたデータから、たまたまパターンAが優れていただけかもしれない。そのため、どの程度優れていそうかを知りたい。そのためには、シュミレーションをすればよい。パターンA、Bの2つの分布からランダムにサンプリングする。各サンプリングされた値を比較し、比率を計算すれば、この質問には回答できる。サンプリングされた値のコンバージョンレートが高くなるか、低くなるかは、パターンA、Bの分布に基づく。500,000回のシュミレーションの結果、97%でパターンAが優れていることがわかる。
+
+```{r}
+n_trial <- 500000
+set.seed(1989)
+a_sampling <- rbeta(n = n_trial, prior_alpha + df_likelihood$cv[1], prior_beta + df_likelihood$not_cv[1])
+b_sampling <- rbeta(n = n_trial, prior_alpha + df_likelihood$cv[2], prior_beta + df_likelihood$not_cv[2])
+
+ab_result <- sum(a_sampling > b_sampling) / n_trial
+ab_result
+```
+
+可視化するとこのようになる。
+
+```{r}
+# (A - B) / B
+diff_ab_sampling <- (a_sampling - b_sampling) / b_sampling
+dens_ab_sampling <- density(diff_ab_sampling) 
+df_ab_sampling <- tibble(x = dens_ab_sampling$x, y = dens_ab_sampling$y) 
+
+df_ab_sampling %>% 
+  filter(x >= 0) %>% 
+  mutate(type = "A") %>% 
+  bind_rows(df_ab_sampling %>% filter(x < 0) %>% mutate(type = "B")) %>% 
+  ggplot(aes(x, y, fill = type)) +
+  geom_ribbon(aes(xmin = x, xmax = x, ymin = 0, ymax = y), alpha = 1/2) +
+  geom_vline(xintercept = 0, linetype = "dashed") + 
+  geom_text(
+    data = data.frame(),
+    aes(x = 0.03, y = 1, label = percent(ab_result, accuracy = 0.01)), inherit.aes = FALSE, size = 5
+    ) +
+  scale_x_continuous(labels = percent_format(accuracy = 0.01)) +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(subtitle = "Histogramn of (A - B) / B Samples: Probability", x = "(A-B)/B", y = "Density") + 
+  theme_bw()
+```
+計算した値をもとに90%信用区間を推定できる。`5%:0.01`はAをBと比較した際に、Aが101%以下の効果を出す確率が5%で、`95%:0.12`は、AをBと比較した際に、Aが112%以上の効果を出す確率が5%。つまり、AをBと比較した際に、Aが90%の確率で101%から112%の効果を出すだろうと解釈できる。
+
+```{r}
+# 90% Credible Interval
+quantile(diff_ab_sampling, probs = c(0.05, 0.95))
+```
+
+ここまで行ってきたことをパッケージの結果と比べてみる。見て分かる通り、多少、数値がずれるものの同じような数字が計算されていることがわかる。
+
+```{r}
+set.seed(1989)
+ab_all <- bayesTest(df %>% filter(flag == 'a') %>% pull(cv),
+                    df %>% filter(flag == 'b') %>% pull(cv),
+                    priors = c('alpha' = 2, 'beta' = 10),
+                    n_samples = 500000,
+                    distribution = 'bernoulli')
+plot(ab_all)[3]
+```
+
+## 参考文献
+

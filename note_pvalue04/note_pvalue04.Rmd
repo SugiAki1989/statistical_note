@@ -1,0 +1,648 @@
+---
+title: "カウントデータと区間推定"
+pagetitle: "カウントデータと区間推定"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここでは頻度に関するデータ分析の手法についてまとめていきます。母比率$p$に関する話からはじめて、対応ありなしの2つの母比率$p$の差の区間推定と検定、2×2分割表に関するリスク、オッズや検定などをまとめていきます。
+
+## 比率の信頼区間の推定
+2項分布に従う確率変数の期待値と分散は$E(X)=np, V(X)=np(1-p)$となり、$n$が十分大きいとき、$B(n,p)$は$N(\mu = np, \sigma^{2} = np(1-p))$で2項分布は正規近似できる性質があります。これにより変数$Z$への標準化は下記のようになります。
+
+$$
+Z = \frac{\bar{X} - \mu}{\sigma} = \frac{\bar{X} - np}{\sqrt{np(1-p)}}=\frac{\frac{\bar{X}}{n} - p}{\sqrt{\frac{p(1-p)}{n}}} = \frac{\hat{p} - p}{\sqrt{\frac{p(1-p)}{n}}} \approx N(0,1) 
+$$
+
+また、標本比率$\hat{p}$の母比率、母分散は、
+
+$$
+E(\hat{p}) = p,\quad V(\hat{p}) = \frac{p(1-p)}{n},\quad SE(\hat{p}) = \sqrt{\frac{p(1-p)}{n}}
+$$
+
+となります。区間推定の式の$Z$に先程の$Z$を代入して整理すると、
+
+$$
+P(|Z| \le z_{\frac{\alpha}{2}}) = 1 - \alpha
+$$
+
+信頼区間は下記のようになるものの、未知のパラメータ$p$が含まれているので、
+
+$$
+P \left(
+\hat{p} - z_{\frac{\alpha}{2}}\sqrt{\frac{p(1-p)}{n}} \le p  \le \hat{p} + z_{\frac{\alpha}{2}}\sqrt{\frac{p(1-p)}{n}}
+\right)  = 1 - \alpha
+$$
+
+$p$を$\hat{p}$で代用し、下記を信頼区間として利用することになります。
+
+$$
+P \left(
+\hat{p} - z_{\frac{\alpha}{2}}\sqrt{\frac{\hat{p}(1-\hat{p})}{n}} \le p  \le \hat{p} + z_{\frac{\alpha}{2}}\sqrt{\frac{\hat{p}(1-\hat{p})}{n}}
+\right)  = 1 - \alpha
+$$
+
+## サンプルサイズと信頼区間
+この信頼区間の計算式を利用すれば、誤差を$\varepsilon$以内に抑えた上で、確率$1-\alpha$で標本比率を推定できます。ここで点推定値は$\hat{p}=0.2$だとして、誤差を$\varepsilon=0.02=2\%$、確率$1-\alpha=1-0.05=95\%$で標本比率を推定したいとします。
+
+区間を決めているのは、下記の部分なので、
+
+$$
+Z_{\frac{\alpha}{2}}\sqrt{\frac{\hat{p}(1-\hat{p})}{n}} = \varepsilon
+$$
+
+これを変形し、$n$について解くことで、精度をコントロールできます。
+
+$$
+n = \hat{p}(1-\hat{p})\left(\frac{Z_{\frac{\alpha}{2}}}{\varepsilon} \right)^{2}
+$$
+
+実際に計算すると、標本比率$\hat{p}=0.2=20\%$という設定で、誤差を$\varepsilon=0.02=2\%$、確率$1-\alpha=1-0.05=95\%$で標本比率を推定したい場合、
+
+```{r}
+p <- 0.20
+alpha <- 0.05
+eps <- 0.02
+z <- qnorm(alpha/2, mean = 0, sd = 1, lower.tail = FALSE)
+
+# サンプルサイズの計算式
+n <- p*(1-p)*(z / eps)^2
+sprintf('必要なサンプルサイズn = %.0f人', n)
+```
+
+必要なサンプルサイズは`r ceiling(n)`人となります。さらに精度を上げるために、$\varepsilon$、確率$1-\alpha$を厳しくすると、サンプルサイズは自然と大きくなります。
+
+```{r}
+alpha <- 0.01
+eps <- 0.01
+z <- qnorm(alpha/2, mean = 0, sd = 1, lower.tail = FALSE)
+
+# サンプルサイズの計算式
+n <- p*(1-p)*(z / eps)^2
+sprintf('必要なサンプルサイズn = %.0f人', n)
+```
+
+実際のところ、調査する前から標本比率$\hat{p}$がわかっている場合はまれなので、標本比率$\hat{p}=0.50=50\%$
+と設定して、サンプルサイズを求めることになります。標本比率$\hat{p}=0.50=50\%$とするのは、必要なサンプルサイズが一番大きなる標本比率$\hat{p}$が50%だからです。
+
+誤差を$\varepsilon=0.10=10\%$、確率$1-\alpha=1-0.05=95\%$と固定しておいて、$n$が最大となる$p$を探してみます。
+
+```{r}
+alpha <- 0.05
+eps <- 0.10
+z <- qnorm(alpha/2, mean = 0, sd = 1, lower.tail = FALSE)
+p <- seq(0,1,0.01)
+len <- length(p)
+n <- vector(mode = "numeric", length = len)
+
+for (i in 1:len) {
+  n[[i]] <- p[[i]]*(1-p[[i]])*(z / eps)^2
+}
+
+# nが最大となるpのインデックスを取得して、nが最大に対応するpを求める
+max_idx <- which.max(n)
+max_n <- n[max_idx]
+max_p <- p[max_idx]
+
+plot(p, n, type = "l", xaxt = "n", yaxt = "n", xlab = "Probability", ylab = "Sample Size")
+points(x = max_p, y = max_n, pch = 16, col = "red", cex = 1)
+abline(v = max_p, lty = 2, col = "red")
+abline(h = max_n, lty = 2, col = "red")
+axis(side = 1, at = seq(0, 1, 0.1))
+axis(side = 2, at = seq(0, 110, 5))
+```
+
+標本比率$\hat{p}$が50%としておくと、最もサンプルサイズが大きくなることがわかりました。予め
+標本比率がわからない場合は、必要なサンプルサイズが大きくなることを前提に標本比率$\hat{p}$を50%としておくことで、必要なサンプルサイズを求めることができます。
+
+このような考えのもと、標本誤差早見表という表が作られたりしているのだと思われます(リサーチ会社の人間ではないので実際はわからない)。この表の見方は、表側に標本比率、表頭にサンプルサイズが記載されており、任意の表側、表頭の条件のもとで、ぶつかり合うセルに誤差が記載されています。
+
+```{r}
+alpha <- 0.05
+z <- qnorm(alpha/2, mean = 0, sd = 1, lower.tail = FALSE)
+
+p <- c(0.01, 0.05, 0.07, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50)
+len_p <- length(p)
+n <- c(50, 100, 200, 300, 400, 500, 1000, 2000, 3000, 4000, 5000)
+len_n <- length(n)
+eps_mat <- matrix(0, nrow = len_p, ncol = len_n)
+rownames(eps_mat) <- paste0("p=", sprintf("%02s", p*100), "%-", (1-p)*100, "%")
+colnames(eps_mat) <- paste0("n=",n)
+
+for (i in 1:len_p) {
+  for (j in 1:len_n) {
+    eps <- z * sqrt((p[[i]] * (1-p[[i]]))/ n[[j]]) 
+    eps_mat[i, j] <- round(eps * 100, 1)
+  }
+}
+
+# ネットに公開されているものと少し数値がずれるのはz=2として近似しているためかもしれない
+knitr::kable(eps_mat, align = "c", caption = "信頼度95%の標本誤差早見表")
+```
+
+例えばサンプルサイズ$n$が100人で、標本比率$\hat{p}$が50％の場合、ぶつかり合うセルの標本誤差は`r eps_mat[12,2]`とあるので、標本比率の信頼区間はだいたい40%~60%の区間が母比率$p$を含む可能性があり、同じ条件のもとで繰り返し100回同じように標本比率を計算すれば95回は母比率$p$を含む区間が得られるということを意味しています。
+
+## 母比率$p$の検定
+母比率$p$の両側検定をする場合、下記のように仮説を設定します。
+
+$$
+\begin{eqnarray}
+  \left\{
+    \begin{array}{l}
+      H_{0}: p = p_{0} \\
+      H_{1}: p \neq p_{0}
+    \end{array}
+  \right.
+\end{eqnarray}
+$$
+
+$Z$は標準正規分布$N(0,1)$の$Z(\alpha/2)$点を読み取り、その棄却域を超えていれば、有意水準$\alpha$で帰無仮説$H_{0}$を棄却します。
+
+検定の際には、離散分布から連続分布への近似を修正する連続修正項$- \frac{1}{2n}$を$Z$が小さくならないように分子に加えます。
+
+$$
+Z = \frac{|\hat{p} - p_{0}| - \frac{1}{2n}}{\sqrt{\frac{\ p_{0}(1- p_{0})}{n}}} 
+$$
+
+例えば、シングルアンサーの質問に500人が回答し、60人(12%)がYesと回答したとします。このとき、他の調査の同じ質問では、標本比率が10%だったとします。今回の調査の12%は有意水準5%で検定し、比率が高いといえるのでしょうか。このような問題設定であれば、上記の式を利用して$Z$を計算すると、
+
+$$
+Z = \frac{|0.12 - 0.10| - \frac{1}{2 \times 500}}{\sqrt{\frac{\ 0.10(1 - 0.10)}{500}}} 
+$$
+
+```{r}
+n <- 500
+p <- 60/500
+p0 <- 0.10
+
+# Zの計算式
+Z <- (abs(p - p0) - (1 / (2 * n))) / sqrt((p0 * (1 - p0) / n))
+sprintf('Z=%.3f', Z)
+```
+
+これを$Z(0.05/2)=1.96$と比較することで、この棄却域を超えていれば$H_{0}$を棄却します。
+
+```{r}
+alpha <- 0.05
+Z >= qnorm(alpha/2, mean = 0, sd = 1, lower.tail = FALSE)
+
+```
+
+結論としては、棄却域を超えないので、今回の調査は前回の調査に比べて、有意水準5%で高いとはいえない結果となります。また、p値は帰無仮説が正しいとした標準正規分布での検定統計量$Z$よりも外側の確率のことなので、さきほどの検定統計量$Z$を利用して計算できます。
+
+```{r}
+# p値の計算
+p <- sum(
+  pnorm(q = Z, mean = 0, sd = 1, lower.tail = FALSE),
+  pnorm(q = -1*Z,mean = 0, sd = 1, lower.tail = TRUE)
+)
+sprintf('p-value=%.4f', p)
+```
+
+理論を理解するために手計算をしていますが、普通は便利な関数を使うことをおすすめします。ここまで計算してきた結果と同じ結果が得られています。
+
+```{r}
+prop.test(x = 60, n = 500, p = 0.10, alternative = "two.sided", conf.level = 0.95)
+```
+
+## 対応なしの2つの母比率$p$の差の区間推定と検定
+
+2つの母比率$p_{1},p_{2}$の差を検定するためには、標本比率$\hat{p}_{1},\hat{p}_{2}$の差を利用することになります。母比率、母分散、母標準偏差は下記の通りです。
+
+$$
+E(\hat{p}_{1} - \hat{p}_{2}) = p_{1} - p_{2},\quad
+V(\hat{p}_{1} - \hat{p}_{2}) = \frac{p_{1}(1-p_{1})}{n_{1}} + \frac{p_{2}(1-p_{2})}{n_{2}},\quad
+SE(\hat{p}_{1} - \hat{p}_{2}) = \sqrt{\frac{p_{1}(1-p_{1})}{n_{1}} + \frac{p_{2}(1-p_{2})}{n_{2}}}
+$$
+両側検定をする場合、下記のように仮説を設定します。
+
+$$
+\begin{eqnarray}
+  \left\{
+    \begin{array}{l}
+      H_{0}: p_{1} = p_{2} \\
+      H_{1}: p_{1} \neq p_{2}
+    \end{array}
+  \right.
+\end{eqnarray}
+$$
+
+帰無仮説が正しいとすれば、$p_{1}=p_{2}=p$となるので、$V(\hat{p}_{1} - \hat{p}_{2})$はまとめることができます。
+
+$$
+V(\hat{p}_{1} - \hat{p}_{2}) = p(1-p)\left(\frac{1}{n_{1}} + \frac{1}{n_{2}} \right)
+$$
+
+また、帰無仮説が正しいのであれば、両群のデータもまとめることができるので、
+
+$$
+\hat{p} = \frac{r_{1} + r_{2}}{n_{1} + n_{2}}
+$$
+
+$$
+SE(\hat{p}_{1} - \hat{p}_{2}) = \sqrt{ \hat{p}(1-\hat{p})\left(\frac{1}{n_{1}} + \frac{1}{n_{1}} \right)}
+$$
+
+この結果、$Z$は標準正規分布$N(0,1)$に従うことになります。
+
+$$
+Z = \frac{(\hat{p}_{1} - \hat{p}_{2}) - E(\hat{p}_{1}-\hat{p}_{2})}{SE(\hat{p}_{1} - \hat{p}_{2})} = 
+\frac{\hat{p}_{1} - \hat{p}_{2}}{\sqrt{\hat{p}(1-\hat{p})\left( \frac{1}{n_{1}} + \frac{1}{n_{2}} \right)}} \sim N(0, 1)
+$$
+
+検定する際には、母比率の推定の時と同様に連続修正項として、$\frac{1}{2}(\frac{1}{n_{1}} + \frac{1}{n_{2}})$で補正します。
+
+$$
+Z = \frac{|\hat{p}_{1} - \hat{p}_{2}| - \frac{1}{2}(\frac{1}{n_{1}} + \frac{1}{n_{2}})}{\sqrt{\hat{p}(1-\hat{p})\left( \frac{1}{n_{1}} + \frac{1}{n_{2}} \right)}} 
+$$
+
+$SE$がわかっているので$p_{1} - p_{2}$の$1-\alpha$信頼区間は、
+
+$$
+\hat{p}_{1} - \hat{p}_{2} \pm Z(\alpha/2) \sqrt{\frac{\hat{p}_{1}(1-\hat{p}_{1})}{n_{1}} + \frac{\hat{p}_{2}(1-\hat{p}_{2})}{n_{2}}}
+$$
+となります。では、母比率の差の検定に移ります。下記のような2つのグループの実験データがある場合にYesと回答した比率にグループ間で差があるかどうかを両側検定します。
+
+```{r}
+a <- 12; b <- 47
+c <-  5; d <- 45
+
+nm <- list(c("Group1", "Group2"), c("Yes", "No"))
+mat <- matrix(c(a, b, c, d), 
+              nrow = 2, byrow = TRUE,
+              dimnames = nm)
+mat <- addmargins(mat)
+mat
+```
+
+検定統計量$Z$は標準正規分布に従うので、ここでは$Z$の値を求め、
+
+```{r}
+n1 <- mat[1,3]
+p1 <- mat[1,1] / n1
+
+n2 <- mat[2,3]
+p2 <- mat[2,1] / n2
+
+n <- mat[3,3]
+p <- mat[3,1] / n
+
+Z <- (abs(p1 - p2) - 1/2*(1/n1 + 1/n2)) / sqrt(p*(1-p)*(1/n1 + 1/n2))
+Z
+```
+
+ここでは、Z値ではなくZ値に対応する$p$値をもとに仮説検定を行います。
+
+```{r}
+# p値の計算
+p <- sum(
+  pnorm(q = Z, mean = 0, sd = 1, lower.tail = FALSE),
+  pnorm(q = -1*Z,mean = 0, sd = 1, lower.tail = TRUE)
+)
+sprintf('p-value=%.4f', p)
+```
+
+$p$値は`r sprintf('%.4f', p)`となっているので、帰無仮説は棄却できず、グループ間で標本比率に差があるとはいえません。`prop.test()`でも同じように比率の差の検定ができるので、結果を手計算と比較してみます。
+
+```{r}
+prop.test(x = c(mat[1,1], mat[2,1]), n = c(n1, n2), alternative = "two.sided", conf.level = 0.99, correct = TRUE)
+```
+
+`prop.test()`は$\chi^{2}$値を検定統計量として利用しているので、$Z$の値とは比較できませんが、$Z^2$は自由度1の$\chi^2$分布に従うので、$Z^2=1.217563^2=1.48246$となって一致します。また、$p$値も一致していることがわかります。検定結果も同じで、グループ間で標本比率に差があるとはいえません。
+
+95％信頼区間も計算しておきます。
+
+```{r}
+z <- qnorm(0.05/2, mean = 0, sd = 1, lower.tail = FALSE)
+upr <- (p1 - p2) + 1.96 * sqrt((p1*(1-p1) / n1) + (p2*(1-p2) / n2))
+lwr <- (p1 - p2) - 1.96 * sqrt((p1*(1-p1) / n1) + (p2*(1-p2) / n2))
+c(sprintf('lower=%.4f', lwr), sprintf('upper=%.4f', upr))
+```
+
+この式からも分かる通り、連続修正項を含んでいないので、`prop.test(correct = FALSE)`とすることで、同じ結果が得られます。
+
+```{r}
+prop.test(x = c(mat[1,1], mat[2,1]), n = c(n1, n2), alternative = "two.sided", conf.level = 0.95, correct = FALSE)$conf.int
+```
+
+## 対応ありの2つの母比率$p$の差の区間推定と検定(McNemar検定)
+さきほどの2つの母比率$p$の差の区間推定と検定では、回答者は「対応なし」という関係を想定していました。ここでは、「対応あり」の場合の2つの母比率$p$の差の区間推定と検定を行います。下記のデータでは、1回目も2回目も同じ54人が回答しており、1回目と2回目の回答の違いをテーブルとしてまとめています。
+
+```{r}
+a <- 25; b <- 7
+c <-  1; d <- 21
+
+nm <- list(c("Yes1", "No1"), c("Yes2", "No2"))
+mat_ <- matrix(c(a, b, c, d), 
+              nrow = 2, byrow = TRUE,
+              dimnames = nm)
+mat <- addmargins(mat_)
+mat
+```
+
+ここで興味がある標本比率は、$\hat{p}_{1} = \frac{a + b}{N}, \hat{p}_{2} = \frac{a + c}{N}$となります。1回目に
+Yesと回答した比率、2回目にYesと回答した比率の差が興味の対象です。セルの要素は$a: [1,1]\quad b: [1,2]\quad c: [2,1]\quad d: [2,2]$です。
+
+$$
+\hat{p}_{1} - \hat{p}_{2} = \frac{a + b - (a + c)}{N} = \frac{b - c}{N}
+$$
+
+これまでと同じように両側検定の仮説を設定します。
+
+$$
+\begin{eqnarray}
+  \left\{
+    \begin{array}{l}
+      H_{0}: p_{1} = p_{2} \\
+      H_{1}: p_{1} \neq p_{2}
+    \end{array}
+  \right.
+\end{eqnarray}
+$$
+
+対応のある比率の差の検定では、帰無仮説のもとで、標準誤差は下記の通りとなり、
+
+$$
+SE(\hat{p}_{1} - \hat{p}_{2}) = \frac{\sqrt{b+c}}{N}
+$$
+
+連続修正項を加えて、近似的に、検定統計量$Z$は標準正規分布$N(0,1)$に従います。
+
+$$
+Z = \frac{(\hat{p}_{1} - \hat{p}_{2}) \pm \frac{1}{N}}{SE(p_{1} - p_{2})} =
+\frac{(b-c)/N \pm 1/N}{(b-c/N)} = 
+\frac{(b-c)\pm 1}{\sqrt{b+c}} \sim N(0,1)
+$$
+
+$Z$の値を$Z^2$とすることで、これは自由度1の$\chi^2$分布に従うので、帰無仮説の棄却域を$\chi_{1}^{2}$分布で構築します。
+
+$$
+Z^{2}=\chi_{1}^{2} = \left(\frac{(b-c)\pm 1}{\sqrt{b+c}}\right)^{2} = \frac{(|b-c|- 1)^2}{b+c}
+$$
+
+信頼区間は近似的に下記で構成されます。
+
+$$
+\hat{p}_{1} - \hat{p}_{2} \pm Z(\alpha/2)SE(\hat{p}_{1} - \hat{p}_{2}) = \frac{b-c}{N} \pm \frac{Z(\alpha/2)}{N}\sqrt{b+c-\frac{(b-c)^2}{N}}
+$$
+今回も手計算で$\chi_{1}^{2}$を求めていきます。
+
+$$
+Z^{2} = \chi_{1}^{2} = \frac{(|b-c|- 1)^2}{b+c} = \frac{(|7-1|-1)^2}{7+1} = 3.125
+$$
+
+この値を利用して、$\chi_{1}^{2}$分布から$p$値を計算します。
+
+```{r}
+p <- pchisq(q = 3.125, df = 1, lower.tail = FALSE)
+sprintf('p-value=%.4f', p)
+```
+
+$\chi_{1}^{2}$、$p$値のいずれも、`mcnemar.test()`の結果と一致しました。今回の検定統計量では、5％有意水準の棄却域を超えず、帰無仮説は棄却できず、標本比率の差に違いはないということになります。
+
+```{r}
+# matではなくmat_を使用する
+mcnemar.test(x = mat_, correct = TRUE)
+```
+
+`mcnemar.test()`は信頼区間を出力しないので、計算結果の確認はできませんが、手計算で信頼区間を計算しておきます。
+
+$$
+\frac{b-c}{N} \pm \frac{Z(\alpha/2)}{N}\sqrt{b+c-\frac{(b-c)^2}{N}} = 
+\frac{7-1}{54} \pm \frac{1.96}{54}\sqrt{7+1-\frac{(7-1)^2}{54}} = 0.0128 \sim 0.2094
+$$
+
+```{r}
+#a <- 25; b <- 7
+#c <-  1; d <- 21
+z <- qnorm(0.05/2, mean = 0, sd = 1, lower.tail = FALSE)
+upr <- (b-c)/sum(mat_) + z / sum(mat_) * sqrt(b + c - ((b-c)^2/sum(mat_)))
+lwr <- (b-c)/sum(mat_) - z / sum(mat_) * sqrt(b + c - ((b-c)^2/sum(mat_)))
+c(sprintf('lower=%.4f', lwr), sprintf('upper=%.4f', upr))
+```
+
+## $\chi^{2}$検定
+帰無仮説で与えているモデルと観測データの適合度合いを検定したい場合に適合度の検定が利用できます。適合度の検定やこの後に紹介する独立性の検定は、検定統計量に$\chi^{2}$値を利用することからまとめて$\chi^{2}$検定と呼ばれることもあります。
+
+適合度の検定では、ベルヌイ試行を一般化した多項試行を考えます。つまり、$k$個の互いに排反なカテゴリのいずれかの1つに属し、1回の試行は独立しており、$i(i=1 \sim k)$番目のカテゴリに入る確率は試行を通じて$p_{i}$とします。$\sum_{i=1}^{k} p_{i} = 1$です。
+
+このような試行を$n$回行い、確率変数である各カテゴリの度数$n_{i}$が得られたとします。$\sum_{i=1}^{k} n_{i} = n$で、自由度は$n$という制約より$k-1$です。
+
+多項試行ではあるものの$n$回の試行結果で、カテゴリ$i$に入るか、入らないかに注目すれば良いから、$E(n_{i})=np_{i}, \quad V(n_{i})=np_{i}q_{i}$の二項分布に従う確率変数とも考えられ、$np_{i}$は試行を$n$回行うときの、確率$p_{i}$をもつセル$i$の期待度数となります。
+
+帰無仮説は、カテゴリ確率$p_{i}$が帰無仮説$H_{0}$によって$p_{i0}$として特定される場合を考えます。
+
+$$
+\begin{eqnarray}
+  \left\{
+    \begin{array}{l}
+      H_{0}: p_{1} = p_{10}, \dots, p_{k} = p_{k0}\\
+      H_{1}: 少なくとも1つのp_{i} \neq p_{i0}
+    \end{array}
+  \right.
+\end{eqnarray}
+$$
+
+$n$が十分大きい時、近似的に$\chi^2$値を用いて実施でき、もし$H_{0}$が正しければ、期待度数$np_{i0}$と観測度数$n_{i}$との差は小さくなるように検定統計量$\chi^2$値はつくられています。また、観測度数を$O_{i}$とし、期待度数を$E_{i}$として表記されていることもあります。
+
+$$
+\chi^2_{k-1} \sim \sum_{i=1}^{k} \frac{(n_{i} - np_{i0})}{np_{i0}} = \sum_{i=1}^{k} \frac{(O_{i} - E_{i})}{E_{i}}
+$$
+
+このような検定統計量をとるので、特段何もなければ、基本的には右側の棄却域のみを設定することが多いです。なぜこれが$\chi^2$分布に従うのかは、多項分布、多次元正規分布、多次元確率変数変換などを使って証明されます。それはさておき、実際に検定していきましょう。
+
+特定の質問にYesと回答する人に対して、25人が男性、5人が女性の時、男女で偏りがあるかどうかを調べたいとします。期待度数は$E=15(=30/2)$となり観測度数となります。
+
+```{r}
+o <- c(25, 5)
+e <- sum(o)/length(o)
+chi2 <- sum(
+  ((o - e) ^ 2 / e)
+  )
+
+# 有意水準は5%
+chi2 > qchisq(0.95, df = length(o)-1)
+```
+
+$\chi^2$値を計算すると、有意水準5%の棄却域は`r round(qchisq(0.95, df = length(o)-1), 2)`となり、$\chi^2$値は`r round(chi2, 2)`より帰無仮説は棄却されます。手計算する必要はなく、`chisq.test()`を利用しても同じ結果が得られます。
+
+```{r}
+chisq.test(o)
+```
+
+独立性の検定を見ていきましょう。独立性の検定は適合度の検定から異なる2つのカテゴリを用いた適合度の検定を拡張したものなので、簡単に紹介しておきます。下記のようなk×lのクロス集計表が利用されます。
+
+```{r}
+a <- 29; b <- 80
+c <- 10; d <- 94
+mat_ <- matrix(c(a, b, c, d), nrow = 2, byrow = TRUE,
+               dimnames = list(c("Group1","Group2"), c("Yes", "No")))
+mat <- addmargins(mat_)
+mat
+```
+
+各$(i,j)$要素の観測度数$O_{ij}$、横計$n_{i}$、縦計$m_{j}$、全度数$N$とします。帰無仮説は、2つのカテゴリが独立、または、分布が一様であるということになります。$H_{0}$のもとで、期待度数は$E_{ij} = \frac{n_{i}m_{j}}{N}$となります。
+
+$$
+\chi^2_{(k-1)(l-1)}{} \sim \sum_{i=1}^{k}\sum_{j=1}^{l} \frac{(O_{ij} - E_{ij})}{E_{ij}}
+$$
+
+適合度の検定と同様に`chisq.test()`を利用して結果が得られます。
+
+```{r}
+chisq.test(mat)
+```
+
+## リスクとオッズに関する推定
+### リスク
+クロス集計表の分析方法として、リスクとオッズを使った方法もあるので、その内容もまとめておきます。下記のようなクロス集計表があった場合に、
+
+| group  | yes | no |   n   |
+|:------:|:---:|:--:|:-----:|
+| $group1$ |  $a(=r_{1})$ | $b$  | $n_{1}$ |
+| $group2$ |  $c(=r_{2})$ | $d$  | $n_{2}$ |
+
+リスク差(Risk Difference)、リスク比(Risk Ratio)は下記の通り定義されます。
+
+$$
+\begin{eqnarray}
+\hat{RD} &=& \frac{\hat{p_{1}}}{\hat{p_{2}}} = \frac{\frac{r_{1}}{n_{1}}}{\frac{r_{2}}{n_{2}}} \\
+\hat{RR} &=& \hat{p_{1}} - \hat{p_{2}}= \frac{r_{1}}{n_{1}}-\frac{r_{2}}{n_{2}}
+\end{eqnarray}
+$$
+
+`Epi`パッケージは疫学研究に必要なものがまとまっているパッケージなので、テーブルを渡すだけで豊富なアウトプットを提供してる便利なパッケージです。
+
+```{r}
+library(Epi)
+a <- 29; b <- 80
+c <- 10; d <- 94
+mat_ <- matrix(c(a, b, c, d), nrow = 2, byrow = TRUE,
+               dimnames = list(c("Group1","Group2"), c("Yes", "No")))
+mat <- addmargins(mat_)
+mat
+```
+
+ここでは、このパッケージを利用して、リスク比に注目していきます。
+
+```{r}
+res_risk <- Epi::twoby2(mat_)
+```
+
+結果を見ると、グループ1のリスクは`r round(res_risk$table[1,3],2)`で、グループ2のリスクは`r round(res_risk$table[2,3],2)`となっており、この比をとったリスク比は`r round(res_risk$measures[1,1],2)`です。
+
+この結果から、グループ2よりもグループ1のほうが`r round(res_risk$measures[1,1], 2)`倍起こりやすく、95％信頼区間は`r c(sprintf('lower=%.4f', lwr), sprintf('upper=%.4f', upr))`であることがわかりました。
+
+信頼区間、検定ではリスク比の対数が正規分布に近似できる性質を利用して、近似的に下記の通り定義されます。まず標準誤差は、
+
+$$
+SE \left( log\left[\frac{\hat{p}_{1}}{\hat{p}_{2}}\right] \right) = \sqrt{\frac{1-\hat{p}_{1}}{n_{1}\hat{p}_{1}} + \frac{1-\hat{p}_{2}}{n_{2}\hat{p}_{2}}} = \sqrt{\frac{1}{r_{1}} - \frac{1}{n_{1}} + \frac{1}{r_{2}} - \frac{1}{n_{2}}}
+$$
+
+であり、この標準誤差を利用し、信頼区間は下記の通り構成されます。
+
+$$
+\exp \left( log \left[\frac{\hat{p}_{1}}{\hat{p}_{2}} \right] \pm Z(\alpha/2) \sqrt{\frac{1-\hat{p}_{1}}{n_{1}\hat{p}_{1}} + \frac{1-\hat{p}_{2}}{n_{2}\hat{p}_{2}}}\right) = \exp \left( log \left[\frac{\hat{p}_{1}}{\hat{p}_{2}} \right] \pm Z(\alpha/2) \sqrt{\frac{1}{r_{1}} - \frac{1}{n_{1}} + \frac{1}{r_{2}} - \frac{1}{n_{2}}}\right)
+$$
+`Epi::twoby2()`のリスク比の信頼区間は`r c(sprintf('lower=%.4f', res_risk$measures[1,2]), sprintf('upper=%.4f', res_risk$measures[1,3]))`でした。実際に検算してみます。
+
+```{r}
+rr <- res_risk$measures[1,1]
+z <- qnorm(0.05/2, mean = 0, sd = 1, lower.tail = FALSE)
+se <- z * sqrt(1/mat[1,1] - 1/mat[1,3] + 1/mat[2,1] - 1/mat[2,3])
+
+upr <- exp(log(rr) + se)
+lwr <- exp(log(rr) + -1*se)
+
+c(sprintf('lower=%.4f', lwr), sprintf('upper=%.4f', upr))
+```
+
+だいたい同じ値が得られています。次に、検定統計量を計算します。検定統計量は比率の差の検定と同じ計算式で計算できます。帰無仮説はリスク比が0($RR=0$)です。
+
+$$
+Z = \frac{|\hat{p}_{1} - \hat{p}_{2}| - \frac{1}{2}(\frac{1}{n_{1}} + \frac{1}{n_{2}})}{\sqrt{\hat{p}(1-\hat{p})\left( \frac{1}{n_{1}} + \frac{1}{n_{2}} \right)}}
+$$
+
+```{r}
+risk1 <- mat[1,1]/mat[1,3]; n1 <- mat[1,3]
+risk2 <- mat[2,1]/mat[2,3]; n2 <- mat[2,3]
+risk  <- mat[3,1]/mat[3,3]; n <- mat[3,3]
+
+z <-  (abs(risk1-risk2) - 1/2*(1/n1 + 1/n2)) / sqrt(risk*(1-risk)*(1/n1 + 1/n2))
+z
+```
+
+統計量はz=`r round(z,2)`より、5％有意水準のz=`r round(qnorm(0.975, 0, 1),2)`よりも大きいので、帰無仮説は棄却されます。
+
+### オッズ
+リスクとオッズは分析データの取得状態によって使い分けられる事が多く、リスクは前向き(コホート)研究(要因→結果)、オッズは後ろ向き(ケースコントロール)研究(結果→要因)で使用されます。一般に、後ろ向き研究の場合、リスク比、リスク差はリスクの発生指標としてあまり良い推定が得られないことが知られています。そのため、後ろ向き研究ではオッズを利用します。下記の動画で詳しく解説されています。
+
+- [なぜオッズ比を使うのか](https://www.youtube.com/watch?v=DzITNPU_mXg&t=511s)
+- [オッズ比とリスク比（相対危険度）の違いは？](https://www.youtube.com/watch?v=_DdE97C7Hq0)
+
+オッズは当たる確率と、当たらない確率の比で定義され、1よりも大きければ、当たりやすいことを表します。例えば、グループ1のオッズは下記の通りです。
+
+| group  | yes | no |   n   |
+|:------:|:---:|:--:|:-----:|
+| $group1$ |  $a(=r_{1})$ | $b$  | $n_{1}$ |
+| $group2$ |  $c(=r_{2})$ | $d$  | $n_{2}$ |
+
+$$
+odds = \frac{p}{1-p} = \frac{\frac{a}{a+b}}{\frac{b}{a+b}} = \frac{a}{b}
+$$
+同じように、グループ2のオッズは$\frac{c}{d}$となるので、オッズの比をとると、
+
+$$
+Odds\ Ratio = \frac{\frac{a}{b}}{\frac{c}{d}} = \frac{ad}{bc} 
+$$
+
+<span style="color:red">ただ、リスクとは異なり「Hogeリスクがx倍起こりやすい」とは言えず、「オッズ比がx倍である」という言い方、解釈になります。</span>
+
+オッズ比は`Epi::twoby2()`の出力結果に含まれおり、オッズ比の信頼区間は`r c(sprintf('lower=%.4f', res_risk$measures[2,2]), sprintf('upper=%.4f', res_risk$measures[2,3]))`です。
+
+```{r}
+res_risk
+```
+
+オッズ比の標準誤差は、
+
+$$
+SE \left( log\left[\hat{OR}\right] \right) = \sqrt{\frac{1}{a} + \frac{1}{b} + \frac{1}{c} + \frac{1}{d}}
+$$
+
+であり、この標準誤差を利用し、オッズ比の信頼区間は下記の通り構成されます。オッズ比の対数が正規分布に近似できる性質が利用されています。
+
+$$
+\exp \left( log \left[\hat{OR} \right] \pm Z(\alpha/2) \sqrt{\frac{1}{a} + \frac{1}{b} + \frac{1}{c} + \frac{1}{d}}\right)
+$$
+
+オッズ比の検定は下記の通りで、$\hat{OR}=\frac{ad}{bc} \ge 1$のときマイナスを取り、$\hat{OR}=\frac{ad}{bc} \lt 1$のときプラスを取ります。この統計量は超幾何分布が下記の式で近似できることを利用しています。
+
+$$
+\chi = \frac{\sqrt{N-1}{(ad-bc) \pm \frac{N}{2}}}{\sqrt{n_{1}n_{2}m_{1}m_{2}}} \sim N(0,1)
+$$
+

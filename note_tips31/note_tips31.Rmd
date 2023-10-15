@@ -1,0 +1,78 @@
+---
+title: "差分系列を元の系列に戻す"
+pagetitle: "差分系列を元の系列に戻す"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+差分系列を元の系列に戻す方法をまとめておく。
+
+## 差分系列
+
+差分系列とは、原系列に対して、各時点での差分をとって作られる系列のことで、単位根過程を定常過程に戻す際に使用される。単位根過程とは、ある時系列が非定常過程であり、差分系列が定常になる過程のこと。
+
+```{r}
+x <- c(10,15,25,26,30)
+x
+```
+
+差分系列は`diff`関数を使えば計算できる。
+
+```{r}
+diff_x <- diff(x)
+diff_x
+```
+
+差分系列をもとの系列の戻すには、差分系列の累積和を原系列の頭の値に足して、頭に原系列の頭の値をつなげれば元の過程に戻すことができる。
+
+```{r}
+c(x[1], x[1] + cumsum(diff_x))
+```
+
+もう少しわかりやすくするためにデータフレームに値をまとめる。`diff`には差分が記録され、`cumdiff`には差分の累計が記録されている。
+
+差分には`5, 10, 1, 4`であり、最初の値を入れて`10, 5, 10, 1, 4`、累計和をとれば、
+
+- `10, 5, 10, 1, 4`
+- `10`
+- `10 + 5 = 15`
+- `10 + 5 + 10 = 25`
+- `10 + 5 + 10 + 1 = 26`
+- `10 + 5 + 10 + 1 + 4 = 30`
+
+となる。手計算しなくても、`diffinv`関数に初期値を渡せばもとに戻せる。
+
+```{r}
+data.frame(
+  x,
+  diff = c(NA, diff_x),
+  cumdiff = c(NA, cumsum(diff_x)),
+  reverse_x = c(x[1], x[1] + cumsum(diff_x)),
+  diffinv_x = diffinv(diff_x, xi = x[[1]])
+)
+```

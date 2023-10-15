@@ -1,0 +1,162 @@
+---
+title: "ニューラルネットワークの実装"
+pagetitle: "ニューラルネットワークの実装"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+WPからの引っ越し記事なのでレイアウトが崩れてます。
+
+## ニューラルネットワーク
+
+遅ればせながらニューラルネットワークについてまとめていきます。前回はニューラルネットワークについて、軽くおさらいしましたが、今回は3層の簡単なニューラルネットワークをスクラッチで実装していこうと思います。バックプロパゲーションとか意味不明という方は、「<a href="https://qiita.com/43x2/items/50b55623c890564f1893">誤差逆伝播法をはじめからていねいに</a>」が非常に丁寧かつ勉強になりますので、一読をおすすめします。本当に丁寧で連鎖率、最急降下法から解説されているので、本当に丁寧です。
+
+## 下準備
+
+モデルで使用する様々な関数を用意しておきます。使用するデータセットはirisです。データを正規化し、活性化関数のシグモイド関数と、バックプロパゲーションの際に使用するシグモイド関数の微分を用意しておきます。
+
+```{r}
+library(tidyverse)
+# 最小最大正規化
+minmax <- function(x){
+  (x-min(x))/(max(x)-min(x))
+}
+
+target  <- minmax(matrix(iris[,1]))
+feature <- matrix(c(iris[,2], iris[,3], iris[,4]),150,3) %>%
+  apply(.,2,minmax)
+
+
+# シグモイド関数
+sigm <- function(x){
+  1 / (1 + exp(-x))
+}
+
+# シグモイド関数の導関数
+deriv_sigm <- function(x){
+  x * (1 - x)
+}
+```
+
+## 重みとバイアスの初期化
+
+ここでは、データを訓練するための条件を設定しておきます。繰り返し回数のepochは1万回、ラーニングレートは0.5としておきます。特徴量は3つで、隠れ層のニューロン数は5つです。重みとバイアスは乱数で設定しておきます。
+
+```{r}
+# 初期化
+epoch         <- 10000
+L_rate        <- 0.5
+in_lay_neuro  <- ncol(feature)
+hid_lay_neuro <- 5
+out_neuro     <- 1
+
+# 重みとバイアスを初期化
+# 入力層から隠れ層
+hid_wgt    <- matrix(rnorm(in_lay_neuro * hid_lay_neuro, 0, 1),
+                     in_lay_neuro, hid_lay_neuro)
+hid_bias   <- matrix(rep(runif(hid_lay_neuro), nrow(feature)), 
+                     nrow = nrow(feature), byrow = FALSE)
+
+# 隠れ層から出力層
+out_wgt    <- matrix(rnorm(hid_lay_neuro * out_neuro, 0, 1),
+                     hid_lay_neuro, out_neuro)
+out_bias   <- matrix(rep(runif(out_neuro), nrow(feature)),
+                     nrow = nrow(feature), byrow = FALSE)
+```
+
+## ニューラルネットワーク
+では、ニューラルネットワークを実行していきましょう。順伝搬させて、バックプロパゲーションで重みを更新させ、1万回繰り返すことによって学習させていきます。
+
+```{r}
+# ニューラルネットワークを実行
+for(i in 1:epoch){
+  
+  # 順伝搬 
+  hid_lay_in     <- feature %*% hid_wgt + hid_bias      # 特徴量*重み+バイアス
+  hid_lay_acts   <- sigm(hid_lay_in)                    # シグモイド関数(特徴量*重み+バイアス)
+  out_lay_in     <- hid_lay_acts %*% out_wgt + out_bias # 活性化された値*重み+バイアス
+  out_lay_acts   <- sigm(out_lay_in)                    # シグモイド関数(活性化された値*重み+バイアス)
+  
+  # 誤差逆伝搬
+  error          <- target - out_lay_acts # 誤差
+  slp_out_lay    <- deriv_sigm(out_lay_acts) # 出力層の微分
+  delta_out_lay  <- error * slp_out_lay # デルタ1
+  
+  slp_hid_lay    <- deriv_sigm(hid_lay_acts) # 隠れ層の微分
+  delta_hid_lay  <- delta_out_lay %*% t(out_wgt) * slp_hid_lay # デルタ2(出力層のデルタ1*隠れ層の重み*隠れ層の微分)
+  
+  out_wgt        <- out_wgt + (t(hid_lay_acts) %*% delta_out_lay) * L_rate # 既存値+修正量(デルタ1*隠れ層の値*学習係数)
+  out_bias       <- out_bias + rowSums(delta_out_lay) * L_rate
+  
+  hid_wgt        <- hid_wgt + (t(feature) %*% delta_hid_lay) * L_rate #既存値+修正量(デルタ2*入力層の値*学習係数)
+  hid_bias       <- hid_bias + rowSums(delta_hid_lay) * L_rate
+  
+}
+```
+
+学習データへの当てはまりなので過学習している感がありますが、そこは本題ではないので、今回はどうでもいいです…テストセット作る気力がありませんでした…そんな手間でもないのですが…
+
+```{r}
+tibble(pred = as.vector(out_lay_acts),
+           actu = as.vector(target)) %>% 
+   mutate(diff = sqrt((pred - actu)^2))
+```
+
+```{r}
+tibble(pred = as.vector(out_lay_acts),
+           actu = as.vector(target)) %>% 
+  mutate(diff = sqrt((pred - actu)^2)) %>% 
+  summarise(RMSE = mean(diff))
+```
+
+
+## パッケージでやってみる
+
+{neuralnet}でやってみます。{neuralnet}については、前回の記事でおさらいしているので、時に解説はありません。
+
+```{r}
+library(neuralnet)
+df <- data.frame(Y = target,
+                 X = feature)
+ns <- neuralnet(Y ~ X.1+X.2+X.3,
+               dat = df,
+               hidden = 5, #隠れ層=1でノード数=1
+               err.fct = "sse", #クロスエントロピー
+               linear.output = FALSE) #出力層のニューロンに適用
+plot(ns)
+```
+
+```{r}
+output <- compute(ns, df[, -1])
+
+tibble(pred = as.vector(output$net.result),
+           actu = as.vector(target)) %>% 
+  mutate(diff = sqrt((pred - actu)^2)) 
+```
+
+さきほどと似たような結果が返ってきています。パッケージって本当に便利ですね。ありがたい。

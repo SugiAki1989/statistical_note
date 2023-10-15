@@ -1,0 +1,462 @@
+---
+title: "p値関数の基礎的な理解"
+pagetitle: "p値関数の基礎的な理解"
+# subtitle: "サブタイトル"
+# date: "`r Sys.time()`"
+# abstract: "このドキュメントのアブストラクトをここに入力します。"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "zenburn"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+## はじめに
+このノートは、下記の書籍の「p値関数」に関する各章各節の部分について、個人的な判断で重要だと感じ点をまとめたものです。また、自分の理解をすすめるために、t検定での例を自分で追加しています。書籍のまとめにおいては、できる限り原著の説明通りに翻訳して記載しているつもりではありますが、不適切な表現がある場合、原著をあたって確認いただけますと幸いです。
+
+- Rothman J. Rothman and Greenland Sander, Timothy L. Lash : Modern Epidemiology(3nd Ed). Lippincott Williams & Wilkins, 2007.
+  - Chapter10: Random Error and Statistical Precision
+- Kenneth J. Rothman: Epidemiology: An Introduction(2nd Ed). Oxford University Press, 2002.
+  - Chapter8: Random Error and the Role of Statics
+
+仮説検定のp値からのみ、仮説を判断することについてのデメリットおよび信頼区間から形成されるp値関数のメリットについて、具体的な研究事例をもとに非常にわかりやすく記述されており、学びが非常に多い内容でした。この章を読むだけでも、仮説検定を p値だけから判断することの恐ろしさ、そして、誤った判断に繋がりやすいことが理解できました。
+
+## Modern Epidemiology(3nd Ed)
+### P-Value Functions(p198)
+
+![](/Users/aki/Documents/statistical_note/note_pvalue02/Figure10-3.png)
+
+- p値関数は、帰無仮説に対する両側 p値と、パラメータに対する帰無仮説のすべての代替値を提供する
+- 右側に信頼水準も示しているので、推定値のすべての可能な信頼限界を示している
+- 曲線がピークに達する点は、比率の点推定値である 3.1 に相当する
+- 95%(90%)信頼区間は、右側の縦軸が 0.95(.90)である関数値としてグラフから直接読み取ることができる
+- パラメータの任意の値に対する p値は、その値に対応する左側の座標から求めることができる。たとえば、帰無仮説の p値は、p値関数と交差する高さに対応する
+- 曲線の頂点は点推定値を示し、点推定値付近の曲線の集中度は推定値の精度を示す
+- p値関数が狭い場合は、精度の高い大規模な研究から得られ、p値関数が広い場合は、精度の低い小規模な研究から得られる
+- 関数を構築するのに使用した統計モデルが正しいと仮定すると、中程度から強い関連がある場合の方がこのデータは適合性が高いといる
+
+### Evidence of Absence of Effect(p200)
+
+![](/Users/aki/Documents/statistical_note/note_pvalue02/Figure10-4.png)
+
+- 信頼限界と p値関数は、統計モデルが正しいと仮定して、任意のαレベルで観測値と合理的に適合する値の範囲を示すことにより、本質的な情報をより多く伝える
+- Figure10-4 は Figure10-3 の p値関数を拡大し、点推定値 1.05、95％信頼限界 1.01 と 1.10 の研究の別の p値関数と一緒に描かれている
+- この精度から、統計モデルに強い偏りやその他の重大な問題がなければ、信頼限界の上限は Nullvalue に近く、大きな効果や中程度の効果にさえデータが適合しないことを示す
+- 一方で、曲線は Nullvalue の少し右で狭いスパイクになっており、大規模研究のデータの帰無仮説の両側 p値は約 0.03 なので、従来の基準では統計的に有意と判定される
+
+### Problems with Confidence Intervals(p204)
+
+- 信頼区間や p値関数が統計的仮説検定と共通する問題のひとつは、"ランダムな誤差を除くすべての点で同一の方法で研究を繰り返す"という概念に依存すること
+- 一連の繰り返し実験における特定の事象の頻度に言及するため、反復標本主義的解釈、あるいは頻度主義的解釈と呼ばれる
+- 区間推定は、この 1 つの研究から生成された 1 組の限界値は、真のパラメータを含んでいるか？という問題に頻度論的理論は答えることはできない
+
+## Epidemiology: An Introduction(2nd Ed)
+### POINT ESTIMATES, CONFIDENCE INTERVALS, AND  PVALUES(p149)
+
+- 点推定値が単一の値であるため、推定値の根底にある統計的変動、すなわちランダム誤差を表現できないから信頼区間を使用する
+- 研究のサンプルサイズが大きければ、推定は比較的正確であり、推定値にはほとんどランダム誤差がない可能性もあるが、サイズの小さい小規模な研究では、精度が低く、推定値にはより多くのランダム誤差が含まれる
+- 信頼区間の統計的な定義: 信頼水準が 95%に設定された場合、データ収集、分析が何度も繰り返され、研究に偏りがなければ、信頼区間の中に 95%の確率で測定値の真値が含まれることを意味する。これらの仮想的な研究の複製で異なる唯一のものは、繰り返される中での違いは、データにおける偶然の要素であると仮定している
+- データのばらつきは統計モデルで適切に記述でき、交絡などのバイアスは存在しないか、または完全に制御されていると仮定されるという非現実的な条件は、一般的に満たされない
+- 非実験的な疫学研究での、信頼区間のは、せいぜいデータの集合における統計的変動の大まかな推定値を提供するものでしかない
+- p値は、帰無仮説(被曝と疾病との間に関係がないとする仮説)との関係で計算され、RR の場合、帰無仮説は RR=1.0 である。p値は、帰無仮説が真で研究に偏りがないと仮定して、研究で得られたデータが帰無仮説から遠い、あるいは実際に得られたものよりも遠い関連を示す確率
+- 例えば、ほとんどの統計モデルは観測値が互いに独立であることを前提としているが、多くの疫学研究は、独立ではない観察に基づき、データは系統的な誤差の影響を受け、単純な統計モデルから予想されるよりもばらつきが大きくなる。理論的な要件が満たされることはほとんどないので、p値は通常、意味のある確率の値としてとらえることはできない
+- p値は、帰無仮説が正しいかどうかを教えてくれるものではない。帰無仮説が正しいかどうかの判断は、他のデータの存在や、帰無仮説とその選択肢の相対的な妥当性とその代替案の妥当性によって決まる
+
+### P-VALUE(CONFIDENCE INTERVAL) FUNCTIONS(p152)
+
+- p値関数(信頼区間関数)の曲線は、推定が関係の強さや正確さを表現するのに適している
+- p値とは、データと帰無仮説の適合度を示す統計量と見なせ、帰無仮説だけを検定するのではなく、他の様々な帰無仮説に対する p値も計算したもの
+- どのようなデータに対しても、そのデータとどのような RR の値との整合性を示す p値を計算することが原理的に可能で、それをプロットしたものが p値関数
+
+![](/Users/aki/Documents/statistical_note/note_pvalue02/Figure8–1.png)
+
+<span style="color:red">※書籍ではORが計算されてRRとして表示されている。</span>
+
+- Figure8–1 は、RR=1.0 のとき、曲線は RR=1.0 という仮説検定の帰無仮説の p値を与える
+- この p値は.05 より大きいので、多くの場合、有意でなく、被曝と疾病の関係がないと判断するが、p値から関連性がないことを推測するのは誤り。データに強い関連性があることを明らかにしている
+- この曲線は、他のすべての可能な RR の値に対する p値も示しており、データとすべての可能な RR の値との間の適合性の程度を示している。
+- この曲線のトップ(P=1.0)は、その点の RR の値が観察されたデータに最も適合する値(点推定値 RR=3.2)。
+- この曲線は、推定値の精度の程度を、円錐形の幅の狭さや広さによって視覚的に理解できるようになっている
+- p値だけで判断すると、関連はないという判断は、被曝者のリスクが 3 倍以上増加することを示す点推定値と矛盾する
+- RR の信頼区間は、RR ＝ およそ 1 ~ 10 までの広い範囲に及んでおり、RR=1 と RR=10.5 の p値は同じであり、検定結果を優先させる理由はなく、よりよい推定値である点推定値は RR=3.2
+- 統計的有意性の検定や p値に基づいて推論を行うことは誤解を招きやすい
+
+![](/Users/aki/Documents/statistical_note/note_pvalue02/Figure8–2.png)
+
+- Figure8–2 は Figure8–1 のデータの p値関数を対比したもので、Figure8–1 のデータの p値関数よりも狭い
+- 2 番目の p値関数の幅が狭いのは、2 番目のデータセットのサイズが大きいためであり、精度が高いということ。このようなケースでは、視覚的に狭い p値関数となる
+- これらのの p値関数から得られるメッセージは非常に対照的で、有意性検定に依存することは、誤解を招き、誤った解釈を導くことになる
+- Figure8–1 では、データの制度は良くないが、強い関連をを示唆しており、何もない状態からリスクの 10 倍以上の示唆を与えており、被曝がリスク因子である可能性を提起しているが、帰無仮説の検定で「有意でない」とされる
+- Figure8–2 では、帰無仮説に近い効果を正確に推定し、関連はの効果は弱いことを示すが、帰無仮説を検定する p値は 0.04 であり、帰無仮説の検定では「統計的に有意」な結果が得られ、帰無仮説を棄却することになり、関連があるという判断となる
+- p値関数では、効果の強さは、横軸に沿った曲線の位置によって伝えられ、精度は、点推定値周りの円錐形の広がりによって伝えられる
+
+![](/Users/aki/Documents/statistical_note/note_pvalue02/Figure8–3.png)
+
+- p値関数は、与えられた推定値に対するすべての信頼区間の集合と密接に関連しており、これら 3 つの信頼区間は、区間の幅を決定する任意の信頼度が異なるだけ
+- 95％信頼区間は P=0.05 の水平線に沿った曲線の値から読み取れ、90％(P=0.10)および 80％(P=0.20)信頼区間も同様
+- 3 つの信頼区間はネストされた信頼区間(Nested Confidence Intervals)と表現される
+- 残念なことに、信頼区間は対応する P-value 関数のイメージを念頭に置いて解釈されないことがあまりにも多い
+- 信頼区間内に null 値を含む信頼区間は「有意ではない」検定に対応し、null 値を除く信頼区間は「有意である」検定結果に対応する
+
+### Example: Is St.John’sWort Effective in Relieving Major Depression?(p158)
+
+- 200 人のうつ病患者を対象に、セントジョーンズワートとプラセボのいずれかを投与する無作為化試験を行った
+- セントジョーンズワートを投与された 98 人のうち 26 人が肯定的な反応を示す
+- プラセボを投与された 102 人のうち 19 人が肯定的な反応を示す
+- リスク比とは、症状が改善される「リスク」のことで、1.0 より大きくなればセントジョーンズワートの有益な効果を意味し、RR2.0 はセントジョーンズワート投与群では寛解の確率が 2 倍であったことを意味する
+
+![](/Users/aki/Documents/statistical_note/note_pvalue02/Figure8–4.png)
+
+- 研究者は統計的有意性がないことを根拠に、セントジョーンズワートは有効でないと結論づけた
+- Figure8–4 をみれば、患者の寛解に関するデータは、セントジョーンズワートが無効であるという判断をほとんど支持していない
+- p値は統計的に有意ではないが、帰無仮説のp値は、グラフではRR=1.0とRR=4.1でp値関数と交差し、等しく適合する
+
+### SIMPLE APPROACHES TO CALCULATING CONFIDENCE INTERVALS(p160)
+
+- レート差やリスク差の 90％信頼区間は下記の通り
+- 1.645 は信頼度 90％、1.96 は信頼度 95％となる
+
+$$
+RD_{L}, RD_{U} = RD \pm 1.645 \times SD
+$$
+
+- リスク比やオッズ比の 90％信頼区間は下記の通り
+- データ量が少ない場合、比率の尺度の分布は非対称に歪む性質があるので修正が必要
+
+$$
+ln(RD_{L}), ln(RD_{U}) = ln(RR) \pm 1.645 \times SD(ln(RR))
+$$
+
+- 信頼限界を対数変換で対数スケールとしてから計算し、指数変換(逆変換)でもとのスケールに戻す。
+
+$$
+RD_{L}, RD_{U} = e^ {(ln(RR) \pm 1.645 \times SD(ln(RR)))}
+$$
+
+## 平均値の差に関するp値関数
+ここでは、平均値の差に関するp値関数をもとにもう少し自分の理解を進めていきます。サンプルデータとしては、`sleep`データを利用します。このデータは、2種類の鎮静剤の効果(コントロールと比較しての睡眠時間の増加)を10名の患者さんで示したデータです。
+
+データの説明を探したけれど見つからなかったので、あっているかどうかわからないですが、このデータにはコントロール群は含まれておらず、2種類の薬に関するデータが入っていて、これにt検定を行うということは、コントロール群と比較して、薬がどのような効果があるのかを見ているのではなく、薬1と薬2の効果の平均の差を見ることになります。
+
+```{r}
+# [, 1]	extra	numeric	increase in hours of sleep
+# [, 2]	group	factor	drug given
+# [, 3]	ID	factor	patient ID
+data(sleep)
+sleep$group <- factor(sleep$group, levels = c(2,1))
+str(sleep)
+```
+
+デフォルトでは`t.test(mu = 0)`となっている引数の値を調整することで、あらゆる帰無仮説に対する両側p値を計算していきます。イメージとしては、得られた観測データをもとに、「true difference in means is equal to 0」「true difference in means is equal to 0.1」「true difference in means is equal to 0.2」…というイメージで計算します。
+
+p値をおさらいしておくと、p値は「特定の統計モデルのもとで(帰無仮説が真であると仮定することも含む)、観察されたデータの統計的要約が観察された値と同じか、それよりも極端である場合の確率」のこと。
+
+```{r}
+x_vec <- seq(-2, 5,0.01)
+pval <- vector(mode = "numeric", length = length(x_vec))
+for (i in seq_along(x_vec)) {
+  pval[[i]] <- t.test(extra ~ group, data = sleep, mu = x_vec[[i]], conf.level = 0.95, var.equal = TRUE)$p.val
+}
+
+# 母平均の差の計算内容確認用の自作p値関数
+# このパターンでも同じものが計算されるはず
+# 等分散を仮定する
+# mean_diff_PvaluePlotFunction <- function(x, y) {
+#   cp <- seq(0.01, 0.999, 0.01)
+#   cpx <- c(cp, 1, rev(cp))
+#   cpy <- c(cp/2, 0.5, 0.5 + cp/2)
+#   
+#   nx <- length(x)
+#   mx <- mean(x)
+#   vx <- var(x)
+#   
+#   ny <- length(y)
+#   my <- mean(y)
+#   vy <- var(y)
+#   
+#   df <- nx + ny - 2
+#   d <- mx - my
+#   
+#   s2 <- ((nx - 1)*vx + (ny - 1)*vy) / df
+#   s <- sqrt(s2 * (1/nx + 1/ny))
+#   ci <- d + qt(cpy, df) * s
+#   
+#   return(data.frame(x_ci = ci, y_pval = cpx))
+# }
+# a <- f(sleep[1:10,1],sleep[11:20,1])
+# plot(a$x_ci, a$y_pval, type = "l")
+
+```
+
+ここではグラフに信頼区間を99%、95%、90%、80%で書き込むための準備を行い、p値関数を可視化します。
+
+```{r}
+alpha020 <- 0.20; alpha010 <- 0.10; alpha005 <- 0.05; alpha001 <- 0.01
+ci80 <- t.test(extra ~ group, data = sleep, mu = 0, conf.level = 1 - alpha020)
+ci90 <- t.test(extra ~ group, data = sleep, mu = 0, conf.level = 1 - alpha010)
+ci95 <- t.test(extra ~ group, data = sleep, mu = 0, conf.level = 1 - alpha005)
+ci99 <- t.test(extra ~ group, data = sleep, mu = 0, conf.level = 1 - alpha001)
+
+plt <- function(){
+  plot(x_vec, pval, type = "l", xaxt = "n", yaxt = "n", xlab = "PointEstimation", ylab = 'p-value')
+axis(side = 1, at = seq(-2, 5, 0.1))
+axis(side = 2, at = seq(0, 1, 0.05))
+
+point_estimate <- ci95$estimate[1] - ci95$estimate[2]
+abline(v = 0, lty = 2, col = 'red')
+abline(h = ci95$p.value, lty = 2)
+abline(v = point_estimate, lty = 2, col = 'gray')
+text(0.2, ci95$p.value+0.01, sprintf("p-value=%3.2f", ci95$p.value))
+
+arrows(ci80$conf.int[1], alpha020,
+       ci80$conf.int[2], alpha020,
+       code = 3, lty = 1, length = 0.1)
+text(point_estimate, alpha020+0.01, "80%CI")
+
+arrows(ci90$conf.int[1], alpha010,
+       ci90$conf.int[2], alpha010,
+       code = 3, lty = 1, length = 0.1)
+text(point_estimate, alpha010+0.01, "90%CI")
+
+arrows(ci95$conf.int[1], alpha005, 
+       ci95$conf.int[2], alpha005, 
+       code = 3, lty = 1, length = 0.1)
+text(point_estimate, alpha005+0.01, "95%CI")
+
+arrows(ci99$conf.int[1], alpha001, 
+       ci99$conf.int[2], alpha001, 
+       code = 3, lty = 1, length = 0.1)
+text(point_estimate, alpha001+0.01, "99%CI")
+}
+plt()
+```
+
+仮説検定から10%有意水準で判断すると、薬1と薬2の平均値の差は0であるという帰無仮説を棄却し、対立仮説を採択することになりますが、5%有意水準で判断すると、帰無仮説を棄却できず、帰無仮説を受容することになり、p値の閾値によって判断が変わってしまいます。
+
+しかし、p値関数のグラフがあれば、上記の内容に加え、点推定値周りの円錐形の広がり、信頼区間の幅が広いことから研究の精度としてはあまり高くないものの、点推定は+1.6となっており、薬2は薬1に比べて数ポイント高い可能性が示唆されます。また、1.6程度の差が実質的に意味のある差なのかどうかは、信頼区間やp値関数、検定結果が有意かどうかであれ、何も教えてくれないので、その点は別途、分析担当者が検討する必要があります。
+
+```{r}
+# この結果を使うべきなのかな…
+# delta_power <- abs(ci95$estimate[1] - ci95$estimate[2]) / ci95$stderr
+# sd_power <- ci95$stderr
+power.t.test(n = NULL, delta = 0.5, power = 0.8, sig.level = 0.05, alternative = "two.sided", sd = ci95$stderr)
+```
+
+ここでは、1.6程度の差は実質的に重要な差と判断し、追試を行ったとします。目安のサンプルサイズを得るために、検定力分析を行い、その結果をもとに各群のサンプルサイズを50に増やしました。
+
+```{r}
+set.seed(1989)
+index.n <- sample(x =  1:10, size = 50, replace = TRUE)
+index.m <- sample(x = 11:20, size = 50, replace = TRUE)
+sleep_large <- sleep[c(index.n, index.m), ]
+
+pval_large <- vector(mode = "numeric", length = length(x_vec))
+for (i in seq_along(x_vec)) {
+  pval_large[[i]] <- t.test(extra ~ group, data = sleep_large, mu = x_vec[[i]], conf.level = 0.95)$p.val
+}
+
+plt() # 先程の結果に追試のグラフを重ねるために再度呼び出し
+lines(x_vec, pval_large, lty = 3, col = "#4D4D4D")
+point_estimate_large <-  mean(sleep_large[sleep_large$group == 2, "extra"]) - mean(sleep_large[sleep_large$group == 1, "extra"])
+abline(v = point_estimate_large, lty = 2, col = "#4D4D4D")
+```
+
+追試の結果は薄い点線のグレーで可視化しています。サンプルサイズを増やしたことで円錐形の幅も狭くなり、研究の精度が上がっていることがわかります。また、今回の結果を見る限り、やはり薬2の効果の方が高そうです。1回目の結果から、5%水準の統計的有意性がないことをp値だけから判断して、薬の効果はないと結論づけてしまっていると、薬の効果はあったかもしれないにも関わらず、誤った判断に繋がりそうです。この例のように、統計的仮説検定を利用してp値のみで判断することは、望ましいとはいえないですね…。
+
+### p値関数のパッケージ
+ここでは、理解を深めるためにp値関数を手計算していましたが、p値関数を可視化する`pvaluefunctions`というパッケージがあるようです。内容をあまり確認していないので、忘れないメモ程度の内容を記載しています。
+
+- [DInfanger/pvalue_functions](https://github.com/DInfanger/pvalue_functions)
+- [P-value functions: Tutorial using the pvaluefunctions package](https://cran.r-project.org/web/packages/pvaluefunctions/vignettes/pvaluefun.html)
+
+例えば、さきほどの`sleep`データの例は下記のように感じで再現できます。
+
+```{r}
+library(pvaluefunctions)
+ttest <- t.test(extra ~ group, data = sleep, mu = 0, conf.level = 0.95)
+ttest_large <- t.test(extra ~ group, data = sleep_large, mu = 0, conf.level = 0.95)
+
+point_estimate <- mean(sleep[sleep$group == 2, "extra"]) - mean(sleep[sleep$group == 1, "extra"])
+point_estimate_large <-  mean(sleep_large[sleep_large$group == 2, "extra"]) - mean(sleep_large[sleep_large$group == 1, "extra"])
+
+p <- pvaluefunctions::conf_dist(
+    estimate = c(point_estimate, point_estimate_large),
+    df = c(ttest$parameter, ttest_large$parameter),
+    tstat = c(ttest$statistic, ttest_large$statistic),
+    type = "ttest",
+    plot_type = "p_val",
+    conf_level = c(0.90, 0.95, 0.99),
+    null_values = c(0,0),
+    alternative = "two_sided",
+    xlab = "Mean difference (group2 - group1)",
+    together = TRUE,
+    plot = TRUE
+  )
+```
+
+
+
+## 書籍のプロットの再現コード
+冒頭で参考にしている書籍のプロットの再現コードを神戸大学の中澤先生がアップされているので、内容をおさらいしつつ動かした際のメモ。
+
+- [Chapter 8. Random Error and the Role of Statistics](https://minato.sip21c.org/epispecial/Chap8.pdf)
+- [Chapter 8. Random Error and the Role of Statistics R code](https://minato.sip21c.org/epispecial/codes-for-Chapter8.R)
+
+
+```{r}
+# # ------------------------------------------------------------------------
+# # NOTE: pvalueplot {fmsb}	Drawing p-value function plot by a cross table
+# # The table should be given as the cross table for the exposure status being column and the health outcome status being row,
+# # opposite from usual manner for cross tabulation.
+# # (拙意訳)
+# # 表は、通常のクロス集計とは逆に、曝露状態を列、健康アウトカムを行とするクロス表で与えます。
+# # 通常のリスクテーブルは行に曝露状態、列にアウトカムがあるが、下記のように表の行と列を入れ替えて渡す必要がある
+# # Outcome   : Col 1  / Comparing : Row 1 vs. Row 2
+# #       Col 1 Col 2
+# # Row 1     8    70
+# # Row 2    41   181
+# # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+# # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+# #       Row 1 Row 2
+# # Col 1     8    41
+# # Col 2    70   181
+# # ------------------------------------------------------------------------
+# library(fmsb)
+# # Figure 8-1
+# # TAB1は通常のリスクテーブルのセル位置
+# TAB1 <- matrix(c(4,4,386,1250), 2)
+# # t()で行と列を入替える。オッズ比の場合、オッズ比の計算式上、入替えても結果は変わらないが、
+# # リスク比計算の場合と統一するために転置しておく
+# T8.1 <- fmsb::pvalueplot(t(TAB1), plot.OR=TRUE, plot.log=TRUE, xrange=c(0.1, 100), ylim = c(0, 1.1))
+# # oddsratio()は入替は不要で通常のリスクテーブル形式で入力。
+# res <- fmsb::oddsratio(TAB1)
+# segments(1, 0, 1, 1, lty = 1)
+# segments(0.1, res$p.value, 100, res$p.value, lty = 2, col = 'red')
+# text(res$estimate+0.5, 1.02, sprintf("Point Estimate=%3.2f", res$estimate))
+# text(1, 1.02, "Null Hypothesis")
+# text(0.6, res$p.value+0.02, sprintf("p-value=%3.2f", res$p.value))
+# 
+# # Figure 8-2
+# # TAB2は通常のリスクテーブルのセル位置
+# TAB2 <- matrix(c(1090, 1000, 14910, 15000), 2)
+# # t()で行と列を入替える。オッズ比の場合、オッズ比の計算式上、入替えても結果は変わらないが、
+# # 通常のリスク比計算の場合と統一するために転置しておく
+# T8.2 <- fmsb::pvalueplot(t(TAB2), plot.OR = TRUE, plot.log = TRUE, xrange = c(0.1, 100))
+# lines(T8.1$OR, T8.1$p.value)
+# segments(1, 0, 1, 1, lwd = 2)
+# 
+# # Figure 8-3
+# CI95 <- fmsb::oddsratio(TAB1, conf.level = 0.95)$conf.int
+# CI90 <- fmsb::oddsratio(TAB1, conf.level = 0.90)$conf.int
+# CI80 <- fmsb::oddsratio(TAB1, conf.level = 0.80)$conf.int
+# fmsb::pvalueplot(t(TAB1), plot.OR = TRUE, plot.log = TRUE, xrange = c(0.1, 100))
+# segments(1, 0, 1, 1, lty = 1)
+# arrows(CI95[1], 0.05, CI95[2], 0.05, code = 3, lty = 3)
+# text(res$estimate, 0.05, "95% CI")
+# arrows(CI90[1], 0.10, CI90[2], 0.10, code = 3, lty = 3)
+# text(res$estimate, 0.10, "90% CI")
+# arrows(CI80[1], 0.20, CI80[2], 0.20, code = 3, lty = 3)
+# text(res$estimate, 0.20, "80% CI")
+# 
+# # Figure 8-5
+# # TAB4は通常のリスクテーブルのセル位置
+# TAB4 <- matrix(c(12, 5, 47, 45), 2)
+# # t()で行と列を入替える
+# fmsb::pvalueplot(t(TAB4), plot.OR = FALSE, plot.log = TRUE, xrange = c(0.1, 10))
+# res4 <- fmsb::riskratio(X = TAB4[1,1], m1 = sum(TAB4[1,]),
+#                         Y = TAB4[2,1], m2 = sum(TAB4[2,]),
+#                         conf.level = 0.9)
+# segments(1, res4$p.value, 10, res4$p.value, lty=2)
+# text(0.5, res4$p.value+0.02, sprintf("p-value=%3.2f", res4$p.value))
+# segments(1, 0, 1, 1, lwd = 1)
+# arrows(res4$conf.int[1], 0.1, res4$conf.int[2], 0.1, code = 3, lty = 1)
+# text(res4$estimate, 0.1+0.02, paste("90%", sprintf("CI: %3.2f-%3.2f", res4$conf.int[1], res4$conf.int[2]), sep=""))
+```
+
+ここからはメモ。
+
+```{r}
+# ------------------------------------------------------------------------
+# # http://halbau.world.coocan.jp/lecture/2007/epi12.pdf
+# # リスク比の信頼区間の計算方法が記載されている
+# library(Epi)
+# a <- 8 ; b <- 70
+# c <- 41; d <- 181
+# TAB1 <- matrix(c(a, b, c, d), nrow = 2, byrow = TRUE)
+# Epi::twoby2(TAB1, alpha = 0.05)
+# 2 by 2 table analysis:
+# ------------------------------------------------------ 
+# Outcome   : Col 1 
+# Comparing : Row 1 vs. Row 2 
+# 
+#       Col 1 Col 2    P(Col 1) 95% conf. interval
+# Row 1     8    70      0.1026    0.0521   0.1919
+# Row 2    41   181      0.1847    0.1390   0.2412
+# 
+# 95% conf. interval
+#              Relative Risk:  0.5553    0.2724   1.1321
+#          Sample Odds Ratio:  0.5045    0.2253   1.1298
+# Conditional MLE Odds Ratio:  0.5056    0.1948   1.1639
+#     Probability difference: -0.0821   -0.1572   0.0161
+# 
+#              Exact P-value: 0.1095 
+#         Asymptotic P-value: 0.0963 
+# ------------------------------------------------------
+# # fmsb::pvalueplot()のリスク比の計算内容を確認する用の自作関数
+# RiskRatio_PvaluePlotFunction <- function(XTAB) {
+#   cp <- seq(0.001, 0.999, 0.001)
+#   cpx <- c(cp, 1, rev(cp))
+#   cpy <- c(cp/2, 0.5, 0.5 + cp/2)
+# 
+#   row1_a <- XTAB[1, 1]
+#   row1_b <- XTAB[1, 2]
+#   row1_x <- sum(XTAB[1,])
+# 
+#   row2_c <- XTAB[2, 1]
+#   row2_d <- XTAB[2, 2]
+#   row2_y <- sum(XTAB[2,])
+# 
+#   row1_r <- row1_a / row1_x
+#   row2_r <- row2_c / row2_y
+# 
+#   rr <- row1_r / row2_r
+#   # リスク比の信頼区間の計算式の証明
+#   # https://yoshida931.hatenablog.com/entry/2018/02/01/154410
+#   # http://halbau.world.coocan.jp/lecture/2007/epi12.pdf
+#   rr_sigma2 <- (1 / row1_a) - (1 / row1_x) + (1 / row2_c) - (1 / row2_y)
+#   rr_sigma <- sqrt(rr_sigma2)
+#   rr_ci <- rr * exp(qnorm(cpy) * rr_sigma)
+#   return(data.frame(x_ci = rr_ci, y_pval = cpx))
+# }
+# a <- RiskRatio_PvaluePlotFunction(data)
+# plot(a$x_ci, a$y_pval, type = "l")
+# ------------------------------------------------------------------------
+```
+
+## 参考文献
+
+- [Kenneth J. Rothman: Epidemiology: An Introduction(2nd Ed). Oxford University Press, 2002.]()
+- [Rothman J. Rothman and Greenland Sander, Timothy L. Lash : Modern Epidemiology(3nd Ed). Lippincott Williams & Wilkins, 2007.]()
+- [Chapter 8. Random Error and the Role of Statistics](https://minato.sip21c.org/epispecial/Chap8.pdf)
+- [Chapter 8. Random Error and the Role of Statistics R code](https://minato.sip21c.org/epispecial/codes-for-Chapter8.R)
+- [Modern Epidemiology Chapter 10: Demonstration of p-value functions](https://rpubs.com/kaz_yos/p-val-fun)

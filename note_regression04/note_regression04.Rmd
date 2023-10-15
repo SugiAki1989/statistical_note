@@ -1,0 +1,194 @@
+---
+title: "最小2乗法のBLUEが成立しないケースについて"
+pagetitle: "最小2乗法のBLUEが成立しないケースについて"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 1280,
+                      out.height = 720,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは最小2乗法のBLUEが成立しなくなる場合の例をまとめていく。最小2乗推定量は一定の仮定を満たしている場合、BLUE(Best Linear Unbiased Estimator)となることが知られている。ただ、私は一定の仮定をすぐに忘れてしまうので、そのあたりをこのノートではまとめておく。
+
+## BLUEの特徴
+
+最小2乗推定量は一定の仮定を満たしている場合、BLUEとなり、下記の望ましい特徴を有する。
+
+- 線形性: 線形モデルの推定量である
+- 不偏性: 推定量の期待値が母数と一致する
+- 有効性: 推定量の分散が他の推定量と比べて最小である
+- 一致性: サンプルサイズを増やすと、推定量が母数に収束する
+
+下記に上記の性質の図解があってわかりやすい。
+
+- [最小二乗法②統計学的性質](http://www2.toyo.ac.jp/~mihira/keizaitoukei2014/ols2.pdf)
+
+## ガウスマルコフの定理(計量経済学の文脈)
+
+最小二乗法の推定量がBLUEになるためには、[実証分析のための計量経済学:正しい手法と結果の読み方](https://www.biz-book.jp/isbn/978-4-502-16811-6)と[Gauss–Markov theorem](https://en.wikipedia.org/wiki/Gauss%E2%80%93Markov_theorem#:~:text=Gauss%E2%80%93Markov%20theorem%20as%20stated%20in%20econometrics%5Bedit%5D)を参照にすると、誤差について下記を満たす必要がある。下記を満たせていない場合、最小二乗法で推定することは不適切となる。
+
+- 仮定1: 誤差の均一分散(有効性に関連)
+- 仮定2: 誤差の共分散は0(有効性に関連)
+- 仮定3: 誤差は説明変数と独立(一致性に関連)
+
+## 仮定1: 誤差の均一分散(Homoskerdasticity)
+
+誤差の均一分散は、どの観測値であっても同じ分散を持っていることを意味する。つまり、変数が大きくなるにつれて、誤差を大きなる場合や、何らかの一定の法則に誤差が従っているケースなどは、誤差の均一分散が満たされていない(Heteroskedasticity)。この場合、最小二乗法の有効性(推定量の分散が他の推定量と比べて最小である)が損なわれ、最小二乗法によって求められた回帰係数の標準誤差が正しくない値となる。その結果として、例えば、不均一分散によって、分散が過小評価されると、t値は過大評価されるので、有意になりやすく、回帰係数の検定が正しく行えない。
+
+不均一分散かどうかはBPテスト(Breusch-Pagan Test)で確認できる。BPテストの詳細は下記の書籍p155の「6.2.1 χ2乗分布とBPテスト」を参照。
+
+- [Rによる計量経済学](https://www.ohmsha.co.jp/book/9784274222658/)
+
+```{r}
+# Homoscedasticity(分散均一性) of residuals or equal variance
+# 帰無仮説は「誤差は等分散である」
+# 対立仮説は「誤差は等分散ではない」
+# library(lmtest)
+# lmtest::bptest(fit)
+```
+
+対応としては、不均一分散頑丈推定量を用いて分散を推定する方法がある。下記のサイトに`estimatr`パッケージを利用した例があってわかりやすい。
+
+- [Rで計量経済の回帰分析やるならestimatrパッケージが良さそう。](https://keita43a.hatenablog.com/entry/2019/04/17/232548)
+
+```{r}
+# se_typeは色々と選べる
+# library(estimatr)
+# lm_robust(y ~ x, data = df,  se_type = "HC3")
+```
+
+## 仮定2: 誤差の共分散は0
+
+誤差の共分散は0とは、誤差が観測された値と独立であり、無相関であることを意味する。時系列のデータでは、基本的に自己相関(系列相関)があるので、不適切なケースとなる。時系列のデータは、過去の値が現在の値に影響しやすいので、過去と現在の値で相関が生じてしまう。つまり、自己相関があると、共分散は0ではなくなる。この場合、最小二乗法の有効性(推定量の分散が他の推定量と比べて最小である)が損なわれ、回帰係数の標準誤差を過小評価することになり、回帰係数の検定が正しく行えない。
+
+誤差の共分散が0であるかどうかは自己相関を調べればよいので、`acf()`で調べることができる。もしくはダービーワトソン統計量を利用した検定を行えば良い。
+
+```{r}
+# No autocorrelation of residuals
+# lmtest::dwtest(resid[1:n-1] ~ resid[2:n])
+# car::durbinWatsonTest(fit)
+# 帰無仮説は「自己相関がない」。
+# 対立仮説は「自己相関がある」。
+
+# 自己相関
+# acf(resid)
+```
+
+対応方法としては、自己相関の関連度合いを推定し、その推定量を利用して最小2乗法を計算する実行可能一般化最小2乗法(FGLS: Feasible generalized least squares)で対応する。一般化最小2乗法は誤差がランダムでないことを仮定した推定方法。`nlme`パッケージの`gls`関数で利用できる。
+
+```{r}
+# corARMA(p = 1)はu_{t} = pu_{t-1}+ epsilon_{t}の関係を想定している、現時点の誤差は1つ前の誤差と関係する
+# gls(y ~ x, data = df, corr = corARMA(p = 1))
+```
+
+`gls`関数の詳細は下記の書籍p129の「5.3.3 一般化最小二乗法による推定」を参照。
+
+- [Rによる計量経済学](https://www.ohmsha.co.jp/book/9784274222658/)
+
+## 仮定3: 誤差は説明変数と独立
+
+誤差は説明変数と独立とは、誤差が説明変数と相関を持たないことを意味する。内生成バイアスや欠落変数バイアスなどが有名で、モデルの交絡変数を取りこぼしているモデルは正しい推定値を計算できないため、一致性( サンプルサイズを増やすと、推定量が母数に収束する)が損なわれる。欠落変数バイアスは含まれるべき変数が欠落しているために起こるバイアス。誤差ではなくバイアスなので、モデルに取り込む仮説が間違っていると、サンプルサイズを大きくしても、母数とは違う値に収束することになるため、解釈に誤りが生まれる。
+
+$y=\beta_{0} + \beta_{1}x_{1} + \beta_{2}x_{2}$というモデルがあり、$x_{2}$が$x_{1}$と$y$に影響を与えている場合、$x_{2}$を取り込まずに$x_{1}$だけで回帰モデルを構築すると、$x_{1}$の回帰係数は正しい値を計算できない。この場合、$x_{2}$の影響は誤差が吸収することになり、変数$x_{1}$と$\epsilon$は相関することになる。
+
+「仮定3: 誤差は説明変数と独立」が満たされない場合、一致性が損なわれる。仮定1と仮定2は有効性に関するものであり、推定量の分散が大きくなるもの不偏性や一致性はあるので、推定量は正しいと言えなくもないが、一致性がない場合、母数には一致しないので、有効性が損なわれるよりも深刻。
+
+対応方法としては、モデルに多くの変数を取り込む方法がある。ただ多くの変数を取り込むことで、回帰係数の推定の偏りは起こらないものの、多重共線性という問題が発生したり、不要な変数が取り込まれることで、ノイズがまじり、回帰係数の標準誤差が大きくなるという問題も発生する。また、因果推論の立場でよく話される中間変数(mediator)をモデルに取り込んだ場合、効果を適切に推定できなくなってしまう。
+
+多重共線性については、$x_{1}$の交絡変数$x_{2},x_{3}$があるとして、$x_{2},x_{3}$の回帰係数は正確に推定したい変数ではなく、交絡をコントロールするための共変量としてモデルに取り込まれるのであれば、多重共線性が起こっていてもモデルに取り込んでも良い。$x_{2},x_{3}$のVIFが高くとも、回帰係数の推定値は気にしていないため、$x_{1}$の回帰係数を正しく推定するためにもモデルに必要である。
+
+## 仮定1と2を可視化する
+
+仮定1と2は可視化することでも調べられる。ここでは下記の通りの特徴をもつサンプルデータを用意して、可視化した際にどのような結果となるか眺める。
+
+- データ1：シンプル線形関係のデータ。
+- データ2：2次曲線のような関係があるデータ
+- データ3：不等分散性を持つデータ
+- データ4：時系列の特徴を持つデータ
+- データ5：単位根過程のデータ(見せかけの回帰)
+
+```{r}
+set.seed(1989)
+n <- 100
+x <- runif(n) * 50
+y1 <- 2*x + rnorm(n)
+fit1 <- lm(y1 ~ x)
+y2 <- 2*x^2 + rnorm(n)
+fit2 <- lm(y2 ~ x)
+y3 <- 2*x + rnorm(n, sd = x)
+fit3 <- lm(y3 ~ x)
+url <- "https://raw.githubusercontent.com/facebook/prophet/master/examples/example_wp_log_peyton_manning.csv"
+t <- read.csv(file=url)
+t_x <- 1:n
+t_y <- t$y[1:n]
+fit4 <- lm(t_y ~ t_x)
+set.seed(1989)
+xx <- cumsum(rnorm(n))
+yy <- cumsum(rnorm(n))
+fit5 <- lm(yy ~ xx)
+
+# 基本的な関係性確認のための散布図
+par(mfrow = c(4, 5), mar = c(1,1,1,1), cex.lab = 1, cex.axis = 1, cex.main = 1, cex.sub = 1)
+plot(x, y1, main = "fit1")
+plot(x, y2, main = "fit2")
+plot(x, y3, main = "fit3")
+plot(t_x, t_y, main = "fit4", type = 'l')
+plot(1:n, xx, main = "fit5", type = 'l', col = 'red')
+lines(1:n, yy, col = 'blue')
+
+# 誤差の分布
+plot(fit1, which = 1)
+plot(fit2, which = 1)
+plot(fit3, which = 1)
+plot(fit4, which = 1)
+plot(fit5, which = 1)
+
+# 自己相関
+acf(resid(fit1))
+acf(resid(fit2))
+acf(resid(fit3))
+acf(resid(fit4))
+acf(resid(fit5))
+
+# 自己相関
+plot(resid(fit1)[1:n-1], resid(fit1)[2:n], main = "Resid(fit1)")
+plot(resid(fit2)[1:n-1], resid(fit2)[2:n], main = "Resid(fit2)")
+plot(resid(fit3)[1:n-1], resid(fit3)[2:n], main = "Resid(fit3)")
+plot(resid(fit4)[1:n-1], resid(fit4)[2:n], main = "Resid(fit4)")
+plot(resid(fit5)[1:n-1], resid(fit5)[2:n], main = "Resid(fit5)")
+```
+
+## 「誤差の期待値が0」「説明変数は非確率変数」という仮定
+
+「誤差の期待値が0」という仮定は、切片があるモデルであれば、切片に吸収されて誤差の期待値が0になるため、何ら制約的ではないとも言われる。これに加え、「説明変数は非確率変数」という仮定が満たされると、仮定1~3とは関係なく、推定量は不偏性を持つことになる。誤差の期待値が0ではない場合、不偏性を持たない。
+
+## 参考文献
+
+- [実証分析のための計量経済学: 正しい手法と結果の読み方](https://www.biz-book.jp/isbn/978-4-502-16811-6)
+- [Rによる計量経済学](https://www.ohmsha.co.jp/book/9784274222658/)
+- [経済学のためのPython入門](https://py4basics.github.io/)
+- [5 モデルの関数型と特殊な変数](http://www2.kobe-u.ac.jp/~kawabat/ch08j.pdf)
+
+

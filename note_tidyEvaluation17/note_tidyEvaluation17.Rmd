@@ -1,0 +1,219 @@
+---
+title: "RのTidy evaluation_1"
+pagetitle: "RのTidy evaluation_1"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+# はじめに
+ここでは`{ggplot2}`におけるTidyEvalについてまとめる。
+
+更新履歴  
+2019.12.14 `vars()`について追記  
+
+## `aes()`と`aes_string()`
+
+`{ggplot2}`では、`aes()`を使うことでNSEで評価できる。また、これが一般的な書き方だと思う。
+
+```R:R
+ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width, alpha = 0.5)) +
+  geom_point() + 
+  theme_minimal()
+```
+
+[f:id:AZUMINO:20191214033210p:plain]
+
+
+反対に、クオテーションしたものを渡す場合は、`aes_string()`をつかうことになる。これの使い所は、関数化したときである。例えば、下記のように実行すれば、うまくいきそうであるが、そうはならない。
+
+```R:R
+plot_points <- function(data, x, y, alpha){
+  ggplot(data = data, aes(x = x, y = y, alpha = alpha))+
+    geom_point() +
+    theme_minimal() 
+}
+
+plot_points(data = iris,
+            x = Sepal.Length,
+            y = Sepal.Width,
+            alpha = 0.5)
+ FUN(X[[i]], ...) でエラー:  オブジェクト 'Sepal.Length' がありません 
+
+```
+
+これは、「変数が見つからない」という類のエラーがなので、関数内部の`{ggplot2}`が環境をうまく捉えられておらず、データフレームの中で評価できない状態。たぶん、そういうことだと思う。`aes_string()`だとうまくいく。
+
+```{r}
+library(tidyverse)
+plot_points <- function(data, x, y, alpha){
+  ggplot(data = data, aes_string(x = x, y = y, alpha = alpha))+
+    geom_point() +
+    theme_minimal() 
+}
+
+plot_points(data = iris,
+            x = "Sepal.Length",
+            y = "Sepal.Width",
+            alpha = 0.5)
+```
+
+これでもいいといえばいいのですが、Tidyevalらしくするなら、`enquo()`でクオージャーを作ってクオートとして、必要な部分でアンクオートするほうが自然に見える。
+
+```{r}
+plot_points_tidyeval <- function(data, x, y, alpha){
+  
+  x_enq <- enquo(x)
+  y_enq <- enquo(y)
+  
+  ggplot(data = data, aes(x = !!x_enq, y = !!y_enq, alpha = alpha))+
+    geom_point() +
+    theme_minimal()
+}
+
+plot_points_tidyeval(data = iris,
+                     x = Sepal.Length,
+                     y = Sepal.Width,
+                     alpha = 0.5)
+```
+
+## `facet_grid()`
+`facet_grid()`は少し戸惑う。`vars()`という関数は、`facet_grid()`の`~`のヘルパ関数。`facet`を`enquo()`して、アンクオートしてから`vars()`することになる。
+
+```{r}
+plot_points_tidyeval <- function(data, x, y, alpha, facet){
+  
+  x_enq <- enquo(x)
+  y_enq <- enquo(y)
+  facet_enq <- enquo(facet)
+  
+  ggplot(data, aes(x = !!x_enq, y = !!y_enq, alpha = alpha))+
+    geom_point()+
+    theme_minimal()+
+    facet_grid(cols = vars(!!facet_enq))
+  }
+
+iris %>%
+  plot_points_tidyeval(
+    x = Sepal.Length,
+    y = Sepal.Width,
+    facet = Species,
+    alpha = 0.5
+  )
+```
+
+`facet_wrap()`は外部クオートしておけば、アンクオートする必要もなかったりする。`vars()`って、これまでのブログでも外部クオートするために便利な関数だと思ってたけど、どうやら認識に誤りがあるようです…(備考に追加したので参照)。
+
+```{r}
+plot_points_tidyeval <- function(data, x, y, alpha, facet){
+
+  x_enq <- enquo(x)
+  y_enq <- enquo(y)
+
+  ggplot(data = data, aes(x = !!x_enq, y = !!y_enq, alpha = alpha))+
+    geom_point() +
+    theme_minimal() +
+    # facet_wrap() doesn't need !!!(bang-bang-bang)
+    facet_wrap(facet)
+  }
+
+iris %>%
+  mutate(pot = sample(c("a", "b", "c", "d"), 150, replace = TRUE)) %>%
+  plot_points_tidyeval(
+    data = .,
+    x = Sepal.Length,
+    y = Sepal.Width,
+    alpha = 0.5,
+    facet = vars(Species, pot)
+  )
+```
+
+これは、先程の内容をかき直しただけ。`...`で変数を`facet_wrap()`に流し、`vars()`を使う。
+
+```{r}
+plot_points_tidyeval <- function(data, x, y, alpha, ...){
+  
+  x_enq <- enquo(x)
+  y_enq <- enquo(y)
+  
+  ggplot(data = data, aes(x = !!x_enq, y = !!y_enq, alpha = alpha)) +
+    geom_point() +
+    theme_minimal() +
+    facet_wrap(vars(...))
+}
+
+iris %>%
+  mutate(pot = sample(c("a", "b", "c", "d"), 150, replace = TRUE)) %>%
+  plot_points_tidyeval(
+    data = .,
+    x = Sepal.Length,
+    y = Sepal.Width,
+    alpha = 0.5,
+    Species, pot
+  )
+```
+
+はぁ…TidyEval難しす…
+
+## 備考
+`_at`などのスコープ付き動詞は、引数として`...`を使用しない。`summarise_at(vars(col1, col2,...), list(fun1, fun2,...))`みたいな形で、`vars()`を使用する。`summarise_at()`が期待するものは、`vars()`です。なので、`var()`を渡す必要があって、他のモノとは違って`!!!(bang-bang-bang)`する必要はなかったりする。`facet_grid()`の`~`もそういうことだと思う…[ggplot2 3.0.0
+](https://www.tidyverse.org/blog/2018/07/ggplot2-3-0-0/)とか見てください。
+
+```R:R
+g_sum <- function(data, grouped_vars, summary_vars, summary_funs) {
+  
+  data %>%
+    group_by(!!!grouped_vars) %>%
+    summarise_at(summary_vars, summary_funs)
+  
+}
+
+mtcars %>%
+  g_sum(
+    grouped_vars = vars(gear, carb),
+    summary_vars = vars(mpg, cyl, disp),
+    summary_funs = list(mean = mean, median = median)
+  )
+
+# A tibble: 11 x 8
+# Groups:   gear [3]
+    gear  carb mpg_mean cyl_mean disp_mean mpg_median cyl_median disp_median
+   <dbl> <dbl>    <dbl>    <dbl>     <dbl>      <dbl>      <dbl>       <dbl>
+ 1     3     1     20.3     5.33     201.        21.4          6       225  
+ 2     3     2     17.2     8        346.        17.1          8       339  
+ 3     3     3     16.3     8        276.        16.4          8       276. 
+ 4     3     4     12.6     8        416.        13.3          8       440  
+ 5     4     1     29.1     4         84.2       29.8          4        78.8
+ 6     4     2     24.8     4        121.        23.6          4       131. 
+ 7     4     4     19.8     6        164.        20.1          6       164. 
+ 8     5     2     28.2     4        108.        28.2          4       108. 
+ 9     5     4     15.8     8        351         15.8          8       351  
+10     5     6     19.7     6        145         19.7          6       145  
+11     5     8     15       8        301         15            8       301  
+```
+
+調べてみたけども、ちゃんとなんでそうなのか理解しないといけないな…

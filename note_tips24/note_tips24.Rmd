@@ -1,0 +1,192 @@
+---
+title: "as.data.frame(do.call(rbind,lapply)) produces something weird。ぐぅわかる。"
+pagetitle: "as.data.frame(do.call(rbind,lapply)) produces something weird。ぐぅわかる。"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ChatworkのAPIをRから操作する[パッケージ](https://github.com/SugiAki1989/chatr)の制作途中で、あぁなるほど、そういうことになるのか、ということがあったので、解決策メモ。内容は`as.data.frame(do.call(rbind,lapply))`が変なものを生成する、という下記の話。
+
+ - [[R] as.data.frame(do.call(rbind,lapply)) produces something weird](https://stat.ethz.ch/pipermail/r-help/2012-November/328716.html)
+
+## APIが返すもの
+APIが返すもののサンプルデータとして、こんなネストしたリストを返してくる。
+
+```{r}
+library(tidyverse)
+sample <- 
+  list(
+    list(message_is = "1", account = list(account_id = "X001", name = "X001_name"), update_time = 0),
+    list(message_is = "2", account = list(account_id = "X002", name = "X002_name"), update_time = NA)
+  )
+sample
+```
+
+これをリストからデータフレーム化するために、`as.data.frame(do.call(rbind,lapply))`で変換しようとすると、`something weird`が生成される。<s>はじめからtidyverseライクなスタイルで書けばよかったんだけど、いっちょ前にbaseライクのほうがtidyverseのアップデートの影響も受ける可能性が低くなるかなーとか思ったのがそもそもの失敗だった。</s>見た目は普通のデータフレームだし、クラスもデータフレームだけど、`str()`の結果が変。
+
+```{r}
+r1 <- as.data.frame(do.call(what = rbind, args = lapply(X = sample, FUN = function(x){`[`(x, c("message_is", "update_time"))})))
+r2 <- as.data.frame(do.call(what = rbind, args = lapply(X = sample, FUN = function(x){`[[`(x, c("account"))})))
+
+list(r1,r2,str(r1),str(r2))
+```
+
+`as.data.frame()`する前の段階の構造が原因っぽい。
+
+```{r}
+do.call(rbind, lapply(X = sample, FUN = function(x){`[[`(x, c("account"))})) %>% class()
+```
+
+```{r}
+do.call(rbind, lapply(X = sample, FUN = function(x){`[[`(x, c("account"))})) %>% str()
+```
+
+最初からこう書けばよかったのだが。`dplyr::bind_rows()`はそこらへんうまくやってくれるので、`as.data.frame(do.call(bind_rows,lapply))`にするだけでも、狙っていた形に持っていける。
+
+```{r}
+d <- sample %>% 
+  purrr::map(`[[`, c("account")) %>%
+  purrr::map_dfr(.x = ., .f = function(x){dplyr::bind_rows(x)})
+
+list(d,str(d))
+```
+
+## 解法
+ほかにもっと良い方法があるだろうけど、`bind_rows()`を使わない場合の現状の解法は下記。`unstack()`をうまく使えるように変形する。
+
+```{r}
+# 必要な深さレベル2の要素抽出
+tmp <- lapply(X = sample, FUN = function(x){`[[`(x, c("account"))})
+# リストの分解
+un_list <- unlist(tmp)
+un_list_name <- names(un_list)
+# リストを分解した要素とそれに対応する名前のデータフレーム
+d <- data.frame(un_list, un_list_name)
+d
+```
+
+```{r}
+# unstack()でun_list_nameごとのベクトルに変形しデータフレーム化
+df <- unstack(x = d, from = un_list_name)
+
+list(df,str(df))
+```
+
+```{r}
+# 必要な深さレベル1の要素抽出
+tmp <- lapply(X = sample, FUN = function(x){`[`(x, c("message_is", "update_time"))})
+un_list <- unlist(tmp)
+un_list_name <- names(un_list)
+d <- data.frame(un_list, un_list_name)
+d
+```
+
+```{r}
+df <- unstack(x = d, from = un_list_name)
+list(df,str(df))
+```
+
+何がありがたいかというと、仮にAPIがこんなめちゃくちゃ嫌な構造で返してきても問題ない。
+
+```{r}
+sample2 <- 
+  list(
+    list(
+      list(
+        list(x1="1",x2=list(x3=NA,x4="11"),y1="111"),
+        list(x1="2",x2=list(x3="2",x4="22"),y1="222")
+      ),
+      list(
+        list(x1="3",x2=list(x3="3",x4=NA),y1="333"),
+        list(x1="4",x2=list(x3="4",x4="44"),y1="444")
+      )
+    ),
+    list(
+      list(
+        list(x1="5",x2=list(x3="5",x4="55"),y1="555"),
+        list(x1="6",x2=list(x3="6",x4="66"),y1=NA)
+      ),
+      list(
+        list(x1=NA,x2=list(x3="7",x4="77"),y1="777"),
+        list(x1="8",x2=list(x3="8",x4="88"),y1="888")
+      )
+    )
+  )
+
+sample2
+```
+
+同じ要領でデータフレームに変換。
+
+```{r}
+d <- unstack(
+  data.frame(
+    unlist(sample2),
+    names(unlist(sample2))
+    )
+  )
+list(d,str(d))
+```
+
+基本的には、APIはリクエストに対して同じ構造でデータを返すはず…長さ(要素)が変わること「ない」はず、という前提ですが。下記のように突然`y2`が増えるとかないはず。
+
+```{r}
+sample2 <- 
+  list(
+    list(
+      list(
+        list(x1="1",x2=list(x3=NA,x4="11"),y1="111"),
+        list(x1="2",x2=list(x3="2",x4="22"),y1="222")
+      ),
+      list(
+        list(x1="3",x2=list(x3="3",x4=NA),y1="333"),
+        list(x1="4",x2=list(x3="4",x4="44"),y1="444")
+      )
+    ),
+    list(
+      list(
+        list(x1="5",x2=list(x3="5",x4="55"),y1="555"),
+        list(x1="6",x2=list(x3="6",x4="66"),y1=NA)
+      ),
+      list(
+        list(x1=NA,x2=list(x3="7",x4="77"),y1="777"),
+        list(x1="8",x2=list(x3="8",x4="88"),y1="888",y2="8888")
+      )
+    )
+  )
+
+d <- unstack(
+  data.frame(
+    unlist(sample2),
+    names(unlist(sample2))
+    )
+  )
+
+d
+```
+
+他にもっと妥当な方法ありそうだけど。

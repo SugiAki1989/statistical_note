@@ -1,0 +1,274 @@
+---
+title: "ggplot2のスケール"
+pagetitle: "ggplot2のスケール"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここでは`ggplot2`パッケージの位置スケール`scale_x_*()`を中心に基本的な使い方をまとめておく。`scale_x_*()`の内容は`scale_y_*()`でも使えるので、ここでは`x`だけ。
+
+すぐ忘れるので、自分の備忘録としてまとめておく。紹介する関数は下記の通り。
+
+- scale_x_continuous: Continuous position scales
+- scale_x_discrete: Discrete position.
+- scale_x_datetime: Position scale, date
+- scale_x_date: Position scale, date
+
+予め可視化に必要なデータやライブラリを準備しておく。
+
+```{r}
+library(palmerpenguins)
+library(tidyverse)
+library(patchwork)
+library(lubridate)
+library(scales) 
+
+n <- 50000
+duration_days <- 365*2
+
+set.seed(1989)
+y <- arima.sim(
+  n = n-1, # 1001できるので-1
+  model = list(
+    order = c(1,1,1),  # ARIMA(p,d,q)
+    ar = c(0.5),       # arの強さ
+    ma = c(0.5)        # maの強さ
+    )　
+)
+
+# dplyr::filter(x >= as.POSIXct('2022-08-01 00:00:00') & x <= as.POSIXct('2022-08-01 23:59:59') or 
+# dplyr::filter(x >= ymd_hms('2022-08-01 00:00:00') & x <= ymd_hms('2022-08-01 23:59:59') or 
+log <- data.frame(
+  x = ymd_hms("2022-08-01 00:00:00") +
+        days(sample(0:duration_days, n, replace = TRUE)) +
+        hours(sample(0:23, n, replace = TRUE)) +
+        minutes(sample(0:59, n, replace = TRUE)) +
+        seconds(sample(0:59, n, replace = TRUE))
+  ) %>%
+  arrange(x) %>% 
+  bind_cols(y = y)
+
+log2 <- log %>% 
+  group_by(x=date(x)) %>% 
+  summarise(y = sum(y)) %>% 
+  ungroup()
+```
+
+## 位置スケールの役割
+位置スケールの基本的な枠割は、連続値、離散値、日時などのデータ型を持つ変数をプロット領域にマッピングし。対応する軸を構成する。に対して、値の範囲、値の分割数、値の表示をコントロールすること。
+
+### scale_x_continuousについて
+#### limitsについて
+`limits`は値の範囲を制限することが可能。
+
+```{r echo=TRUE}
+p1 <- ggplot(penguins, aes(x = bill_length_mm, y = bill_depth_mm, group = species)) +
+  geom_point(aes(color = species, shape = species), size = 2, alpha = 0.5)
+
+p1a <- p1 + scale_x_continuous(limits = c( 0, 40))
+p1b <- p1 + scale_x_continuous(limits = c(40, 50))
+p1c <- p1 + scale_x_continuous(limits = c(50, 100))
+
+((p1a + p1b + p1c) & theme_classic()) + 
+  plot_layout(guides = 'collect') &
+  theme(legend.position = 'top')
+```
+
+#### breaksについて
+
+`breaks`は値の分割をコントロールすることが可能。
+
+```{r echo=TRUE}
+upr <- max(penguins$bill_length_mm, na.rm = TRUE)
+lwr <- min(penguins$bill_length_mm, na.rm = TRUE)
+
+p2a <- p1 + scale_x_continuous(breaks = c(37, 38, 39, 45, 50))
+p2b <- p1 + scale_x_continuous(breaks = seq(floor(lwr), floor(upr), 5))
+p2c <- p1 + scale_x_continuous(breaks = c(40:50))
+
+((p2a + p2b + p2c) & theme_classic()) + 
+  plot_layout(guides = 'collect') &
+  theme(legend.position = 'top')
+```
+
+#### labelsについて
+
+`labels`は値の表示をコントロールすることが可能。
+
+```{r echo=TRUE}
+p3a <- p1 + scale_x_continuous(breaks = c(37, 50), labels = c('Adelie Zone', 'Gentoo & Chinstrap Zone'))
+p3b <- p1 + scale_x_continuous(breaks = c(40, 45, 50, 55), labels = expression(alpha, beta, gamma, delta))
+
+((p3a + p3b) & theme_classic()) + 
+  plot_layout(guides = 'collect') &
+  theme(legend.position = 'top')
+```
+
+
+### scale_x_discreteについて
+#### limitsについて
+`limits`は値の範囲をコントロールできる。`limit`の並び順を変更することで、一時的に因子型のレベル変更を行ったかのように並び順をコントロールできる。`reorder`などでレベルを調整する必要がない。
+
+```{r echo=TRUE}
+p4 <- ggplot(penguins, aes(species, flipper_length_mm)) + 
+  geom_boxplot(aes(col = species), width = 0.3) +
+  geom_jitter(aes(col = species), alpha = 0.5)
+
+p4a <- p4 + scale_x_discrete(limit = c('Adelie'))
+p4b <- p4 ## default factor Levels: Adelie Chinstrap Gentoo
+p4c <- p4 + scale_x_discrete(limit = c('Gentoo', 'Chinstrap', 'Adelie'))
+
+((p4a + p4b + p4c) & theme_classic()) + 
+  plot_layout(guides = 'collect') &
+  theme(legend.position = 'top')
+```
+
+#### labelsについて
+`labels`は値の表示をコントロールできる。
+
+```{r echo=TRUE}
+p5a <- p4 + scale_x_discrete(labels = c('Adelie' = 'A', 'Gentoo' = 'G', 'Chinstrap' = 'C'))
+p5b <- p4 + scale_x_discrete(labels = c('Adelie' = 'ADELIE', 'Gentoo' = 'GENTOO', 'Chinstrap' = 'CHINSTRAP'))
+p5c <- p4 + scale_x_discrete(labels = abbreviate)
+
+((p5a + p5b + p5c) & theme_classic()) + 
+  plot_layout(guides = 'collect') &
+  theme(legend.position = 'top')
+```
+
+### scale_x_datetimeについて
+日付に関しては`limits`、`breaks`、`date_labels`を合わせて使うことが多いので、組み合わせた例を記載しておく。ベースとなるデータはこちら。
+
+```{r echo=TRUE}
+p6 <- ggplot(log, aes(x, y)) + 
+  geom_line(col = "#01489D")
+p6 & theme_classic() + theme(axis.text.x = element_text(angle = 90, vjust = 0.2, hjust=0.2))
+```
+
+引数を順番に組み合わせると、各引数の役割がよくわかる。`date_breaks`は、"sec", "min", "hour", "day", "week", "month", "year"の単位で指定可能。また、フォーマットは下記の通り指定できる。詳細は`strptime()`のヘルプを参照。
+
+|a|a|
+|:---:|:---:|
+|%A| 曜日(Monday-Sunday)|
+|%Y| 年(0000-9999)|
+|%m| 月(01-12)|
+|%d| 日(01-31)|
+|%H| 時(00-23)|
+|%M| 分(00-59)|
+|%S| 秒(00-59)|
+
+
+```{r echo=TRUE}
+p6a <- p6 + scale_x_datetime(limits = as.POSIXct(c('2022-08-01', '2022-08-30')))
+
+p6b <- p6 + scale_x_datetime(limits = as.POSIXct(c('2022-08-01', '2022-08-30')),
+                             date_labels = "%Y-%m-%d")
+
+p6c <- p6 + scale_x_datetime(limits = as.POSIXct(c('2022-08-01', '2022-08-30')), 
+                             breaks = seq(as.POSIXct('2022-08-01'), as.POSIXct('2022-08-31'), by = '2 days'),
+                             date_labels = "%Y-%m-%d")
+
+p6d <- p6 + scale_x_datetime(limits = as.POSIXct(c('2022-08-01', '2022-08-30')), 
+                             breaks = date_breaks("5 day"),
+                             date_labels = "%Y-%m-%d")
+
+(p6a + p6b + p6c / p6d) & theme_classic() + theme(axis.text.x = element_text(angle = 90, vjust = 0.2, hjust=0.2))
+```
+
+### scale_x_dateについて
+
+さきほどと同じように段階的に引数を追加していく。
+
+```{r echo=TRUE}
+p7 <- ggplot(log2, aes(x, y)) + 
+  geom_line(col = "#01489D")
+
+p7a <- p7 + scale_x_date(limits = c(as.Date("2022-08-1"), as.Date("2022-08-15")))
+
+p7b <- p7 + scale_x_date(limits = c(as.Date("2022-08-1"), as.Date("2022-08-15")),
+                         labels = date_format("%Y/%m/%d"))
+
+p7c <- p7 + scale_x_date(limits = c(as.Date("2022-08-1"), as.Date("2022-08-15")),
+                         labels = date_format("%Y/%m/%d"),
+                         breaks = date_breaks("1 day"))
+
+p7d <- p7 + scale_x_date(limits = c(as.Date("2022-08-1"), as.Date("2022-12-31")),
+                         labels = date_format("%Y/%m/%d"),
+                         breaks = "1 month", 
+                         minor_breaks = "1 week")
+
+
+(p7a + p7b + (p7c/p7d)) & theme_classic() + theme(axis.text.x = element_text(angle = 90, vjust = 0.2, hjust=0.2))
+```
+
+### 整数を時間として表示する
+
+秒数が数字として記録されている場合に、時間に表示を変更するための小技。数字を`MM:SS`形式の時間に変換する場合はこちらを利用する。
+
+```{r echo=TRUE}
+w <- data.frame(
+  x = as.numeric(time(WWWusage)),
+  y = as.numeric(WWWusage)
+)
+
+timeHM <- function(x){
+  h <- floor(x/60)
+  m <- floor(x %% 60)
+  lab <- sprintf('%d:%02d',h,m)
+  return(lab)
+}
+
+timeHM(c(0,10,30,60,90,120,3600,3600*24))
+```
+
+`labels`に先ほど作成した`timeHM`を渡す。
+
+```{r echo=TRUE}
+ggplot(w, aes(x, y)) + 
+  geom_line() +
+  scale_x_continuous(name = 'time',
+                     breaks = seq(0, max(w$x), by = 5),
+                     labels = timeHM) +
+  theme_bw()
+
+```
+
+数字を`HH:MM:SS`形式の時間に変換する場合はこちらを利用する。
+
+```{r echo=TRUE}
+timeHMS <- function(x){
+  h <- floor(x/3600)
+  m <- floor((x/60) %% 60)
+  s <- round(x %% 60)
+  lab <- sprintf('%02d:%02d:%02d',h,m,s)
+  lab <- sub('^00:', '', lab)
+  lab <- sub('^0', '', lab)
+  return(lab)
+}
+
+timeHMS(c(0,10,30,60,90,120,3600,3600*24))
+```

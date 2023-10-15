@@ -1,0 +1,408 @@
+---
+title: "TidyModels: modeltime + GlobalModels"
+pagetitle: "TidyModels: modeltime + GlobalModels"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+`tidymodels`パッケージの使い方をいくつかのノートに分けてまとめている。`tidymodels`パッケージは、統計モデルや機械学習モデルを構築するために必要なパッケージをコレクションしているパッケージで、非常に色んなパッケージがある。ここでは、今回は`modeltime`パッケージで複数の時系列を予測する方法についてまとめていく。モデルの数理的な側面や機械学習の用語などは、このノートでは扱わない。
+
+下記の公式ドキュメントや`tidymodels`パッケージに関する書籍を参考にしている。
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+## `modeltime`パッケージの目的
+
+`modeltime`パッケージは、時系列モデルの構築を効率よく行うためのパッケージで、`tidymodels`パッケージと組み合わせて時系列モデルを作成する際に使用される。時系列予測のための体系的なワークフローを提供し、時系列ブーストモデルなど新しいアルゴリズムもカバーしている点が特徴的。
+
+ここでは、複数の時系列データがある場合に効率よく予測モデルを構築する方法をまとめる。
+
+- [Forecasting with Global Models](https://business-science.github.io/modeltime/articles/modeling-panel-data.html)
+- [Nested Forecasting](https://business-science.github.io/modeltime/articles/nested-forecasting.html)
+- [Forecasting Many Time Series (Using NO For-Loops)](https://www.business-science.io/code-tools/2021/07/19/modeltime-panel-data.html)
+- [Global Models with Modeltime](https://albertoalmuinha.com/posts/2021-08-02-global-models/global-models/)
+
+上記のドキュメントやサイトをなぞりながら、不明点を追記しながらまとめていく。
+
+## グローバルモデリング
+
+多数の時系列を予測を行う場合、方法としては2つある。1つ目は、各時系列に対してモデルを作成し、繰り返して予測を行なう方法。2つ目は、時系列分野での呼び方なのか、`modeltime`パッケージ特有の言葉なのかわからないが、GlobalModelを用いる方法。これは、すべての時系列の予測を生成する1つのモデルのみが作成され、このモデルを用いて、各時系列の予測を行なう。双方、メリット・デメリットは存在するものの、スケーラビリティを考えるのであれば、後者の方法が望ましい。
+
+例えば、精度に関しては1つ目の方法の方が優れている可能性があるが、数百の店舗がある場合に、数百のモデルを作成する必要があり、時間がかかる、多くのメモリが必要になる可能性がある。
+
+グローバルモデリングの文脈ではパネルデータが重要になる。パネルデータは各種様々な指標に関して、複数の系列が同じ間隔で記録されているデータのフォーマット。パネルデータの文脈で先程のことを考えると、パネルが100個あれば、100個分のモデル作成を行い、100個分の予測を繰り返すことになる。グローバルモデリングでは、100個分のパネルに対して、1つのモデルを作成し、100個分の予測を行なう。
+
+ただ、グローバルモデルは特徴量エンジニアリングがうまくできないと、精度が低くなってしまう。そのため、特徴量エンジニアリングが非常に重要になる。
+
+## モデルの作成
+
+まずは必要なパッケージを読み込んでおく。
+
+```{r}
+library(tidymodels)
+library(modeltime)
+library(tidyverse)
+library(timetk)
+library(DT)
+``` 
+
+使用するデータは、`modeltime`パッケージの`walmart_sales_weekly`データ。`Store`と`Dept`を識別する`id`、週開始日`date`、週売上`value`を利用する。
+
+```{r}
+data_table <- walmart_sales_weekly %>%
+    select(id, Date, Weekly_Sales) %>%
+    set_names(c("id", "date", "value"))
+
+data_table
+```
+
+`id`のユニーク数は7個なので、ウォルマートの7店舗分の2010-02-05から2012-10-26までの週売上が143レコードづつ記録されている。
+
+```{r}
+data_table %>% 
+  group_by(id) %>% 
+  summarise(
+    n.obs = n(),
+    start_date = min(date),
+    end_date = max(date),
+    min_value = min(value),
+    mean_value = mean(value),
+    max_value = max(value)
+  )
+```
+
+`plot_time_series`関数を利用すると、一気に売上推移を可視化できる。これをみると、売上規模として、4つくらいに分類できそうで、どの時系列も特有の特徴を持っていることがわかる。つまり、各時系列に特有の特徴量がなければ、予測が難しそうなことがわかる。
+
+```{r}
+data_table %>%
+  #group_by(id) %>%
+  plot_time_series(
+    date, 
+    value, 
+    .color_var = id,
+    .smooth = FALSE,
+    .interactive = FALSE, 
+    .facet_ncol = 3
+  )
+```
+
+時系列を分けて可視化したいときはグループ化すればよい。
+
+```{r}
+data_table %>%
+  group_by(id) %>%
+  plot_time_series(
+    date, 
+    value, 
+    .color_var = id,
+    .interactive = FALSE, 
+    .facet_ncol = 3
+  )
+```
+
+ドキュメントに従って、`time_series_split`関数を利用して、データを学習セットとテストセット(3 か月分)に分割する。重複するタイムスタンプが検出された。スライディングウィンドウを使って、重なり合った時系列を一緒に処理する、というインフォメーションが表示される。
+
+```{r}
+splits <- data_table %>% 
+  time_series_split(
+    assess     = "3 months", 
+    cumulative = TRUE
+  )
+df_train <- splits %>% training()
+df_test <- splits %>% testing()
+
+bind_rows(
+  df_train %>% summarise(start_date = min(date), end_date = max(date), records = n()),
+  df_test %>% summarise(start_date = min(date), end_date = max(date), records = n())
+)
+```
+
+グラフ化しておく。
+
+```{r}
+splits %>%
+  tk_time_series_cv_plan() %>%
+  plot_time_series_cv_plan(date, value, .interactive = FALSE,
+                           .title = "Time Series Validation Plan") + 
+  scale_x_date(limits = c(as.Date("2010-02-01"), as.Date("2012-11-01")),
+               labels = date_format("%Y/%m"),
+               breaks = date_breaks("3 month")) + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.2, hjust=0.2))
+```
+
+モデリングのためのレシピを作成する。このレシピが行っている処理を理解するために、必要な列だけ残して可視化する。大枠として、2010-02-05のレコードを対象にすると、2010-02-05が`id`の分だけ積み上げられており、`id_X*_*`というカラムでレコードが管理されていることがわかる。
+
+```{r}
+recipe(value ~ ., df_train) %>%
+  step_mutate_at(id, fn = droplevels) %>%
+  step_timeseries_signature(date) %>%
+  step_zv(all_predictors()) %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+  prep() %>%
+  bake(df_train) %>%
+  select(date, value, date_week, contains("id")) %>% 
+  DT::datatable()
+```
+
+このような形で、各`id`ごとに`917/7=131`レコードを積み上げているデータを利用する。
+
+```{r}
+recipe(value ~ ., df_train) %>%
+  step_mutate_at(id, fn = droplevels) %>%
+  step_timeseries_signature(date) %>%
+  step_zv(all_predictors()) %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+  prep() %>%
+  bake(df_train) %>%
+  select(date, value, date_week, contains("id")) %>% 
+  filter(id_X1_1 == 1) %>% 
+  datatable()
+```
+
+この後で利用するモデルでは、`date`カラムは不要なので、先程のレシピから`step_rm(date)`で削除しておく。
+
+```{r}
+recipe <- recipe(value ~ ., df_train) %>%
+    step_mutate_at(id, fn = droplevels) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(date) %>%
+    step_zv(all_predictors()) %>%
+    step_dummy(all_nominal_predictors(), one_hot = TRUE)
+
+summary(prep(recipe)) %>% print(n = 50)
+```
+
+レシピが完成したので、モデルとワークフローを作成し、学習データでフィッティングする。パラメタチューニングなどはここでは一旦スルーする。
+
+```{r}
+model <- boost_tree("regression") %>% 
+  set_engine("xgboost")
+
+workflow <- workflow() %>%
+    add_model(model) %>%
+    add_recipe(recipe)
+
+workflow_fit <- workflow %>% 
+  fit(df_train)
+
+workflow_fit
+```
+
+ここから`modeltime`のワークフローを利用する。フィッティングが完了しているモデルをモデルテーブルに登録する。
+
+```{r}
+model_table <- modeltime_table(
+    workflow_fit
+)
+model_table
+```
+
+モデルテーブルに登録したあとは、キャリブレーションを行なう。`id`別に処理する必要があるので、引数で`id`を設定する。ここでのキャリブレーションは、モデルをテストデータでフィッティングし、テストデータで予測値を計算している。
+
+```{r}
+calibration_table <- model_table %>%
+    modeltime_calibrate(
+      new_data = df_test, 
+      id = "id"
+    )
+calibration_table
+```
+
+`.calibration_data`カラムの中身を見ると、各`id`の日付ごとに予測値が算出されていることがわかる。
+
+```{r}
+calibration_table %>% 
+  pluck(".calibration_data", 1)
+```
+
+`id`を`1_1`のレコードに絞ってみるとわかりやすい。
+
+```{r}
+calibration_table %>% 
+  pluck(".calibration_data", 1) %>% 
+  filter(id == "1_1")
+```
+
+予測値の算出が終わったので、テストデータに対するグローバルモデルとローカルモデルの精度を確認する。`modeltime_accuracy`関数の`acc_by_id`が`FALSE`だとグローバルモデルの精度、`TRUE`だとローカルモデルの精度が計算される。
+
+```{r}
+bind_rows(
+     calibration_table %>% modeltime_accuracy(acc_by_id = FALSE) %>% mutate(id = "Global"),
+     calibration_table %>% modeltime_accuracy(acc_by_id = TRUE)
+     ) %>% 
+  select(id, everything())
+```
+
+グローバルモデルの精度とは、`id`を考慮しない予測値と実測値の評価を行っており、
+
+```{r}
+calibration_table %>% 
+  pluck(".calibration_data", 1) %>% 
+  summarise(
+    mae = mean(abs(.actual - .prediction))
+  )
+```
+
+ローカルモデルの精度とは、`id`を考慮した予測値と実測値の評価を行っている。
+
+```{r}
+calibration_table %>% 
+  pluck(".calibration_data", 1) %>% 
+  group_by(id) %>% 
+  summarise(
+    mae = mean(abs(.actual - .prediction))
+  )
+```
+
+グローバル精度、ローカル精度を確認する意図としては、どの時系列でモデルがうまく機能しているのか、反対に、どのモデルがうまく機能していないのかを判断できる。例えば、今回のモデルにおいては、`1_38`はうまく予測できていないが、`1_13`はうまく予測できていることがわかる。
+
+各`id`の予測値を`modeltime_forecast`関数で可視化しておく。`calibration_table`にも予測値は入っているが、この関数に予測したいテストデータ、フルデータを渡すことで、観測値と予測値をあわせて可視化できる。
+
+```{r}
+calibration_table %>%
+    modeltime_forecast(
+        new_data    = df_test,
+        actual_data = data_table,
+        conf_by_id  = TRUE
+    ) %>%
+    group_by(id) %>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = TRUE
+    )
+```
+
+グローバルモデルがいったんうまく機能していると仮定して、`modeltime_refit`関数でフルデータで再学習を行なう。
+
+```{r}
+refit_table <- calibration_table %>%
+  modeltime_refit(data = data_table)
+
+refit_table
+```
+
+この関数を利用することで、モデルテーブルのモデルの更新を行っている。見た目は全く同じなのでわかりくいが、内部ではデータが更新されていることがわかる。なぜかうまく値を取り出せないので、コピペしておく。上が`calibration_table`で、下が`refit_table`。`predictors`のレコード数が変わっていることがわかる。
+
+```
+# calibration_table
+str(calibration_table)
+mdl_tm_t [1 × 5] (S3: mdl_time_tbl/tbl_df/tbl/data.frame)
+ $ .model           :List of 1
+  ..$ :List of 4
+  .. ..$ pre    :List of 3
+  .. .. ..$ mold        :List of 4
+  .. .. .. ..$ predictors: tibble [917 × 37] (S3: tbl_df/tbl/data.frame)
+
+# refit_table
+str(refit_table)
+mdl_tm_t [1 × 5] (S3: mdl_time_tbl/tbl_df/tbl/data.frame)
+ $ .model_id        : int 1
+ $ .model           :List of 1
+  ..$ :List of 4
+  .. ..$ pre    :List of 3
+  .. .. ..$ mold        :List of 4
+  .. .. .. ..$ predictors: tibble [1,001 × 37] (S3: tbl_df/tbl/data.frame)
+```
+
+フルデータで再学習してたので、将来の日付に対する予測を行なう。まずは、将来の日付データを`future_frame`関数で作成する。
+
+```{r}
+future_table <- data_table %>%
+  group_by(id) %>%
+  future_frame(
+    .length_out = 52, # weeklyデータなので52週=1年
+    .bind_data = FALSE
+    ) %>% ungroup()
+
+bind_rows(
+  df_train %>% summarise(start_date = min(date), end_date = max(date), records = n()) %>% mutate(id = "train"),
+  df_test %>% summarise(start_date = min(date), end_date = max(date), records = n()) %>% mutate(id = "test"),
+  future_table  %>% summarise(start_date = min(date), end_date = max(date), records = n()) %>% mutate(id = "future")
+) %>% 
+  select(id, everything())
+```
+
+
+`modeltime_forecast`関数の挙動を`id`を限定して可視化しておく。後ろの方に予測値がついたデータフレームが作成されている。
+
+```{r}
+refit_table %>%
+  modeltime_forecast(
+    new_data    = future_table,
+    actual_data = data_table, 
+    conf_by_id  = TRUE
+  ) %>% 
+  filter(id == "1_1") %>% 
+  DT::datatable()
+```
+
+このデータフレームを`plot_modeltime_forecast`関数で可視化しおく。
+
+```{r}
+refit_table %>%
+  modeltime_forecast(
+    new_data    = future_table,
+    actual_data = data_table, 
+    conf_by_id  = TRUE
+  ) %>%
+  group_by(id) %>%
+  plot_modeltime_forecast(
+    .interactive = FALSE,
+    .facet_ncol  = 2
+  )
+```
+
+これでグローバルモデルを利用したモデリングの基礎的な部分は終わり。下記はおまけ。
+
+```{r}
+refit_table %>%
+  modeltime_forecast(
+    new_data    = future_table,
+    actual_data = data_table, 
+    conf_by_id  = TRUE
+  ) %>% 
+  ggplot(aes(.index, .value, col = id)) + 
+  geom_line() + 
+  geom_ribbon(aes(ymin = .conf_lo, ymax = .conf_hi), alpha = 0.1) +
+  geom_vline(xintercept = as.Date("2012-11-02")) + 
+  theme_bw() + 
+  scale_x_date(limits = c(as.Date("2010-02-01"), as.Date("2013-10-25	")),
+               labels = date_format("%Y/%m"),
+               breaks = date_breaks("3 month")) + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.2, hjust=0.2))
+  
+```
+
+## 参考文献
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+

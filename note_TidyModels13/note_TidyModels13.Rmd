@@ -1,0 +1,398 @@
+---
+title: "Modeltime -Feature Engineering-"
+pagetitle: "Modeltime -Feature Engineering-"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+`modeltime`パッケージを使いながら時系列データの予測を行なうノートをいくつかに分けてまとめている。`modeltime`パッケージの目的は、時系列モデルの構築を効率よく行うためのパッケージで、`tidymodels`パッケージと組み合わせて時系列モデルを作成する際に使用される。時系列予測のための体系的なワークフローを提供し、時系列ブーストモデルなど新しいアルゴリズムもカバーしている点が特徴的。モデルの数理的な側面や機械学習の用語などは、このノートでは扱わない。
+
+## 特徴量エンジニアリング
+
+このノートでは、時系列データの特徴量エンジニアリングについてまとめる。ここでは`timetk`パッケージを使って特徴量エンジニアリングを行なう。必要なパッケージを読み込んでおく。
+
+```{r}
+library(tidyverse)  
+library(timetk)  
+library(tsibble)  
+library(tsibbledata)  
+library(fastDummies)  
+```
+
+## 使用データ
+
+オーストラリアの小売の売上データセット(`tsibbledata::aus_retail`)を利用する。データの各時系列は下記のキーで一意に識別される。
+
+- `State`: オーストラリアの州
+- `Industry`: 業種
+
+ここでは`Australian Capital Territory`の州と5つの業種の値のみに注目する。
+
+```{r}
+tsibbledata::aus_retail %>% 
+  filter(State == "Australian Capital Territory") %>% 
+  distinct(State, Industry)
+```
+
+`tsibble`クラスなので、通常のデータフレームに変換しておく。
+
+```{r}
+Industries <- c(
+  "Cafes, restaurants and catering services",
+  "Clothing retailing",
+  "Clothing, footwear and personal accessory retailing",
+  "Department stores",
+  "Electrical and electronic goods retailing"
+)
+
+monthly_retail_tbl <- tsibbledata::aus_retail %>%
+  tk_tbl() %>%
+  filter(State == "Australian Capital Territory") %>%
+  filter(Industry %in% Industries) %>% 
+  mutate(Month = as.Date(Month)) %>%
+  mutate(Industry = as_factor(Industry)) %>%
+  select(Month, Industry, Turnover)
+
+monthly_retail_tbl %>% 
+  distinct(Industry)
+```
+
+使用するデータは最終的に下記の通り。
+
+```{r}
+monthly_retail_tbl %>% 
+  group_by(Industry) %>% 
+  summarise(
+    min_date = min(Month),
+    max_date = max(Month),
+    cnt = n()
+  )
+```
+
+## 時系列の可視化
+
+5つの業種の時系列を可視化しておく。基本的には上昇トレンドではあるが、各系列ごとに異なる特徴があ見られる。
+
+```{r}
+monthly_retail_tbl %>%
+  group_by(Industry) %>%
+  plot_time_series(
+    Month,
+    Turnover,
+    .facet_ncol  = 3,
+    .smooth      = FALSE,
+    .interactive = TRUE
+  )
+```
+
+各系列の月、四半期、年の特徴を可視化する。`Department stores`に焦点を当てる。`tk_seasonal_diagnostics`関数で、系列の月、四半期、年ごとの特徴を計算できる。
+
+```{r}
+monthly_retail_tbl %>% 
+  filter(Industry == Industries[4]) %>%
+  tk_seasonal_diagnostics(.date_var = Month,
+                          .value = Turnover)
+```
+
+時系列プロットの激しいスパイクは12月に発生していることがわかる。
+
+```{r}
+monthly_retail_tbl %>% 
+  filter(Industry == Industries[4]) %>%
+  plot_seasonal_diagnostics(.date_var = Month,
+                          .value = Turnover,
+                          .title = Industries[4])
+```
+
+## 特徴量エンジニアリング
+### 探索的特徴選択
+
+有効な特徴量かどうかは、線形回帰を実行して、調整済R2乗値`Adjusted R-squared`が増加するかを調べればよい。手っ取り早い方法。`Adjusted R-squared`は0.8637。
+
+```{r}
+monthly_retail_tbl %>%
+  filter(Industry == Industries[[1]]) %>%
+  plot_time_series_regression(
+    .date_var = Month,
+    .formula = Turnover ~ Month,
+    .show_summary = TRUE,
+    .title = Industries[1]
+  )
+```
+
+### 対数・標準化変換
+
+分散を小さくするために対数変換を利用できる。また、標準化も利用される。
+
+```{r}
+monthly_retail_tbl %>%
+  filter(Industry == Industries[[1]]) %>%
+  mutate(Turnover =  log1p(x = Turnover)) %>%
+  mutate(Turnover =  standardize_vec(Turnover)) %>% 
+  plot_time_series(
+    Month,
+    Turnover,
+    .facet_ncol  = 3,
+    .smooth      = FALSE,
+    .interactive = TRUE
+  )
+```
+
+### カレンダーベースの特徴量
+
+`Time Series Signature`とも呼ばれ、`timetk::tk_augment_timeseries_signature()`関数でデータセットに25以上の特徴量を追加できる。
+
+```{r}
+monthly_retail_tbl %>%
+  filter(Industry == Industries[[1]]) %>%
+  mutate(Turnover =  log1p(x = Turnover)) %>%
+  mutate(Turnover =  standardize_vec(Turnover)) %>% 
+  tk_augment_timeseries_signature(.date_var = Month)
+```
+
+- `index.num`: "1970-01-01 00:00:00"からの秒数
+- `diff`: 直前のレコードのindex.numとの差
+- `year`: 年成分
+- `year.iso`: ISO年成分。ISOカレンダーは、週の始まりを月曜日とし、1月4日が含まれる週をその年の第1週するカレンダー。
+- `half`: 1月から6月が1、7月から12月が2
+- `quarter`: 四半期成分
+- `month`: 月成分
+- `month.xts`: xtsパッケージの実装
+- `month.lbl`: 月成分のラベル。
+- `day`: 日成分
+- `hour`: 時間成分
+- `minute`: 分成分
+- `second`: 秒成分
+- `hour12`: 12時間スケールでの時間成分
+- `am.pm`: 午前(AM)=1、午後(PM)=2
+- `wday`: 日曜日=1、土曜日=7の曜日成分
+- `wday.xts`: xtsパッケージの実装。日曜日は0、土曜日は6の曜日成分
+- `wday.lbl`: 日曜日から始まり土曜日で終わる順序付き因子としての曜日成分
+- `mday`: その年の日成分(1~366)
+- `qday`: その年の四半期基準での日成分(1四半期で1~90という感じ)
+- `yday`: その年の日成分(1~366)
+- `mweek`: その年の週成分(1-52)
+- `week`: その年の週番号(日曜始まり1-52)。
+- `week.iso`: その年のISO週番号(月曜始まり1-52)。
+- `week2`: ？(隔週での頻度に対する係数)
+- `week3`: ？(3週間ごとの頻度に対する係数)
+- `week4`: ？(4週に一度の頻度に対する係数。1月から4月は1、5月から8月は2、9月から12月は3)
+- `mday7`: ？(その月の曜日の7分割の整数値で、その日がその月に出現した最初の、2番目の、3番目の、...例を返す。例えば、その月の最初の土曜日は mday7 = 1 となる。2番目はmday7 = 2)
+  
+  
+系列に合わせて不要なカラムは削除する。
+
+```{r}
+monthly_retail_tbl %>%
+  filter(Industry == Industries[[1]]) %>%
+  mutate(Turnover =  log1p(x = Turnover)) %>%
+  mutate(Turnover =  standardize_vec(Turnover)) %>% 
+  tk_augment_timeseries_signature(.date_var = Month) %>% 
+  select(-diff, -matches("(.xts$)|(.iso$)|(hour)|(minute)|(second)|(day)|(week)|(am.pm)"))
+```
+
+`month.lbl`はこのままでは利用できないので、ダミー変数にワンホットエンコーディングする。
+
+```{r}
+monthly_retail_tbl %>%
+  filter(Industry == Industries[[1]]) %>%
+  mutate(Turnover =  log1p(x = Turnover)) %>%
+  mutate(Turnover =  standardize_vec(Turnover)) %>% 
+  tk_augment_timeseries_signature(.date_var = Month) %>% 
+  select(-diff, -matches("(.xts$)|(.iso$)|(hour)|(minute)|(second)|(day)|(week)|(am.pm)")) %>% 
+  dummy_cols(select_columns = c("month.lbl")) %>%
+  select(-month.lbl) %>%
+  mutate(index.num = normalize_vec(x = index.num)) %>%
+  mutate(year = normalize_vec(x = year))
+```
+
+`Adjusted R-squared`は0.9028となっており、0.8637よりも説明力が上がっていることがわかる。
+
+```{r}
+monthly_retail_tbl %>%
+  filter(Industry == Industries[[1]]) %>%
+  mutate(Turnover =  log1p(x = Turnover)) %>%
+  mutate(Turnover =  standardize_vec(Turnover)) %>% 
+  tk_augment_timeseries_signature(.date_var = Month) %>% 
+  select(-diff, -matches("(.xts$)|(.iso$)|(hour)|(minute)|(second)|(day)|(week)|(am.pm)")) %>% 
+  dummy_cols(select_columns = c("month.lbl")) %>%
+  select(-month.lbl) %>%
+  mutate(index.num = normalize_vec(x = index.num)) %>%
+  mutate(year = normalize_vec(x = year)) %>% 
+  plot_time_series_regression(.date_var = Month, 
+                              .formula = Turnover ~ as.numeric(Month) + 
+                                index.num + year + half + quarter + month +
+                                month.lbl_January + month.lbl_February + month.lbl_March + month.lbl_April +
+                                month.lbl_May + month.lbl_June + month.lbl_July + month.lbl_August + 
+                                month.lbl_September + month.lbl_October + month.lbl_November + month.lbl_December, 
+                              .show_summary = TRUE)
+```
+
+### フーリエ級数
+
+`tk_augment_fourier`関数を利用することで、周期的な変動を取り込める。`.K`は含めるべきsin項とcos項のペア数を指定する。`m = 12`(1年)と`K = 1`の例。
+
+```{r}
+monthly_retail_tbl %>%
+  filter(Industry == Industries[[1]]) %>%
+  mutate(Turnover =  log1p(x = Turnover)) %>%
+  mutate(Turnover =  standardize_vec(Turnover)) %>%
+  tk_augment_fourier(.date_var = Month, .periods = 12, .K = 1) %>% 
+  select(-Industry) %>%
+  pivot_longer(-Month) %>% 
+  plot_time_series(Month, .value = value, 
+                   .facet_vars = name, 
+                   .smooth = FALSE)
+```
+
+`Adjusted R-squared`は0.9037となっており、0.9028より微増したことがわかる。
+
+```{r}
+monthly_retail_tbl %>%
+  filter(Industry == Industries[[1]]) %>%
+  mutate(Turnover =  log1p(x = Turnover)) %>%
+  mutate(Turnover =  standardize_vec(Turnover)) %>% 
+  tk_augment_timeseries_signature(.date_var = Month) %>% 
+  select(-diff, -matches("(.xts$)|(.iso$)|(hour)|(minute)|(second)|(day)|(week)|(am.pm)")) %>% 
+  dummy_cols(select_columns = c("month.lbl")) %>%
+  select(-month.lbl) %>%
+  mutate(index.num = normalize_vec(x = index.num)) %>%
+  mutate(year = normalize_vec(x = year)) %>% 
+  tk_augment_fourier(.date_var = Month, .periods = 12, .K = 1) %>%
+  plot_time_series_regression(.date_var = Month, 
+                              .formula = Turnover ~ as.numeric(Month) + 
+                                index.num + year + half + quarter + month +
+                                month.lbl_January + month.lbl_February + month.lbl_March + month.lbl_April +
+                                month.lbl_May + month.lbl_June + month.lbl_July + month.lbl_August + 
+                                month.lbl_September + month.lbl_October + month.lbl_November + month.lbl_December +
+                                Month_sin12_K1 + Month_cos12_K1, 
+                              .show_summary = TRUE)
+```
+
+### ラグ特徴量
+
+ラグ特徴量とは、過去に起こったことが未来に影響を与える、あるいはある種の本質的な情報を含んでいるという仮定に基づいて作成されるため有用な場合がある。PACFがラグ13と関連していることがわかる。
+
+```{r}
+monthly_retail_tbl %>%
+  filter(Industry == Industries[[1]]) %>%
+  plot_acf_diagnostics(Month,
+                       Turnover,
+                       .lags = "24 months",
+                       .interactive = FALSE)
+```
+
+具体的なイメージはこちら。
+
+```{r}
+date <- seq(as.Date("2022-01-01"), as.Date("2022-01-30"), by = "day")
+d <- tibble(date, value = 1:30)
+d %>% 
+  tk_augment_lags(.value = value, .lags = c(12, 13)) %>% 
+  print(n = 30)
+```
+
+`Adjusted R-squared`は0.9237となっており、0.9037より微増したことがわかる。
+
+```{r}
+monthly_retail_tbl %>%
+  filter(Industry == Industries[[1]]) %>%
+  mutate(Turnover =  log1p(x = Turnover)) %>%
+  mutate(Turnover =  standardize_vec(Turnover)) %>% 
+  tk_augment_timeseries_signature(.date_var = Month) %>% 
+  select(-diff, -matches("(.xts$)|(.iso$)|(hour)|(minute)|(second)|(day)|(week)|(am.pm)")) %>% 
+  dummy_cols(select_columns = c("month.lbl")) %>%
+  select(-month.lbl) %>%
+  mutate(index.num = normalize_vec(x = index.num)) %>%
+  mutate(year = normalize_vec(x = year)) %>% 
+  tk_augment_fourier(.date_var = Month, .periods = 12, .K = 1) %>%
+  tk_augment_lags(.value = Turnover, .lags = c(12, 13)) %>%
+  plot_time_series_regression(.date_var = Month, 
+                              .formula = Turnover ~ as.numeric(Month) + 
+                                index.num + year + half + quarter + month +
+                                month.lbl_January + month.lbl_February + month.lbl_March + month.lbl_April +
+                                month.lbl_May + month.lbl_June + month.lbl_July + month.lbl_August + 
+                                month.lbl_September + month.lbl_October + month.lbl_November + month.lbl_December +
+                                Month_sin12_K1 + Month_cos12_K1 + 
+                                Turnover_lag12 + Turnover_lag13, 
+                              .show_summary = TRUE)
+```
+
+## ローリング特徴量
+
+時系列データセットでローリングウィンドウ特徴量は、サンプル自体と事前に指定された数のサンプルを含む範囲を定義することによって、特定のデータサンプルの値に関する統計を計算することで特徴量を作成できる。いくつかのローリング期間の値を試した後、3か月、6か月、12か月の3つのローリング期間を設定する。
+
+具体的なイメージはこちら。
+
+```{r}
+d %>% 
+  tk_augment_lags(.value = value, .lags = 12) %>%
+  tk_augment_slidify(.value   = value_lag12,
+                     .f       = ~ mean(.x, na.rm = TRUE), 
+                     .period  = c(3, 6, 9, 12),
+                     .partial = TRUE,
+                     .align   = "center") %>% 
+  print(n = 30)
+```
+
+`Adjusted R-squared`は0.9481となっており、0.9237より微増したことがわかる。
+
+```{r}
+monthly_retail_tbl %>%
+  filter(Industry == Industries[[1]]) %>%
+  mutate(Turnover =  log1p(x = Turnover)) %>%
+  mutate(Turnover =  standardize_vec(Turnover)) %>% 
+  tk_augment_timeseries_signature(.date_var = Month) %>% 
+  select(-diff, -matches("(.xts$)|(.iso$)|(hour)|(minute)|(second)|(day)|(week)|(am.pm)")) %>%
+  dummy_cols(select_columns = c("month.lbl")) %>%
+  select(-month.lbl) %>%
+  mutate(index.num = normalize_vec(x = index.num)) %>%
+  mutate(year = normalize_vec(x = year)) %>%
+  tk_augment_fourier(.date_var = Month, .periods = 12, .K = 1) %>%
+  tk_augment_lags(.value = Turnover, .lags = c(12, 13)) %>%
+  tk_augment_slidify(.value   = c(Turnover_lag12, Turnover_lag13),
+                     .f       = ~ mean(.x, na.rm = TRUE), 
+                     .period  = c(3, 6, 9, 12),
+                     .partial = TRUE,
+                     .align   = "center") %>%
+  plot_time_series_regression(.date_var = Month, 
+                              .formula = Turnover ~ as.numeric(Month) + 
+                                index.num + year + half + quarter + month +
+                                month.lbl_January + month.lbl_February + month.lbl_March + month.lbl_April +
+                                month.lbl_May + month.lbl_June + month.lbl_July + month.lbl_August + 
+                                month.lbl_September + month.lbl_October + month.lbl_November + month.lbl_December +
+                                Month_sin12_K1 + Month_cos12_K1 + 
+                                Turnover_lag12 + Turnover_lag12_roll_3  + Turnover_lag12_roll_6  + Turnover_lag12_roll_9 + Turnover_lag12_roll_12 +
+                                Turnover_lag13 + Turnover_lag13_roll_3  + Turnover_lag13_roll_6  + Turnover_lag13_roll_9 + Turnover_lag13_roll_12,
+                              .show_summary = TRUE)
+```
+
+## 参考文献
+
+- [Time Series Forecasting Lab (Part 1) - Introduction to Feature Engineering](https://blog.bguarisma.com/time-series-forecasting-lab-part-1-introduction-to-feature-engineering)

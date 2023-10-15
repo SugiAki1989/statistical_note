@@ -1,0 +1,99 @@
+---
+title: "回帰分析の回帰診断"
+pagetitle: "回帰分析の回帰診断"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 1280,
+                      out.height = 720,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+数年前に書いたものをそのまま転記している。
+
+## 回帰診断図
+
+線形モデルの回帰診断図は下記がわかりやすい。
+
+- [線形モデルと回帰診断図](https://hasegawascond.hatenablog.com/entry/2020/11/15/032629)
+
+ここでは特徴をもつデータを生成し、診断図がどのようになるかを確認する。
+
+- データ1：シンプル線形関係のデータ。
+- データ2：2次曲線のような関係があるデータ
+- データ3：不等分散性を持つデータ
+- データ4：時系列の特徴を持つデータ
+- データ5：単位根過程のデータ(見せかけの回帰)
+
+```{r}
+set.seed(1989)
+n <- 100
+x <- runif(n) * 50
+y1 <- 2*x + rnorm(n)
+fit1 <- lm(y1 ~ x)
+y2 <- 2*x^2 + rnorm(n)
+fit2 <- lm(y2 ~ x)
+y3 <- 2*x + rnorm(n, sd = x)
+fit3 <- lm(y3 ~ x)
+url <- "https://raw.githubusercontent.com/facebook/prophet/master/examples/example_wp_log_peyton_manning.csv"
+t <- read.csv(file=url)
+t_x <- 1:nrow(t)
+t_y <- t$y
+fit4 <- lm(t_y ~ t_x)
+set.seed(1989)
+n <- 5000
+xx <- cumsum(rnorm(n))
+yy <- cumsum(rnorm(n))
+fit5 <- lm(yy ~ xx)
+# 最後の作図用スクリプト
+par(mfrow = c(6, 5), mar = c(1,1,1,1))
+plot(x, y1, main = "fit1")
+plot(x, y2, main = "fit2")
+plot(x, y3, main = "fit3")
+plot(t_x, t$y, main = "fit4")
+plot(xx, yy, main = "fit5")
+plot(fit1, which = 1)
+plot(fit2, which = 1)
+plot(fit3, which = 1)
+plot(fit4, which = 1)
+plot(fit5, which = 1)
+plot(fit1, which = 2)
+plot(fit2, which = 2)
+plot(fit3, which = 2)
+plot(fit4, which = 2)
+plot(fit5, which = 2)
+hist(resid(fit1), xlab = "Resid", breaks = 50)
+hist(resid(fit2), xlab = "Resid", breaks = 50)
+hist(resid(fit3), xlab = "Resid", breaks = 50)
+hist(resid(fit4), xlab = "Resid", breaks = 50)
+hist(resid(fit5), xlab = "Resid", breaks = 50)
+acf(resid(fit1))
+acf(resid(fit2))
+acf(resid(fit3))
+acf(resid(fit4))
+acf(resid(fit5))
+plot(resid(fit1)[1:n-1], resid(fit1)[2:n], main = "Resid(fit1)")
+plot(resid(fit2)[1:n-1], resid(fit2)[2:n], main = "Resid(fit2)")
+plot(resid(fit3)[1:n-1], resid(fit3)[2:n], main = "Resid(fit3)")
+plot(resid(fit4)[1:n-1], resid(fit4)[2:n], main = "Resid(fit4)")
+plot(resid(fit5)[1:n-1], resid(fit5)[2:n], main = "Resid(fit5)")
+```

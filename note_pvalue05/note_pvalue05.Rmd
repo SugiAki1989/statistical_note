@@ -1,0 +1,483 @@
+---
+title: "サンプルサイズの大きさの決め方"
+pagetitle: "サンプルサイズの大きさの決め方"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここではサンプルサイズの大きさ(`sample size`)を決める方法をまとめていきます。サンプルサイズの大きさを決める方法は2通りあって、精度を基準に決める方法と検定の要素をもとに決める方法があります。
+
+前者は、あるアンケートの質問の比率を推定したい場合など、標本による推定誤差を収めたい範囲から逆算してサンプルサイズを決める方法で、後者は、検定の行う場合など、有意水準$\alpha$、有意差$d$、検出力$1 - \beta$ から逆算する方法。
+
+## 精度を基準に決める方法
+
+信頼区間の計算式を利用することで精度を基準にサンプルサイズを決めることができます。下記の式を利用すれば、誤差を$\varepsilon$以内に抑えた上で、確率$1-\alpha$で標本比率を推定できます。詳しいことは前回のノートで取り扱っているので、省略します。
+
+区間を決めているのは、下記の部分なので、
+
+$$
+Z_{\frac{\alpha}{2}}\sqrt{\frac{\hat{p}(1-\hat{p})}{n}} = \varepsilon
+$$
+
+これを変形し、$n$について解くことで、精度をコントロールできます。
+
+$$
+n = \hat{p}(1-\hat{p})\left(\frac{Z_{\frac{\alpha}{2}}}{\varepsilon} \right)^{2}
+$$
+
+実際のところ、調査する前から標本比率$\hat{p}$がわかっている場合はまれなので、標本比率$\hat{p}=0.50=50\%$
+と設定して、サンプルサイズを求めることになります。標本比率$\hat{p}=0.50=50\%$とするのは、必要なサンプルサイズが一番大きなる標本比率$\hat{p}$が50%だからです。下記の計算式でサンプルサイズを計算することができます。
+
+```{r}
+p <- 0.50
+alpha <- 0.05
+eps <- 0.05
+z <- qnorm(alpha/2, mean = 0, sd = 1, lower.tail = FALSE)
+
+# サンプルサイズの計算式
+n <- p*(1-p)*(z / eps)^2
+sprintf('必要なサンプルサイズn = %.0f人', n)
+```
+
+ここでは、標本比率が母比率に対して収まって欲しい範囲を表す誤差を(`r eps*100`)%として、100回中95回は誤差の範囲内に収まる信頼度を(`r (1-alpha)*100`)%としています。
+
+## 検定の要素から行う場合
+有意水準$\alpha$、有意差$d$、検出力$1 - \beta$を利用する方法で、有意差$d$というのは聞き慣れないかもしれませんが、一般に帰無仮説は$H_{0}: d = 0$、対立仮説は$H_{1}: d \ne 0$となっていることが多いと思います。この時、どれくらいの差があれば意味のある差とするか、検出したい有意差の量的な表現のことです。
+
+### 母平均の差の検定
+
+正規分布を母集団に仮定して話を進めていきます。まず母平均の差の検定を例に考えます。2つの母集団として$\mu_{A},\mu_{B},\sigma^{2}_{A},\sigma^{2}_{B}$を考え、等分散$\sigma^{2}_{A}=\sigma^{2}_{B}=\sigma^{2}$を仮定します。この2つの母集団から標本$n_{A},n_{B}$をサンプリングします。検出したい有意差$d$は絶対値の差$d$は、$|\mu_{A} - \mu_{B}|$を$\sigma$で除した値を利用します。
+
+なぜこのような計算から差をもとめるのかというと、母平均の差が同じ場合を考え、ばらつきが小さいケース、大きいケースを考えます。ばらつきが小さいのであれば分布が重なる範囲が少なく、差が大きいと考えられそうですが、ばらつきが大きいのであれば分布が重なる範囲が多く、差が小さいと考えられるためです。
+
+ただ、$d$をどのように決定すればよいかが問題となる。過去の調査などから$d$を仮定できればよいが、仮定するのは困難なケースが多いため、慣習的に下記に従うことも多いです。
+
+- 小さい差を検出する場合: $d=0.1 \sim 0.2$
+- 中くらいの差を検出する場合: $d=0.4 \sim 0.5$
+- 大きい差を検出する場合: $d=0.8 \sim 0.9$
+
+$n$が等しい場合のサンプルサイズの計算式は、下記のようになります。
+
+$$
+n = 2 \left\{ \frac{Z(\alpha/2) + Z(\beta)}{d} \right\}^{2}
+$$
+
+であり、$\alpha=0.05$、$1-\beta=0.80$、$d=0.40$で中くらいの差を検出したいとすると、両グループから100人程度サンプリングすれば良いことになります。
+
+```{r}
+alpha <- 0.05
+beta <- 0.80
+d <- 0.40
+
+a <- qnorm(alpha/2, mean = 0, sd = 1, lower.tail = FALSE)
+b <- qnorm(1-beta, mean = 0, sd = 1, lower.tail = FALSE)
+
+n <- ceiling(2 * ((a + b) / d)^2)
+sprintf('必要なサンプルサイズn = %.0f人', n)
+```
+
+自分で計算しなくても`power.t.test`関数を利用すれば便利です。
+
+```{r}
+power.t.test(n = NULL,
+             delta = d,
+             sd = 1, 
+             sig.level = alpha,
+             power = beta,
+             type = 'two.sample',
+             alternative = 'two.sided'
+             )
+```
+
+### 母比率の差の検定
+
+2つの母集団として母比率$p_{A},p_{B}$を考えると、両側検定の各仮説は$H_{0}: p_{A}=p_{B}, H_{1}: p_{A} \ne p_{B}$となります。検出すべき差に対する量的表現は$|p_{A}-p_{B}|$ではなく、arcsinで変換した値を利用します。なぜarcsinで変換するのかというと、比率の差が10%脱としても、90%と80%の差が10%と、10%と20%の差が10%では、検出する差のサンプルサイズが異なるため、詳しい話はさておき、変換して利用することで便利に扱えます。
+
+$$
+\phi = 2 arcsin(\sqrt{p})
+$$
+この変換した値の差を利用する。
+
+$$
+d = |\phi_{A} - \phi_{B}|
+$$
+
+そして、先ほどと同じように、$\alpha$、$1-\beta$、$d$を決めれば、サンプルサイズを決定できます。ランダムサンプリングのサンプルサイズが同じとする場合、母平均の差で用いた計算式がそのまま利用できます。$\alpha=0.05$、$\beta=0.80$、$d = |\phi_{A} - \phi_{B}|$としてサンプルサイズを求めてみます。
+
+ここで$\phi_{A}=0.75, \phi_{B}=0.55$とします。これは$d=0.20$があれば統計学的に効果ありとする差になります。例えば広告とかコンバージョンの話で、パターンAが50％で、新しいパターンBが差の20％くらい高い75％であれば、効果はあったと考えていることになります。およそ各グループで90人くらいをサンプリングすればよいということになります。
+
+```{r}
+alpha <- 0.05
+beta <- 0.80
+
+pa <- 2*asin(sqrt(0.75))
+pb <- 2*asin(sqrt(0.55))
+d <- abs(pa - pb)
+
+a <- qnorm(alpha/2, mean = 0, sd = 1, lower.tail = FALSE)
+b <- qnorm(1-beta, mean = 0, sd = 1, lower.tail = FALSE)
+
+n <- ceiling(2 * ((a + b) / d)^2)
+sprintf('必要なサンプルサイズn = %.0f人', n)
+```
+
+ただ、実験をする前から$d$を決め打ちすることが難しい問題があります。この時に有用な考え方が最小検出可能効果(Minimum Detectable Effect: MDE)。これは、真の値はわからないものの、実用的なビジネスで意味のある差の大きさはもとにして考える方法。自分たちのビジネスと照らし合わせ、1%は見落としても良いが、5%は見落としたくないのであれば、$d=5%$としてサンプルサイズを見積もることになる。つまり、必要なサンプルサイズの最小値を推定するために、ビジネス的に意味のある差を利用する。ネットで見かける[A/B-test size calculator](https://abtestguide.com/abtestsize/)などのサンプルサイズ計算機はこのMDEを相対指定させるものもある。下記の設定で行えば似たようなサンプルサイズが返される。
+
+- Conversion rate Control via your test page, in %: 55
+- Expected improvement over control relative, in %: 36.3
+- Hypothesis: Two-sided
+- Power: 80
+- Required confidence level (1 - alpha): 95
+
+先程と同じくこちらも`power.prop.test`関数を利用すれば便利です。arcsinで変換する必要はありません。
+
+```{r}
+power.prop.test(n = NULL, 
+                p1 = 0.75, 
+                p2 = 0.55, 
+                sig.level = alpha,
+                power = beta,
+                alternative = 'two.sided'
+                )
+
+```
+
+1つの母比率$p$が特定の$p_{0}$と等しいかどうかを検定する場合、
+
+$$
+\phi_{0} = 2 arcsin(\sqrt{p_{0}})
+$$
+
+として、下記の通り差を計算します。
+
+$$
+d = \sqrt{2}|\phi -  \phi_{0}|
+$$
+
+例えば、前回の広告結果としてCV率が3%はわかっているとして、新しいクリエティブでは8％が見込める場合で、両側検定、$\alpha=0.01$、$\beta=0.95$としてサンプルサイズを求めてみます。つまり5％の差があればクリエイティブは有効とします。結果を見ると、必要なサンプルサイズは351人となりました。
+
+```{r}
+alpha <- 0.01
+beta <- 0.95
+
+p <- 2*asin(sqrt(0.08))
+p0 <- 2*asin(sqrt(0.03))
+d <- sqrt(2) * abs(p - p0)
+
+a <- qnorm(alpha/2, mean = 0, sd = 1, lower.tail = FALSE)
+b <- qnorm(1-beta, mean = 0, sd = 1, lower.tail = FALSE)
+
+n <- ceiling(2 * ((a + b) / d)^2)
+sprintf('必要なサンプルサイズn = %.0f人', n)
+```
+
+`pwr`パッケージには1標本の母比率の検定の検定力分析ができる関数があったので、こちらを利用する。
+
+```{r}
+library(pwr)
+pwr.p.test(
+  h = ES.h(0.03, 0.08),
+  n = NULL,
+  sig.level = alpha,
+  power = beta,
+  alternative = 'two.sided'
+)
+```
+
+## 比率のサンプルサイズ設計の詳細
+
+下記の書籍を参考にまとめている。
+
+- [医学のためのサンプルサイズ設計](https://www.kyoto-up.or.jp/9784814003822.html)
+
+2値アウトカムは成功、失敗などのいずれかを値をとり、比率として表現できるアウトカムのこと。2群の2値アウトカムはクロス集計表にまとめることができる。合計の$\varphi$が見慣れないが、$N=100$とすると、$n_{S}=40, n_{T}=60$となるので、$\varphi = 1.5$となり、$n_{T} =\varphi n_{S}= 1.5 * 40=60$となる。つまり、$\varphi$は割付比率の違いの大きさを表す。
+
+||成功|失敗|合計|観測成功率|想定成功率|
+|:-:|:-:|:-:|:-:|:-:|:-:|
+|コントロール群($S$)|$a$|$c$|$n_{S}$|$a/n_{S}$|$\pi_{planS}$|
+|トリートメント群($T$)|$b$|$d$|$n_{T}=\varphi n_{s}$|$b/n_{T}$|$\pi_{planT}$|
+|合計|$r$|$s$|$N$||
+
+サンプルサイズを設計する前に、想定される効果の大きさ、割合の差$\delta_{plan} = \pi_{planT} = _{planS}$を決める必要がある。2つの比率を比較する一般的な方法は$\chi^{2}$検定か正確検定が多い。$\chi^{2}$検定の場合、サンプルサイズを計算する式は下記の通り。
+
+$$
+\begin{eqnarray}
+N &=& \frac{1 + \varphi}{\varphi} \frac{\left[z_{1-\frac{\alpha}{2}}\sqrt{(1 + \varphi) \bar{\pi} (1 - \bar{\pi})} + 
+  z_{1-\beta}\sqrt{\varphi \pi_{S} (1 - \pi_{S}) + \pi_{T} (1 - \pi_{T})}
+\right]^{2}}{\delta^{2}_{plan}}\\
+\bar{\pi}&=&\frac{\pi_{S} + \varphi \pi_{T}}{1 + \varphi}
+\end{eqnarray}
+$$
+
+各グループに必要なサンプルサイズは、
+
+$$
+\begin{eqnarray}
+n_{S} = \frac{N}{1+\varphi},\quad n_{T} = \frac{\varphi N}{1+\varphi}, 
+\end{eqnarray}
+$$
+
+となる。$\varphi=1$のとき、つまり各群のサイズが等しいのであれば、簡単になる。
+
+$$
+\begin{eqnarray}
+n_{S} = \frac{N}{1+1} = \frac{N}{2},\quad n_{T} = \frac{1 N}{1+1} = \frac{N}{2}, 
+\end{eqnarray}
+$$
+
+[医学のためのサンプルサイズ設計](https://www.kyoto-up.or.jp/9784814003822.html)のp73の例の数値をお借りして、実際にサンプルサイズを計算する。
+
+- コントロール群: 0.38($\pi_{S}$)
+- トリートメント群: 0.23($\pi_{T}$)
+- 割付比率: 1対1($\varphi$)
+- 想定される差: 0.15=0.38-0.23($\delta_{plan} = \pi_{S} - \pi_{T}$)
+- $\bar{\pi}$ = $\frac{0.38 + (1 × 0.23)}{1 + 1} = 0.305$
+- 有意水準$\alpha$: 0.05
+- 検出力$1 - \beta$: 0.90
+
+```{r}
+pi.s <- 0.38
+pi.t <- 0.23
+alpha <- 0.05
+beta <- 0.10
+delta <- pi.s - pi.t
+phi <- 1
+barpi <- ((pi.s + phi*pi.t)/(1 + phi))
+z0.975 <- qnorm(1 - alpha/2, 0, 1)
+z0.9 <- qnorm(1 - beta, 0, 1)
+
+PHI <- (1 + phi)/phi
+NUMERATOR <- (z0.975 * sqrt((1 + phi) * barpi * (1 - barpi)) + z0.9 * sqrt(phi * pi.s * (1 - pi.s) + pi.t * (1 - pi.t)))^2
+DENOMINATOR <- delta^2
+N <- PHI * (NUMERATOR/DENOMINATOR)   
+N.S <- N / (1 + phi)
+N.T <- phi * N / (1 + phi)
+list(N = sprintf('必要な全体サンプルサイズn = %.0f人', ceiling(N)),
+     N.S = sprintf('必要な群単位のサンプルサイズn = %.0f人', ceiling(N.S)),
+     N.T = sprintf('必要な群単位のサンプルサイズn = %.0f人', ceiling(N.T))
+                   )
+```
+
+組み込み関数の`power.prop.test`関数でも同様の結果が得られている。
+
+```{r}
+power.prop.test(n = NULL, 
+                p1 = pi.s, 
+                p2 = pi.t, 
+                sig.level = alpha,
+                power = 1 - beta,
+                alternative = 'two.sided'
+)
+```
+
+## なぜサンプルサイズ計算？
+ここまでは、サンプルサイズの計算方法をまとめていましたが、そもそもなぜサンプルサイズ計算が必要なのでしょうか？
+
+サンプルサイズ計算は「分析目的を達成するために必要な人数を見積るため」に必要な作業です。なので、サンプルサイズはいくつあればよいのか？という質問はナンセンスで、このような目的がある前提で、サンプルサイズはいくつあればよいのか？という考え方が必要になります。結果が得られても信頼のおけるものでなければ意味がないので、信頼のおける結論を得るために必要な作業と言えます。
+
+サンプルサイズを必要以上に多く集めると、様々な資源の無駄遣いになりますし、サンプルサイズが不足していると差が本当はあるのにサンプルサイズ不足で検出できなかったり、無駄が生まれます。
+
+例えば、広告の文脈で考えると、サンプルサイズ設計にあると役立つ項目は下記などです。
+
+- 主要評価項目(目的変数): コンバージョンの有無
+- 検定方法: 母比率の差の検定
+- 検出するべき差(有意差): どのくらいの差があればビジネス的に意味のある最小の差なのか。サンプルサイズを大きくすれば微小な差でも検出することができますが、その差は統計学的には有意かもしれませんが、ビジネス的には無意味な差かもしれません。
+- ばらつきの大きさ: コントロールグループの発生割合など
+- $\alpha$エラー: 本当は差がない場合に誤って差があるとする確率で、通常は5％や1％を設定
+- $\beta$エラー: 本当は差がある場合に誤って差がないとする確率
+- $1 - \beta$: 差があるときに、差があるとする確率で、通常は80％から90％を設定
+- 最大の取得可能サンプルサイズ: サンプルサイズの実質的な上限を考えるため。
+
+具体的な例を書くとこんな感じかと思います(テキトーに書いてます)。
+
+- 主要評価項目(目的変数): コントロール、トリートメントグループのコンバージョン割合の差
+- 検定方法: 母比率の差の検定
+- $\alpha$エラー: 5％
+- $1 - \beta$: 80％
+- 最大の取得可能サンプルサイズ: サイトアクセスユーザー数
+- ばらつきの大きさ: コントロールグループのCV率は10％
+- 検出するべき差(有意差):5％。つまり、トリートメントグループのCV率は15％
+
+ここで難しいのはさきほどを記述した通り、「検出するべき差」を事前に見積もることです。実際は観測されるであろう差を見積もることになりますが、予め見積もる必要があります。
+
+例えば、新しいクリエティブが現状よりも1%改善すると考えた際に、1％はビジネス的に意味のある差でなければ、そもそもそのテストを実施する必要がないと判断できます。検定の差が有意でも、ビジネス的に意味のある差でないなら意思決定に役立ちません。5％くらいがビジネス的に意味のある差であれば、そのくらい改善できそうなクリエイティブや施策を考えるほうが先かと思います。勿論、サービスのユーザー数に応じて1％の改善で売上が大きく変わる場合もあるので、サービスのビジネスをもとに検出すべき差を見積もる必要があります。
+
+あくまで様々な値が見積もりなので、感度分析というパラメタの値を変化させたときにサンプルサイズがどのように変わるのかを予め分析する方法もあります。この分析を通じて、どのような値であればサンプルサイズがいくら必要なのか確認できます。
+
+```{r}
+# 適当な値と雑なスクリプトですいません
+p1 <- c(0.10, 0.10, 0.10, 0.10)
+p2 <- c(0.11, 0.12, 0.14, 0.15)
+alpha <- 0.05
+beta <- c(0.90, 0.80, 0.70, 0.60)
+n <- length(beta)
+
+for (i in 1:n) {
+  for (j in 1:n) {
+    for (k in 1:n) {
+      res <- power.prop.test(
+        n = NULL,
+        p1 = p1[[i]],
+        p2 = p2[[j]],
+        sig.level = alpha,
+        power = beta[[k]],
+        alternative = 'two.sided'
+      )
+      
+      cat(
+        'p1=', p1[[i]],
+        '/ p2=',p2[[j]],
+        '/ beta=',beta[[k]],
+        '/ n=', ceiling(res$n),
+        '\n---------------------------------------\n'
+      )
+    }
+  }
+}
+
+```
+
+サンプルサイズの計算式は検定の種類によって変わりますが、基礎となる計算式があります。ここでは、基礎となる計算式をもとに、平均値の差の検定を例に計算します。各グループのサイズを$n$として、帰無仮説$d=0$、対立仮説$d=\Delta$のもとでの、平均値の差$d$の分布は、どちらも標準偏差が$SE(d)=\sqrt{2}\sigma/\sqrt{n}$の正規分布となります。対立仮説と帰無仮説は$\Delta$だけ位置がズレているだけです。
+
+棄却限界値$c$で分割すると$\Delta$の内側$A$と外側$B$の2つの範囲に分けることができます。$A$と$B$の長さを足すと$\Delta$に等しくなることから、恒等式を導くことができ、サンプルサイズ$n$を計算できる式が出てきます。これを図解すると下記のようにイメージなります。長文の数式は疲れるので手書きで失礼します。
+
+![サンプルサイズの計算式のイメージ](/Users/aki/Documents/statistical_note/note_pvalue05/delta.png)
+
+パラメタを固定してRで可視化するとこんな感じになる。ちょっと数理の理解とR力が足りない粗末な感じですいません。
+
+```{r}
+n <- 30
+sd <- 25
+mu0 <- 0; mu1 <- 15
+alpha <- 0.05
+xmin <- -30; xmax <- 40
+ymin <- 0; ymax <- dnorm(mu0, mean = mu0, sd = sd * sqrt(2/n)) + 0.005
+xseq <- seq(xmin, xmax, 0.01)
+
+# dnorm(xseq, mean = mu0, sd = sd * sqrt(2/n))
+# dnorm(xseq, mean = mu1, sd = sd * sqrt(2/n))
+plot(NULL, xlim = c(xmin, xmax), ylim = c(ymin, ymax), xlab = "", ylab = "", xaxt = "n", yaxt = "n", axes = FALSE)
+curve(dnorm(x, mean = mu0, sd = sd * sqrt(2/n)), lwd = 2, col = 'red', add = TRUE)
+curve(dnorm(x, mean = mu1, sd = sd * sqrt(2/n)), lwd = 2, col = 'blue', add = TRUE)
+axis(1, at = seq(xmin, xmax, 5))
+
+segments(mu0, ymin, mu0, dnorm(mu0, mean = mu0, sd = sd * sqrt(2/n)), col = 'red')
+segments(mu1, ymin, mu1, dnorm(mu1, mean = mu1, sd = sd * sqrt(2/n)), col = 'blue')
+c <- qnorm(p = 1-alpha/2, mean = mu0, sd = sd * sqrt(2/n), lower.tail = TRUE)
+segments(c, ymin, c, dnorm(mu1, mean = mu1, sd = sd * sqrt(2/n)))
+
+a <- qnorm(p = alpha/2, mean = 0, sd = 1, lower.tail = FALSE) * sqrt(2/n) * sd
+cc <- pnorm(q = a, mean = mu1, sd = sd * sqrt(2/n))
+b <- qnorm(p = cc, mean = 0, sd = 1, lower.tail = FALSE) * sqrt(2/n) * sd
+
+arrows(mu0, 0.005, mu1-mu0, 0.005, code = 3, length = 0.1, col = 'black')
+arrows(mu0, 0.002, mu0+a, 0.002, code = 2, length = 0.1, col = 'red')
+arrows(mu1, 0.002, mu1+(-1*b), 0.002, code = 2, length = 0.1, col = 'blue')
+
+text(mu0, 0.003, round(a,2), col = 'red', pos = 4)
+text(mu1, 0.003, round(b,2), col = 'blue', pos = 2)
+text((mu1 - mu0)/2, 0.005, round(mu1 - mu0, 2), col = 'black', pos = 3)
+```
+
+このあたりに関しては、下記のGoogleのデータサイエンティストの方が解説している動画がわかりやすいです。
+
+- [AB Testing 101 | Fmr. Google Data Scientist Explains How to Calculate the Sample Size](https://www.youtube.com/watch?v=KC1nwY7YCUE&list=LL&index=2&t=988s)
+
+## おまけ
+
+ここからはおまけです。ただのメモです。
+
+```{r}
+# どのくらいの差があればビジネス的に意味のある差かを考える
+mu_a <- 20
+mu_b <- 22
+# 過去のデータから実験はどの程度ばらつくのかを試算する
+sd <- 2
+# 平均の差と標準偏差を利用して効果量を算出する
+delta <- (mu_b - mu_a)/sd
+# ここまでの計算内容
+list(
+  mu_a = mu_a, 
+  mu_b = mu_b, 
+  sd = sd, 
+  delta = delta
+)
+# サンプルサイズを計算する
+power_pre <- pwr::pwr.t.test(
+  n = NULL, 
+  d = delta,
+  sig.level = 0.05,
+  power = 0.8,
+  alternative = 'two.sided'
+)
+power_pre
+```
+
+```{r}
+# サンプルサイズをもとに実験する
+n <- floor(power_pre$n)
+set.seed(1)
+a <- rnorm(n, mu_a, sd)
+b <- rnorm(n, mu_b, sd)
+
+# t検定を行う
+t.test(a, b)
+```
+
+```{r}
+# 事後検出力分析のために統計量を計算
+mean_post_a <- mean(a)
+sd_post_a <- sd(a)
+mean_post_b <- mean(b)
+sd_post_b <- sd(b)
+n_mod <- n - 1
+sd_post_ab <- sqrt(
+  ((n_mod*sd_post_a^2) + (n_mod*sd_post_b^2)) / (n_mod+n_mod)
+)
+delta_post <- (mean_post_b - mean_post_a)/sd_post_ab
+list(
+  mean_post_a = mean_post_a, 
+  sd_post_a = sd_post_a, 
+  mean_post_b = mean_post_b, 
+  sd_post_b = sd_post_b,
+  sd_post_ab = sd_post_ab
+)
+```
+
+```{r}
+# 事後検出力分析を行う
+power_post <- pwr::pwr.t.test(
+  n = n,
+  d = delta_post,
+  sig.level = 0.05,
+  power = NULL,
+  alternative = 'two.sided'
+)
+# 効果量delta = 1を想定していたが、1.12となり、
+# 検出力power = 0.8を想定していたが、0.86となった
+power_post
+```

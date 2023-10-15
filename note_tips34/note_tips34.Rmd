@@ -1,0 +1,324 @@
+---
+title: 'クロス集計からモンテカルロシュミレーションまで'
+pagetitle: 'クロス集計からモンテカルロシュミレーションまで'
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: 'show'
+    highlight: 'kate'
+    # theme: 'flatly'
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = 'center',
+                      dev        = 'ragg_png')
+```
+
+<div class='update-right'>
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、基本的なクロス集計の見方から多項分布を用いたクロス集計のモンテカルロシュミレーションまでをまとめている。また、Rでクロス集計を行うためのパッケージについてもまとめておく。
+
+## クロス集計のためのパッケージ
+
+クロス集計の見方を説明する前に、クロス集計を行うためのパッケージをまとめておく。まずはサンプルデータの準備しておく。大阪と東京の人を対象に、たこ焼きの好き嫌いを聞いたアンケートみたいなイメージ。大阪のほうがたこ焼きが好きな割合を多くして、東京の方は意図的に少なくしておく。
+
+```{r}
+library(tidyverse)
+
+set.seed(1989)
+n_tokyo <- 200
+n_osaka <- 100
+x_tokyo <- rbinom(n = n_tokyo, size = 1, prob = 0.4)
+x_osaka <- rbinom(n = n_osaka, size = 1, prob = 0.7)
+like <- c(x_tokyo, x_osaka)
+like[like == 1] <- 'Yes'
+like[like == 0] <- 'No'
+
+df <- tibble(
+  area = rep(c('tokyo', 'osaka'), times = c(n_tokyo, n_osaka)),
+  is_like = like
+)
+df
+```
+
+クロス集計といえば、まずは`table()`関数。ベクトルを渡せばクロス集計してくれる。
+
+```{r}
+table(df$area, df$is_like)
+```
+
+`prop.table()`関数を使えば割合で表示してくれる。横％、縦％、全体％かは``margin`で指定できる。
+
+```{r}
+prop.table(table(df$area, df$is_like), margin = 1) # 横％ 
+```
+
+他には`xtabs()`関数がある。引数をモデル式(`formula`)で渡す。
+
+```{r}
+# prop.tableの引数に下記を渡すことで、割合は計算可能
+xtabs(~ area + is_like, df)
+```
+
+他には`ftable()`関数がある。引数をモデル式(`formula`)で渡す。多層のクロス集計をするときは便利。
+
+
+```{r}
+# prop.tableの引数に下記を渡すことで、割合は計算可能
+ftable(df, row.vars = 1, col.vars = 2)
+```
+
+クロス集計用の関数を使わなくても集計するだけなので、パイプをつなげることでクロス集計はできる。
+
+```{r}
+df %>% 
+  group_by(area, is_like) %>% 
+  # tally()でもよい
+  count() %>% 
+  pivot_wider(names_from = is_like, values_from = n)
+```
+`janitor`パッケージを利用すればデータフレームをベースにクロス集計が作成できる。詳細は下記のドキュメントを参照願います。
+
+- [Overview of janitor functions](https://cran.r-project.org/web/packages/janitor/vignettes/janitor.html)
+- [tabyls: a tidy, fully-featured approach to counting things](https://cran.r-project.org/web/packages/janitor/vignettes/tabyls.html)
+
+
+```{r}
+library(janitor)
+df %>% 
+  tabyl(area, is_like) %>% 
+  adorn_totals(c('row', 'col'))
+```
+
+`adorn_*()`関数を繋げていくことで、出力形式を柔軟に変更できる。
+
+```{r}
+df %>% 
+  tabyl(area, is_like) %>%
+  adorn_totals(c('row', 'col')) %>% 
+  adorn_percentages('row') %>% 
+  adorn_pct_formatting(digits = 1)
+```
+
+実数とパーセントを併記することも可能。
+
+```{r}
+ct <- df %>%                                  
+  tabyl(area, is_like) %>%                  
+  adorn_totals(where = c('row', 'col'))%>% 
+  adorn_percentages('row') %>% 
+  adorn_pct_formatting(digits = 1) %>%  
+  # 'count (%)'表記
+  adorn_ns(position = 'front') %>%           
+  adorn_title(                                
+    row_name = 'Area',
+    col_name = 'IsLike'
+    )
+ct
+```
+
+データフレームがベースなので、そのまま`ggplot`に渡せば可視化も簡単にできる。
+
+```{r}
+df %>%                                  
+  tabyl(area, is_like) %>%                  
+  adorn_totals(where = 'row')%>% 
+  adorn_percentages('row') %>% 
+  adorn_pct_formatting(digits = 1) %>%  
+  adorn_ns(position = 'front') %>% 
+  pivot_longer(cols = -area, names_to = 'is_like', values_to = 'n') %>% 
+  separate_wider_delim(n, ' (', names = c('n','percent')) %>% 
+  mutate(
+    n = parse_number(n),
+    percent = parse_number(percent)/100
+         ) %>% 
+  ggplot(., aes(x = area, y = n, fill = is_like)) +
+  geom_bar(position = 'fill', stat = 'identity') +
+  geom_text(
+    aes(label = paste0(scales::percent(percent), ' (', n, ')')),
+    position = position_fill(vjust = 0.5),
+    size = 5) + 
+  coord_flip() +
+  scale_fill_brewer(palette = 'Set1') +
+  theme_bw() + 
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = '横%ベースのクロス集計', x = NULL, y = NULL) +
+  theme(text = element_text(size = 15, family = "Fira Sans"))
+```
+
+## クロス集計表の見方
+
+言わずもがなではあるが、クロス集計表(contingency table)は2つの変数の関係を見ている表である。contingencyはそもそも「偶然性、不測」などを意味する言葉であり、クロス集計表の割合をもって2つの変数間の偶然性を示している表ともいえる。一方で、変数間に全く関係がない場合、統計的独立と呼ばれる。
+
+右端の列を行周辺合計(row marginal total) 、下端の行を列周辺合計(column marginal total)と呼ぶ。右下端の角にあたる部分を総計(grand total)と呼ぶ。また、クロス表の側面(ここでは`Area`)は表側と呼び、頭を(ここでは`IsLike`)は表頭と呼ぶ。
+
+```{r}
+ct
+```
+
+探索的にクロス集計表を作成することもあるが、基本的には仮説(因果的な関係)を想定してクロス集計表を作ることが多い。クロス集計から因果関係を導くのは簡単ではない点は注意が必要。今回のケースでは、出身地によってたこ焼きの好き嫌いが変わるだろう、というような関係性を仮定している。もちろん逆でも良く、たこ焼きが好きな人は地域によって偏りがある、でもよい。
+
+どちらが正しいというのはあるわけではないが、時間的な関係性を考慮するほうが個人的にはじっくりくる。つまり、今回のケースであれば、人が生まれた時に出身地は決まるので、その後にたこ焼きの好き嫌いが形成されるような時間的な順序を想定している。たこ焼きの好き嫌いが出身地を決めるとは考えにくい一方で、たこ焼きが好きな集団の特徴を見たいのであれば、列方向にみることで現象の結果としての集団が持つ性質をみるのもありだと思われる。
+
+出身地によってたこ焼きの好き嫌いが変わるだろう、と仮定するのであれば、割合に関しても行％をみればよい。出身地が独立変数(X)、たこ焼きの好き嫌いが目的変数(Y)を想定しているためである。好き嫌い率は、大阪、東京でそれぞれ何パーセントが好きなのかということなので、行パーセントをみるのが適切だと思われる。
+
+このケースでは「大阪は71%、東京は38%より、大阪の人は東京の人よりもたこ焼きが好き」と考えられる(因果関係ではない)。また、行の`Total`には東京、大阪の情報がない状態でのたこ焼きの好き嫌いに関する回答が記録されている。東京、大阪の情報がない状態であれば、49%がたこ焼きが好きではあるが、大阪に限定すると、71%がたこ焼き好きであるため、東京と大阪の出生地の関係性はありそうだとわかる。当たり前ではあるが、たこ焼きの好き嫌いを出身地がすべて説明しているわけではない。
+
+## 対数線形モデル
+
+クロス集計表はいくつかの問題がある。それは、変数内のカテゴリが多くなったり、多層のクロス集計表となると解釈が難しくなる。この問題を対処する方法として、(多重)コレスポンデンス分析などがあるが、ここでは対数線形モデルをまとめておく。
+
+対数線形モデルは、1つの変数を目的変数として扱うモデルではなく、すべての変数を同じように扱うことで、変数間の関係を明らかにすることを目的にしている。ここではあまりありがたくないが、説明のために2×2表の先ほどのデータを利用する。
+
+クロス集計表では2つの変数(`X`,`Y`)が「独立」の場合、`X`がどの状態であっても`Y`の割合は同じであり、`Y`がどの状態であっても`X`の割合は同じになる。独立が成り立つ場合、各セル$n_{ij}$の期待値$\mu_{ij}$は、
+
+$$
+\mu_{ij} = N p^{X}_{i} p^{Y}_{j}
+$$
+
+となり、$n_{ij}$は個数データであるため、対数をとって下記のモデルを考えることができる。ポアソン回帰分析と同じく、このモデルは定数項、$i$に依存する項、$j$に依存する項に分けることができる。
+
+$$
+log \mu_{ij} = logN + logp^{X}_{i} + logp^{Y}_{j}
+$$
+
+対数線形モデルでは$log \mu_{ij}$に対して、パラメタ$\lambda$を使って、$log \mu_{ij}$を定数項、変数$X$のカテゴリに対応するパラメタ$\lambda^{X}_{i}$、変数$Y$のカテゴリに対応するパラメタ$\lambda^{Y}_{j}$の和として表現する。$\lambda^{X}_{i}$や$\lambda^{Y}_{j}$は主因子項と呼ばれる。
+
+$$
+log \mu_{ij} = \lambda + \lambda^{X}_{i} + \lambda^{Y}_{j}
+$$
+
+そして、対数線形モデルでは下記の制約のもとで、パラメタを推定する。
+
+$$
+\sum^{I}_{i=1} \lambda^{X}_{i} = 0, \sum^{J}_{j=1} \lambda^{Y}_{j} = 0
+$$
+
+Rでは`vcd`パッケージの`loglin()`関数で対数線形モデルを実行できる。引数にはクロス集計表やモデル構造を渡す必要がある。`margin = list(c(1), c(2))`は独立で交互作用がないモデルを想定している。
+
+```{r}
+library(vcd)
+crosstable <- xtabs(~ area + is_like, df)
+# MASS::loglm(~ area + is_like, crosstable)でフィットしてcoef()でも同様に係数が計算できる
+fit <- loglin(crosstable, margin = list(c(1), c(2)), param = TRUE, fit = TRUE)
+```
+
+`area`は`tokyo`が多く、`is_like`は`no`が多いことがわかる。各変数のカテゴリが、数値の大小で判断できるので、表が巨大で複雑になると便利なのがわかる。
+
+```{r}
+fit$para
+```
+
+期待度数、尤度比統計量、χ二乗値を取り出すことも出来る。
+
+```{r}
+list(
+  ExpectedValue = fit$fit,
+  LikelihoodRatioTestStatistics = fit$lrt,
+  # chisq.test(xtabs(~ area + is_like, df), correct = F)と同じ
+  ChiSquare = fit$pearson,
+  DegreeOfFreedom = fit$df
+)
+```
+
+変数間の交互作用を想定することできる。むしろクロス集計表では交互作用を想定するほうが自然だと思われる。`margin = list(c(1, 2))`は交互作用があるモデルを想定している。交互作用項の係数を見ると、`osaka-Yes`、`tokyo-No`が多いことがわかる。つまり、大阪の方ははたこ焼きが好きで、東京の人はたこ焼きが好きではないという関係がわかる。
+
+```{r}
+fit2 <- loglin(crosstable, margin = list(c(1, 2)), param = TRUE, fit = TRUE)
+fit2$para$area.is_like
+```
+
+
+## モンテカルロシュミレーション
+
+最後に。クロス集計表の結果を用いて、モンテカルロシュミレーションを行ってみる。多項分布はこんな感じの分布。
+
+$$
+\begin{eqnarray*} f(x_{1}, x_{2}, …, x_{k}) &=& \displaystyle \frac{n!}{x_{1}! x_{2}! … x_{k}!} p_{1}^{x_{1}} p_{2}^{x_{2}} … p_{k}^{x_{k}}  ~~ (x_{i} \geq 0, ~~ x_{1} + … + x_{k} = n) \end{eqnarray*} \\
+p_{i}>0 ~~ (i = 1, 2, …, k), ~~ p_{1} + p_{2} + … + p_{k} = 1
+$$
+
+天下り的にクロス集計表を用意しておく。何らかの変数間の関係が下記のクロス集計として得られたとする。
+
+```{r}
+# クロス集計表の値
+ct <- matrix(
+  c(11, 25, 
+    35, 31), 
+  nrow = 2,
+  byrow = TRUE
+)
+ct
+```
+
+χ二乗検定を行ったところ、5%で有意な結果が得られた。ただ、この結果はたまたまかもしれないので、モンテカルロシュミレーションを行ってみる。
+
+```{r}
+chisq.test(ct)
+```
+
+まずはクロス集計表から、多項分布のパラメタを計算する。パラメタを計算するといっても、各セル度数を総度数で割ることで各セルの確率を算出する。
+
+```{r}
+# 多項分布のパラメータを推定
+N <- sum(ct)
+prob <- ct / N 
+list(
+  N = N,
+  Prob = prob,
+  Params = c(prob[1,], prob[2,])
+  )
+```
+
+あとはこのパラメタをもとに多項分布から乱数を生成する。シュミレーション回数は1万回とする。`rmultinom()`関数は列で1回の乱数生成の結果を表す。
+
+```{r}
+# サンプリング
+n_samples <- 10000
+x <- rmultinom(n = n_samples, 
+               size = N, 
+               prob = c(prob[1,], prob[2,])
+)
+# 10回分の結果
+x[,1:10]
+```
+
+生成されたシュミレーション結果のデータを用いて、1万回、χ二乗検定を行い、有意かどうか判定する。
+
+```{r}
+res <- vector(mode = 'logical', length = n_samples)
+for (i in seq_len(n_samples)) {
+  m <- matrix(
+    c(x[1,i], x[2,i], 
+      x[3,i], x[4,i]),
+    nrow = 2,
+    byrow = TRUE
+  )
+  res[i] <- chisq.test(m, correct = FALSE)$p.value
+}
+hist(res, 
+     main = "モンテカルロシミュレーション結果", 
+     xlab = "p value",
+     breaks = 100)
+
+```
+
+シミュレーション結果のp値の平均を計算する。今回の結果であれば、クロス集計表を得た直後のχ二乗検定ではたまたま有意となったが、シュミレーションして繰り返した結果を見ると、たまたまそうなった可能性が高い。
+
+```{r} 
+cat("モンテカルロシミュレーションによるp値の平均:",  mean(res), "\n")
+```

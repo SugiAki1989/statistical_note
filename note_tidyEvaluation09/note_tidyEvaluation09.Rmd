@@ -1,0 +1,118 @@
+---
+title: "RのTidy evaluation_0"
+pagetitle: "RのTidy evaluation_0"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+## はじめに
+この記事はTidy evaluationについて学習した内容を自分の備忘録としてまとめたものです。ここでの主な話題は[rlang 0.4.0](https://rlang.r-lib.org/)から使えるようになったcurly-curly演算子。
+
+<blockquote class="twitter-tweet"><p lang="en" dir="ltr">rlang 0.4.0 is out! Meet curly-curly, a new operator to make it easier to create <a href="https://twitter.com/hashtag/rstats?src=hash&amp;ref_src=twsrc%5Etfw">#rstats</a> functions around <a href="https://twitter.com/hashtag/tidyverse?src=hash&amp;ref_src=twsrc%5Etfw">#tidyverse</a> pipelines. Blog post at <a href="https://t.co/BHJZJqeWO7">https://t.co/BHJZJqeWO7</a> <a href="https://t.co/zkpBWjmJQi">pic.twitter.com/zkpBWjmJQi</a></p>&mdash; lionel (@_lionelhenry) <a href="https://twitter.com/_lionelhenry/status/1144506303932489728?ref_src=twsrc%5Etfw">June 28, 2019</a></blockquote> <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+
+### curly-curly演算子
+curly-curly演算子は**クオートとアンクオート(Quote-and-Unquote)**を同時に行ってくれる演算子。つまり今までは、`enquo()`して、`!!(bang-bang)`する必要があった。まずは、普通に欠損値をカウントする場合は下記のようになる。パイプラインの中で`Month`や`Ozone`と記述して機能するのはデータマスキング(Data Masking)のおかげである。
+
+```R:R
+library(rlang)
+library(tidyverse)
+
+airquality %>%
+  dplyr::group_by(Month) %>% 
+  dplyr::filter(is.na(Ozone)) %>%
+  dplyr::summarise(Missing_Ozen = n())
+
+# A tibble: 5 x 2
+  Month Missing_Ozone
+  <int>         <int>
+1     5             5
+2     6            21
+3     7             5
+4     8             5
+5     9             1
+```
+
+例えば、グループ毎に欠損値をカウントする関数`cnt_na()`の場合、下記のようになる。`enquo()`と`!!(bang-bang)`することで、コードをクオートして、展開される場所までパイプで流し(評価を遅延)、展開されるべき場所で評価を行うことでデータマスキングを実行する。
+
+```R:R
+cnt_na <- function(data, by, col_nm) {
+  col_nm <- enquo(col_nm)
+  by <- enquo(by)
+  missing_name <- paste0("Missing_", quo_name(col_nm))
+
+  data %>%
+    dplyr::group_by(!!by) %>% 
+    dplyr::filter(is.na(!!col_nm)) %>%
+    dplyr::summarise(!!(missing_name) := n())
+}
+
+airquality %>% 
+  cnt_na(., by = Month, col_nm = Ozone)
+
+# A tibble: 5 x 2
+  Month Missing_Ozone
+  <int>         <int>
+1     5             5
+2     6            21
+3     7             5
+4     8             5
+5     9             1
+```
+
+この`enquo()`と`!!(bang-bang)`はコードを複雑にするという点で、[rlang 0.4.0](https://rlang.r-lib.org/)に指摘されているように、あまり良くないらしい。
+
+> We have come to realise that this pattern is difficult to teach and to learn because it involves a new, unfamiliar syntax, and because it introduces two new programming concepts (quote and unquote) that are hard to understand intuitively. This complexity is not really justified because this pattern is overly flexible for basic programming needs.(拙訳)このパターンは、新しく、なじみのない構文を含み、直感的に理解するのが難しい2つの新しいプログラミングの概念(quote and unquote)を導入するため、これを教えること、学ぶことは困難だと気付いた。このパターンは基本的なプログラミングのニーズに対して過度に柔軟であるため、この複雑さは正当化されない。
+
+これらの問題を解消するために出てきたのがcurly-curly演算子。curly-curly演算子は、**クオートとアンクオート(Quote-and-Unquote)**を同時に行ってくれる演算子なので、`enquo()`の部分が不要となり、`!!`の部分をcurly-curly演算子で囲むだけで済む。`{glue}`の文字列補完に似ている。
+
+```R:R
+cnt_na <- function(data, by, col_nm) {
+  data %>%
+    dplyr::group_by( {{by}} ) %>% 
+    dplyr::filter(is.na( {{col_nm}} )) %>%
+    dplyr::summarise( {{col_nm}} := n() )
+}
+
+airquality %>% 
+  cnt_na(., by = Month, col_nm = Ozone)
+
+# A tibble: 5 x 2
+  Month Ozone
+  <int> <int>
+1     5     5
+2     6    21
+3     7     5
+4     8     5
+5     9     1
+```
+
+表示する名前を修正する方法がわからかったので、また次回。
+
+### 参考サイト
+
+- [rlang 0.4.0](https://rlang.r-lib.org/)

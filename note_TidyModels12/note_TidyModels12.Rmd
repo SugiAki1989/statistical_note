@@ -1,0 +1,599 @@
+---
+title: "TidyModels: modeltime + GlobalModels + cross-validation + hyperparameter-tuning"
+pagetitle: "TidyModels: modeltime + GlobalModels + cross-validation + hyperparameter-tuning"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+`tidymodels`パッケージの使い方をいくつかのノートに分けてまとめている。`tidymodels`パッケージは、統計モデルや機械学習モデルを構築するために必要なパッケージをコレクションしているパッケージで、非常に色んなパッケージがある。ここでは、今回は`modeltime`パッケージで複数の時系列を予測する方法に加え、モデルをチューニングする方法についてまとめていく。モデルの数理的な側面や機械学習の用語などは、このノートでは扱わない。
+
+下記の公式ドキュメントや`tidymodels`パッケージに関する書籍を参考にしている。
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+## `modeltime`パッケージの目的
+
+`modeltime`パッケージは、時系列モデルの構築を効率よく行うためのパッケージで、`tidymodels`パッケージと組み合わせて時系列モデルを作成する際に使用される。時系列予測のための体系的なワークフローを提供し、時系列ブーストモデルなど新しいアルゴリズムもカバーしている点が特徴的。
+
+ここでは、複数の時系列データがある場合に効率よく予測モデルを構築する方法をまとめる。
+
+- [Forecasting with Global Models](https://business-science.github.io/modeltime/articles/modeling-panel-data.html)
+- [Nested Forecasting](https://business-science.github.io/modeltime/articles/nested-forecasting.html)
+- [Forecasting Many Time Series (Using NO For-Loops)](https://www.business-science.io/code-tools/2021/07/19/modeltime-panel-data.html)
+
+特に下記のブログについて、サイトをなぞりながら、不明点を追記しながらまとめていく。非常に勉強になるブログなので、私のメモではなく、下記を見たほうが早いかも。
+
+- [Global Models with Modeltime](https://albertoalmuinha.com/posts/2021-08-02-global-models/global-models/)
+
+ここでの目的はベースラインモデルの作成方法やグローバルモデルのパラメタチューニング方法を学ぶことで、将来の予測をすることはここではしない。
+
+## データの紹介
+
+まずは必要なパッケージやデータを読み込んでおく。これはスペインのカタルーニャの発電量のデータとのこと。
+
+>Sèrie temporal mensual de la producció elèctrica per tecnologies, demanda elèctrica en barres de central, consum elèctric per sectors, demanda de gas natural i consum de carburants d’automoció.
+技術別の電力生産、中央バスバーの電力需要、部門別の電力消費、天然ガスの需要、自動車の燃料消費の月次時系列。
+
+```{r}
+library(modeltime)
+library(tidymodels)
+library(tidyverse)
+library(timetk)
+library(lubridate)
+library(DT)
+
+tk_augment_anomaly_diagnostics <- function(df){
+    nombres <- names(df)[2:length(df)]
+    for(j in 1:length(nombres)){
+        nombre <- nombres[j]
+        nombre1 <- paste(nombre, "_anomaly", sep = "")
+        df <- df %>%
+                dplyr::bind_cols(df %>%
+                            dplyr::select(date, {{nombre}}) %>%
+                            purrr::set_names(c("date", "value")) %>%
+                            tk_anomaly_diagnostics(.date_var = date, .value = value) %>%
+                            dplyr::select(anomaly) %>%
+                            dplyr::mutate(anomaly = if_else(anomaly == "No", 0, 1)) %>%
+                            dplyr::rename({{nombre1}} := anomaly)
+                          )
+    }
+    return(df)
+}
+
+URL <- "https://analisi.transparenciacatalunya.cat/api/views/j7xc-3kfh/rows.csv?accessType=DOWNLOAD"
+df_raw <- read_csv(URL)
+DT::datatable(df_raw)
+``` 
+
+`FEEI`が頭についているカラムを対象にする。また、日付関係のカラムのフォーマットを修正する必要があるので、少しばかり前処理を行ない、WIDE型のデータをLONG型のパネルデータに変形しておく。
+
+```{r}
+df <- df_raw %>%
+  dplyr::select(date = Data, starts_with("FEEI")) %>%
+  dplyr::mutate(date = dmy(paste0("01/", date))) %>%
+  dplyr::rename_with(.cols = starts_with("FEEI"),
+              .fn   = ~ str_replace(., "FEEI_", "")) %>%
+  # FEEIで数ヶ月分の欠損値があるので削除
+  tidyr::drop_na(ConsObrPub) %>%
+  tidyr::pivot_longer(-date, names_to = "id", values_to = "value") %>%
+  dplyr::mutate(id = as.factor(id)) %>%
+  tk_augment_anomaly_diagnostics() %>% 
+  dplyr::select(date, id, value, anomaly = value_anomaly)
+
+DT::datatable(df)
+```
+
+ここでは、13セクター？エリア？の時系列の予測を行なうことになる。単位は月次で、開始月は2005-01-01で、終了月は2021-01-01、レコード数は197個(およそ16年分)。
+
+```{r}
+df %>%
+  dplyr::group_by(id) %>%
+  dplyr::summarise(
+    n.obs = n(),
+    start_date = min(date),
+    end_date = max(date),
+    min_value = min(value),
+    mean_value = mean(value),
+    max_value = max(value),
+    mean_anomaly = round(mean(anomaly) * 100, 1)
+  ) %>%
+  print(n = 20)
+```
+
+13個の時系列を可視化しておく。`QuimPetroquim`は他に比べてボリュームが大きい。
+
+```{r}
+plot_time_series(
+  .data = df,
+  .date_var = date,
+  .value = value,
+  .color_var = id,
+  .smooth = FALSE,
+  .interactive = FALSE
+)
+```
+
+## ベースモデルの作成
+
+ベースモデルの作成を行う前に、データを分割する。テストデータは、各`id`の6か月間の発電量を予測することにする。
+
+```{r}
+splits <- time_series_split(
+    data = df,
+    assess = 6,
+    cumulative = TRUE
+)
+
+splits %>%
+    tk_time_series_cv_plan() %>%
+    plot_time_series_cv_plan(
+      date, 
+      value,
+      .interactive = FALSE)
+``` 
+
+参照しているブログに従い、`window_reg`モデルと`naive_reg`モデルをベースモデルとして利用する。
+
+`window_reg`モデルはウインドサイズに従って計算することでモデルを作成し、`naive_reg`モデルは最後の観測値を系列の次の値として利用することでモデルを作成する。これらのモデルに対して、レシピを作成する。
+
+これらのパラメタ違いのモデルの効率の良い使い方がわからなかったのだが、ブログではカスタムグリッドを定義して、ベースラインモデルとして構築しており、すごく勉強になる。
+
+モデルは合計12個作成されているが、これは設定しているウインドウサイズの違いや、季節周期の違いによるもの(ブログでは24モデルあるが、ここでは12個)。
+
+```{r}
+window_grid_median_tbl <- tibble(window_size = seq(2,12,2)) %>%
+  create_model_grid(
+    f_model_spec  = window_reg,
+    id            = "id",
+    engine_name   = "window_function",
+    engine_params = list(window_function = ~ median(.))
+  )
+
+snaive_grid_tbl <- tibble(seasonal_period = seq(9, 24, 3)) %>%
+  create_model_grid(f_model_spec  = naive_reg,
+                    id            = "id",
+                    engine_name   = "snaive")
+
+models <- union(
+  snaive_grid_tbl %>% dplyr::select(.models), 
+  window_grid_median_tbl %>% dplyr::select(.models)
+  )
+
+list(
+  models %>% pluck(".models", 1),
+  models %>% pluck(".models", 6)
+)
+```
+
+モデルを2つのレシピと掛け合わせてワークフローセットオブジェクトを作成する。
+
+```{r}
+recipe_basic <- recipe(value ~ date + id, data = training(splits))
+
+# recipe_basic_features <- recipe(value ~ id + date, data = training(splits)) %>%
+#     step_timeseries_signature(date) %>%
+#     step_rm(matches("(xts$)|(iso$)|(^.pm)")) %>%
+#     step_zv(all_predictors()) %>%
+#     step_dummy(all_nominal_predictors())
+
+recipe_outliers <- recipe(value ~ ., data = training(splits))
+
+# recipe_outliers_features <- recipe(value ~ ., data = training(splits)) %>%
+#     step_timeseries_signature(date) %>%
+#     step_rm(matches("(xts$)|(iso$)|(^.pm)")) %>%
+#     step_zv(all_predictors()) %>%
+#     step_dummy(all_nominal_predictors())
+```
+
+モデルが12個、レシピが2個なので、合計24モデルを計算する。
+
+```{r}
+workflowset <- workflow_set(
+    preproc = list(
+        recipe_basic,
+        recipe_outliers
+    ),
+    models = models$.models,
+    cross  = TRUE
+)
+workflowset
+```
+
+`modeltime_fit_workflowset`関数は、複数の時系列に対して、順次または並行して各モデルをフィットさせる`fit`関数のラッパー関数。フィッティングした後はモデルテーブルに`modeltime_table`関数で登録する必要があるが、この関数では一気通貫でモデルの登録まで行える。実行時間を短縮するために、並列処理を実行する。
+
+```{r, message=FALSE, cache=TRUE}
+# detectCores()
+# [1] 8
+parallel_start(8)
+
+modeltime_baseline_fit <- workflowset %>%
+    modeltime_fit_workflowset(
+        data    = training(splits),
+        control = control_fit_workflowset(
+            verbose   = TRUE,
+            allow_par = TRUE
+        )
+    )
+
+parallel_stop()
+```
+
+合計24個のモデルが登録されていることがわかる。
+
+```{r}
+modeltime_baseline_fit
+```
+
+このモデルテーブルを利用して、テストデータのキャリブレーションを行なう。ちょっとここらへんから複雑になってくるので、メモがてら細かくまとめておく。
+
+キャリブレーションを行なうと、モデル24個、セクター13個、予測月が6ヶ月分の予測が`.calibration_data`カラムに記録される。つまり、`24 * 13 * 6 = 1872`レコードが生成される。
+
+```{r, warning=FALSE}
+modeltime_baseline_fit_tmp1 <- modeltime_baseline_fit %>%
+  modeltime_calibrate(testing(splits), id = "id")
+
+map_dfr(.x = 1:nrow(modeltime_baseline_fit_tmp1),
+        .f = function(x){modeltime_baseline_fit_tmp1 %>% pluck(".calibration_data", x)}) %>% 
+  summarise(cnt = n())
+```
+
+ここから更に`modeltime_accuracy`関数を利用すると、312レコードが生成されているが、これはモデル24個で、13セクターの6ヶ月分の予測値を集計して評価したため、サイズが小さくなる。`AlimBegudaTabac`だけで24個の評価指標を持っている状態。
+
+```{r, warning=FALSE}
+modeltime_baseline_fit_tmp2 <- modeltime_baseline_fit_tmp1 %>%
+  modeltime_accuracy(acc_by_id = TRUE) # ローカルモデル精度
+
+modeltime_baseline_fit_tmp2 %>% 
+  dplyr::filter(id == "AlimBegudaTabac") %>% 
+  print(n = 30)
+```
+
+ここから各セクターに最適なモデルを選択していく。頭が混乱するので、順をおって確認すると、先程と同じ手順をもう一度行なうが、まずはキャリブレーションを行って、予測値を算出し、集約して評価指標を計算する。
+
+```{r, warning=FALSE}
+# modeltime_baseline_fitは24個のモデルが登録されているモデルテーブル
+modeltime_baseline_fit_caliration <- modeltime_baseline_fit %>%
+  modeltime_calibrate(testing(splits), id = "id") %>%
+  modeltime_accuracy(acc_by_id = TRUE)
+```
+
+そして、モデルごとではなく、セクター(`id`)ごとに最適なモデルを見つけるため、`slice_min`関数で抜き出す。このあたりの段階を説明するために、`AlimBegudaTabac`セクターに絞って挙動を確認する。
+
+先程も確認したとおり、`AlimBegudaTabac`セクターの予測は24個のモデルで行われているため、24レコードある。
+
+```{r}
+modeltime_baseline_fit_caliration %>% 
+  dplyr::filter(id == "AlimBegudaTabac") %>% 
+  print(n = 30)
+```
+
+ここから、`slice_min`関数を`rmse`基準で利用すると`rmse`カラムが最小のレコードがスライスして取り出される。最小が複数該当する場合は、複数行取り出されるので注意。
+
+```{r}
+modeltime_baseline_fit_caliration %>% 
+  filter(id == "AlimBegudaTabac") %>% 
+  slice_min(rmse) 
+```
+
+これらは予測精度が同じなので、どちらを利用しても同じなので、`.model_id`が小さい方をさらに取得する。
+
+```{r}
+modeltime_baseline_fit_caliration %>% 
+  filter(id == "AlimBegudaTabac") %>% 
+  slice_min(rmse) %>% 
+  slice_min(.model_id)
+```
+
+このようにすることで、各セクターに対して最適なモデルが13個取り出される。
+
+```{r}
+baseline_models <- modeltime_baseline_fit_caliration %>%
+  group_by(id) %>% 
+  slice_min(rmse) %>%
+  slice_min(.model_id) %>%
+  ungroup()
+
+baseline_models
+```
+
+24個のモデルが登録されているモデルテーブル`modeltime_baseline_fit`、各13セクターに対するモデルが登録されているテーブル`baseline_models`を使って、必要なモデルだけが記録されたモデルテーブルを作成する。インナージョインでフィルタリングする。このときに、セクターごとにモデルが同じケースもあるが、必要なモデル13個に絞られる。
+
+```{r}
+# modeltime_baseline_fitは24個のモデルが登録されているモデルテーブル
+# baseline_modelsは各13セクターに対するモデルが登録されているテーブル
+
+modeltime_baseline_fit %>%
+  dplyr::inner_join(baseline_models, by = ".model_id") %>%
+  dplyr::select(.model_id, .model, .model_desc.x, id) %>%
+  dplyr::rename(.model_desc = .model_desc.x)
+```
+
+このとき、モデルテーブルに`id`という名前でカラムを残すとエラーになるので削除したモデルテーブルを作成する。他の名前であれば問題ないが、キャリブレーションすると削除されるっぽい。
+
+```{r}
+modeltime_baseline_tbl <- modeltime_baseline_fit %>% 
+                            dplyr::inner_join(baseline_models, by = ".model_id") %>% 
+                            dplyr::select(.model_id, .model, .model_desc.x) %>% 
+                            dplyr::rename(.model_desc = .model_desc.x)
+modeltime_baseline_tbl
+```
+
+実質的に各セクター`id`に対して必要なモデルが紐付いた状態なので、ここからテストデータを使って予測する。ただ、予測すると1つの問題が発生する。1つのセクターに対して、先程取り出したモデル全ての予測値が計算されてしまう。
+
+```{r}
+data_forecasted <- modeltime_baseline_tbl %>%
+                    # modeltime_calibrateはconfを計算するために必要
+                    modeltime_calibrate(testing(splits), id = "id") %>%
+                    modeltime_forecast(
+                      new_data = testing(splits),
+                      actual_data = training(splits),
+                      conf_by_id = TRUE,
+                      keep_data = TRUE
+                    )
+
+data_forecasted %>% 
+  dplyr::filter(id == "ConsObrPub") %>% 
+  print(n = 300)
+```
+
+セクター`ConsObrPub`が必要なモデルは`RECIPE_1_WINDOW_REG_9`である。他のセクターも同様なので、予測値と観測値を分割して、必要モデルの予測値を`baseline_models`テーブルの情報を利用して限定する。
+
+```{r}
+final_baseline_models <- data_forecasted %>%
+  dplyr::filter(.key == "actual") %>%
+  union(
+    data_forecasted %>%
+      dplyr::filter(.key == "prediction") %>%
+      dplyr::inner_join(baseline_models, by = c("id", ".model_id")) %>%
+      dplyr::select(.model_id, .model_desc.x, .key, .index, .value, 
+                    .conf_lo, .conf_hi, date, id, value, anomaly) %>%
+      dplyr::rename(.model_desc = .model_desc.x)
+  )
+
+final_baseline_models %>% 
+  dplyr::filter(id == "ConsObrPub") %>% 
+  print(n = 300)
+```
+
+予測値を含んだ時系列をセクターごとに可視化する。これがベースラインモデルとなる。
+
+```{r, warning=FALSE}
+# final_baseline_models %>% 
+#   ggplot(aes(.index, .value, col = id)) + 
+#   geom_line() + 
+#   geom_ribbon(aes(ymin = .conf_lo, ymax = .conf_hi), alpha = 0.1) +
+#   geom_vline(xintercept = as.Date("2020-12-01")) + 
+#   theme_bw() + 
+#   scale_x_date(limits = c(as.Date("2005-01-01"), as.Date("2021-05-01")),
+#                labels = date_format("%Y/%m"),
+#                breaks = date_breaks("3 month")) + 
+#   theme(axis.text.x = element_text(angle = 45, vjust = 0.2, hjust=0.2))
+
+final_baseline_models %>% 
+  dplyr::group_by(id) %>%
+  plot_modeltime_forecast(
+    .interactive = FALSE,
+    .facet_ncol  = 3
+  )
+```
+
+## モデルの改善
+
+ベースモデルの作成だけで割とお腹いっぱいであるが、先程のモデルよりも優れたモデルを作成する。データ分割を実行すると、下記のインフォメーションが表示されるが、問題ない。
+
+> Overlapping Timestamps Detected. Processing overlapping time series together using sliding windows.
+
+最適なハイパーパラメータを見つけるために必要なクロスバリデーションデータを生成する。可視化された表では、すべてのセクターの系列が含まれているためイメージとは違うかもしれないが、ここでは問題ない。
+
+```{r}
+resamples <- training(splits) %>%
+  time_series_cv(
+    date_var    = date, 
+    assess      = "6 months",
+    cumulative  = TRUE,
+    skip        = "3 months", 
+    slice_limit = 5
+  )
+
+resamples %>%
+  tk_time_series_cv_plan() %>% 
+  plot_time_series_cv_plan(.date_var = date, .value = value)
+
+```
+
+各フォールドの詳細は下記の通り。
+
+```{r}
+resamples %>% 
+  mutate(
+    analysis = map(.x = splits, .f = function(x){analysis(x)}),
+    assessment = map(.x = splits, .f = function(x){assessment(x)}),
+    analysis_min_date = map(.x = analysis, .f = function(x){min(x$date)}),
+    analysis_max_date = map(.x = analysis, .f = function(x){max(x$date)}),
+    assessment_min_date = map(.x = assessment, .f = function(x){min(x$date)}),
+    assessment_max_date = map(.x = assessment, .f = function(x){max(x$date)}),
+  ) %>% 
+  unnest(analysis_min_date,
+         analysis_max_date,
+         assessment_min_date,
+         assessment_max_date
+         )
+```
+
+次はモデルを設定する。今回はProphetBoostモデルを利用する。
+
+```{r}
+model_prophet_boost <- modeltime::prophet_boost(
+    # prophet
+    growth = "linear",
+    changepoint_num = tune(),
+    changepoint_range = tune(),
+    seasonality_yearly = TRUE,
+    seasonality_weekly = FALSE, # Monthlyデータなので機能しない
+    seasonality_daily  = FALSE, # Monthlyデータなので機能しない
+    season = "additive",
+    prior_scale_changepoints = tune(),
+    prior_scale_seasonality = tune(),
+    # prior_scale_holidays = NULL,
+    # xgboost
+    trees = 1000,
+    sample_size = c(0.5, 1),
+    mtry = tune(),  
+    tree_depth = tune(),
+    learn_rate = tune(),
+    stop_iter = tune(),
+    min_n = tune(),
+    # loss_reduction = tune(),
+  ) %>%
+  set_engine('prophet_xgboost')
+
+model_prophet_boost
+```
+
+モデルの次はレシピの設定を行なう。
+
+```{r}
+recipe_prophet_boost <- recipe(value ~ id + date + anomaly, data = training(splits)) %>%
+  step_timeseries_signature(date) %>%
+  step_rm(matches("(.iso$)|(.xts$)|(day)|(hour)|(minute)|(second)|(am.pm)")) %>%
+  step_rm("date_index.num") %>%
+  step_mutate(date_month = factor(date_month, ordered = TRUE)) %>%
+  step_dummy(all_nominal(), one_hot = TRUE)
+
+recipe_prophet_boost %>% prep() %>% bake(training(splits))
+```
+
+モデルとレシピをワークフローに設定する。
+
+```{r}
+workflow_prophet_boost <- workflow() %>%
+    add_model(model_prophet_boost) %>%
+    add_recipe(recipe_prophet_boost)
+```
+
+そして、`tune_grid`関数を使用して、パラメータの最適値を確認する。このプロセスは時間がかかるので、`control_grid`関数を介して並列計算オプションを有効する(`allow_par = TRUE`)。前回に引き続き理解が甘いせいでワーニングが出るが、ここらへんは次回以降で調べる予定。
+
+```{r, cache=TRUE}
+set.seed(1989)
+tune_results <- tune_grid(
+    object     = workflow_prophet_boost,
+    resamples  = resamples,
+    param_info = extract_parameter_set_dials(workflow_prophet_boost),
+    grid       = 20,
+    control    = control_grid(verbose = FALSE, 
+                              allow_par = TRUE, 
+                              parallel_over = "everything")
+    )
+```
+
+`rmse`を最小にするパラメタの組み合わせ上位10は下記の通り。
+
+```{r}
+tune_results %>% 
+  show_best(n = 10, metric = "rmse") %>% 
+  datatable()
+```
+
+ベストなパラメタを抜き出しておき、
+
+```{r}
+tuned_best <- tune_results %>%
+    select_best("rmse")
+tuned_best
+```
+
+ワークフローを先程のパラメタで更新する。モデルテーブルに登録する必要があるので、とりあえずフィッティングしておく。
+
+```{r, warning=FALSE}
+finalize_workflow_prophet_boost <- workflow_prophet_boost %>%
+    finalize_workflow(parameters = tuned_best)
+
+# ここのデータはなんでも
+finalize_workflow_fit_prophet_boost <- finalize_workflow_prophet_boost %>%
+    fit(training(resamples$splits[[1]])) 
+
+finalize_workflow_fit_prophet_boost
+```
+
+`finalize_workflow_prophet_boost`モデルをモデルテーブルに登録し、予測値を算出する。
+
+```{r}
+data_forecasted_prophet_boost <- modeltime_table(
+  finalize_workflow_fit_prophet_boost
+  ) %>%
+    # confを計算するために必要
+    modeltime_calibrate(testing(splits), id = "id") %>%
+    modeltime_forecast(
+        new_data = testing(splits),
+        actual_data = df,
+        conf_by_id = TRUE,
+        keep_data = TRUE
+    ) 
+# data_forecasted_prophet_boost %>% filter(id == "ConsObrPub") 
+data_forecasted_prophet_boost %>% 
+  DT::datatable()
+```
+
+テストデータに対する予測値を可視化しておく。ベースラインモデルよりは可視化だけでも良いモデルとわかる。
+
+```{r}
+data_forecasted_prophet_boost %>% 
+  group_by(id) %>% 
+  plot_modeltime_forecast(
+    .interactive = TRUE, 
+    .legend_show = FALSE,
+    .facet_ncol = 3
+    )
+```
+
+このモデルのグローバルモデルの精度は、下記の通り。
+
+```{r}
+modeltime_table(finalize_workflow_fit_prophet_boost) %>%
+    modeltime_calibrate(testing(splits), id = "id") %>%
+    modeltime_accuracy(acc_by_id = FALSE) %>%
+    table_modeltime_accuracy(.expand_groups = FALSE)
+```
+
+ローカルモデルの精度は、下記の通り。
+
+```{r}
+modeltime_table(finalize_workflow_fit_prophet_boost) %>%
+    modeltime_calibrate(testing(splits), id = "id") %>%
+    modeltime_accuracy(acc_by_id = TRUE) %>%
+    table_modeltime_accuracy(.expand_groups = FALSE)
+```
+
+`modeltime_refit`関数でフルデータで再学習して、予測期間で予測をする、ということはこのモデルからはできない。理由は`anomaly`というカラムが将来日付に存在していないが、学習時にモデルに利用しているため。
+
+## 参考文献
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)

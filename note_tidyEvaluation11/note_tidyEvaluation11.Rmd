@@ -1,0 +1,370 @@
+---
+title: "RのTidy evaluation_1"
+pagetitle: "RのTidy evaluation_1"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+## はじめに
+この記事はTidy evaluationとは直接関係ないが、「関数の作成方法」について学習した内容を自分の備忘録としてまとめたものです。プログラミングなどを体系的に教わったことがないので、いつも自己流でおそらく効率がよくない…そこで、"[Chapter 18 Write your own R functions](https://stat545.com/functions-part1.html)"に「Rの関数の作成はこうのような方法で作成していったほうが良い」という話が書かれていたので、それを参考にまとめておく。
+
+### 最大-最小の幅を求める関数
+ここで作成する関数は、「最大-最小の幅を求める関数」である。サンプルデータは`iris`。幅を求めようとするのであれば、`min()`、`max()`や`diff()`などを組み合わせることで実現できます。しかし、これでは少しコードが長くなってしまうし、他の変数に適用しようとするときの汎用性が乏しくなります。
+
+```R:R
+min_val <- min(iris$Sepal.Length)
+min_val
+[1] 4.3
+
+max_val <- max(iris$Sepal.Length)
+max_val
+[1] 7.9
+
+max_val - min_val
+[1] 3.6
+
+diff(c(min_val, max_val))
+[1] 3.6
+```
+
+このような問題を避けるために、関数化します。
+
+```R:R
+max_minus_min <- function(x){
+  res <- max(x) - min(x)
+  res
+} 
+
+max_minus_min(iris$Sepal.Length)
+[1] 3.6
+```
+
+## 関数のテスト
+作った関数が意図通り動くかどうかをテストしておきます。`1:100`のベクトルであれば、`max=100, min=1`なので`99`になるので、下記のテストを見る限り問題なさそうです。
+
+```R:R
+max_minus_min(1:100)
+[1] 99
+
+max_minus_min(-100:100)
+[1] 200
+```
+
+テストデータだけではなく、実際の`iris`データでもテストしておきます。
+
+```R:R
+max_minus_min(iris$Petal.Width)
+[1] 2.4
+
+max_minus_min(iris$Petal.Length)
+[1] 5.9
+```
+
+意図的に計算できなさそうな`iris$Species`もテストしておきます。エラーがでているので、不可解な計算がされることはありません。
+
+```R:R
+class(iris$Species)
+[1] "factor"
+
+max_minus_min(iris$Species)
+
+Summary.factor(c(1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L,  でエラー: 
+                   ‘max’ not meaningful for factors 
+```
+
+こんなのはどうでしょうか。データフレームから対象の列を抜き出し、各列の最小・最大の幅を計算しようと考えますが、これは上手くいってないようです。2つの変数の中から最小と最大を計算しています。
+
+```R:R
+max_minus_min(iris[c("Petal.Length", "Petal.Width")])
+[1] 6.8
+
+min(iris[c("Petal.Length", "Petal.Width")])
+[1] 0.1
+
+max(iris[c("Petal.Length", "Petal.Width")])
+[1] 6.9
+
+```
+
+また、論理値が入った場合はどうか。Rでは論理値である`TRUE=1`、`FALSE=0`として扱うことができるので、このような計算も実行されてしまいます。
+
+```R:R
+max_minus_min(c(TRUE, FALSE,TRUE, FALSE,TRUE, FALSE,TRUE, FALSE))
+[1] 1
+
+max(FALSE)
+[1] 0
+
+max(TRUE)
+[1] 1
+```
+
+## 引数の妥当性チェック
+想定していない動作を避けられるように、引数の妥当性チェックを行います。例えば、`stopifnot()`を使って引数のチェックを行います。チェックの方法はたくさんあるので、R強強の方々が作られているパッケージのコードなどをGithubで参照ください。ここでは、`stopifnot()`を使ってインプット`x`が数値ベクトルであるかを確認し、そうでなければエラーを返すようにします。
+
+`stopifnot(is.numeric(x))`の役割は言葉通り、もし(`if`)、引数のテストで`is.numeric(x)`が`TRUE`ではない(`not`)なら停止(`stop`)するということになります。つまり、`is.numeric(x)=TRUE`だけ通すので、他の関数の場合でも、テストに通したいものを加えればよいことになります。
+
+```R:R
+max_minus_min <- function(x){
+  stopifnot(is.numeric(x))
+  
+  res <- max(x) - min(x)
+  res
+} 
+```
+
+さきほどの引数で再度試す。不可解な計算が実行されないようになっています。
+
+```R:R
+max_minus_min(iris[c("Petal.Length", "Petal.Width")])
+# max_minus_min(iris[c("Petal.Length", "Petal.Width")]) でエラー: is.numeric(x) is not TRUE
+
+max_minus_min(c(TRUE, FALSE, TRUE, FALSE))
+# max_minus_min(c(TRUE, FALSE, TRUE, FALSE)) でエラー: is.numeric(x) is not TRUE 
+
+max_minus_min(iris)
+# max_minus_min(iris) でエラー: is.numeric(x) is not TRUE 
+
+max_minus_min(iris$Species)
+# max_minus_min(iris$Species) でエラー: is.numeric(x) is not TRUE 
+```
+
+`stopifnot()`は便利ですが、良いエラーメッセージを提供しません。つまり、ユーザーがどうすればエラーを回避できるのかまでは教えてくれないのです。そのため、実際には、`if(cond){stop message}`という形で、`if()`と`stop()`を組み合わせる方法が広く利用されています。
+
+```R:R
+max_minus_min <- function(x){
+    if(!is.numeric(x)) {
+      stop('This "max_minus_min" function only works for numeric input!\n',
+           'Provided an object of class: ', class(x)[1])
+    }
+  
+  res <- max(x) - min(x)
+  res
+} 
+
+max_minus_min(iris$Species)
+# max_minus_min(iris$Species) でエラー: 
+#   This "max_minus_min" function only works for numeric input!
+#   Provided an object of class: factor
+
+max_minus_min(iris[c("Petal.Length", "Petal.Width")])
+# max_minus_min(iris[c("Petal.Length", "Petal.Width")]) でエラー: 
+#   This "max_minus_min" function only works for numeric input!
+#   Provided an object of class: data.frame
+```
+
+しかし、様々な場合を想定して、エラーメッセージを用意しておくことは現実的に難しいので、例えば、[The tidyverse style guide](https://style.tidyverse.org/)にあるような方針に従って、エラーメッセージを返すようにしておくと便利です。例えば、問題の原因が明らかな場合は、"must(しなければいけない)"という類のエラーメッセージ使用します。
+
+```R:R
+dplyr::nth(1:10, "x")
+#> Error: `n` must be a numeric vector, not a character vector.
+
+dplyr::nth(1:10, 1:2)
+#> Error: `n` must have length 1, not length 2.
+```
+
+また、問題の原因が不明は場合は、"can't(できない)"という類のエラーメッセージ使用します。
+
+```R:R
+mtcars %>% pull(b)
+#> Error: Can't find column `b` in `.data`.
+
+as_vector(environment())
+#> Error: Can't coerce `.x` to a vector.
+
+purrr::modify_depth(list(list(x = 1)), 3, ~ . + 1)
+#> Error: Can't find specified `.depth` in `.x`.
+```
+
+また、エラーメッセージから原因を特定する具体的な場所まで、指示できるのがエラーメッセージとしては望ましいです。
+
+```R:R
+# GOOD
+map_int(1:5, ~ "x")
+#> Error: Each result must be a single integer:
+#> * Result 1 is a character vector.
+
+# BAD
+map_int(1:5, ~ "x")
+#> Error: Each result must be a single integer
+```
+
+もしくはヒントを提供するようにします。詳細は、[The tidyverse style guide](https://style.tidyverse.org/)を参照してください。
+
+```R:R
+dplyr::filter(iris, Species = "setosa")
+#> Error: Filter specifications must be named.
+#> Did you mean `Species == "setosa"`?
+
+ggplot2::ggplot(ggplot2::aes())
+#> Error: Can't plot data with class "uneval". 
+#> Did you accidentally provide the results of aes() to the `data` argument?
+```
+
+### 関数をより柔軟なものする
+さきほどまで作っていた関数は「最大-最小の幅を求める関数」でした。
+
+```R:R
+max_minus_min <- function(x){
+  stopifnot(is.numeric(x))
+
+  res <- max(x) - min(x)
+  res
+} 
+```
+
+この関数の幅を自由にコントロールできるように`quantile()`を使って書き換えます。`quantile()`の`prob = c(0, 1)`を取れば最小と最大になります。
+
+```R:R
+max_minus_min(iris$Sepal.Length)
+[1] 3.6
+
+q <- quantile(iris$Sepal.Length, probs = c(0, 1))
+max(q) - min(q)
+[1] 3.6
+```
+
+書き換えて、テストする。さきほど問題なく同じ値が取得できていることがわかる。デフォルト値として、`prob = c(0, 1)`を取るようにしておき、幅を指定しなければ、さきほどと同じ値を返すようにしておく。
+
+```R:R
+max_minus_min <- function(x, probs = c(0, 1)){
+  stopifnot(is.numeric(x))
+  
+  tmp <- quantile(x, probs = probs)
+  res <- max(tmp) - min(tmp)
+  res
+} 
+
+max_minus_min(iris$Sepal.Length, probs = c(0, 1))
+[1] 3.6
+```
+
+`quantile()`自体は、`probs = c(0, 0.5, 1)`というように好きな分位点をいくつも取れますが、今回のような指定した最小と最大の幅を求める場合、2つないといけないので(`stopifnot(length(probs) == 2)`)、2つない場合に、それをエラーとして弾くようにしておきます。
+
+```R:R
+quantile(iris$Sepal.Length, probs = c(0, 0.5, 1))
+  0%  50% 100% 
+ 4.3  5.8  7.9 
+
+max_minus_min <- function(x, probs = c(0, 1)){
+  stopifnot(is.numeric(x))
+  stopifnot(length(probs) == 2)
+  
+  tmp <- quantile(x, probs = probs)
+  res <- max(tmp) - min(tmp)
+  res
+} 
+```
+
+## 引数の妥当性チェック2回目
+関数内部を書き換えたので、想定していない動作を避けられるように、再度、引数の妥当性チェックを行います。例えば、`probs`引数を取れるようにしたことで、想定される様々な制約を設けておく必要があります。
+
+```R:R
+max_minus_min(iris$Species, probs = c(0, 1))
+# max_minus_min(iris$Species, probs = c(0, 1)) でエラー: is.numeric(x) is not TRUE 
+
+max_minus_min(iris$Sepal.Length, probs = c(0.5))
+# max_minus_min(iris$Sepal.Length, probs = c(0.5)) でエラー: length(probs) == 2 is not TRUE 
+
+max_minus_min(iris$Sepal.Length, probs = c(0, 2))
+# quantile.default(x, probs = probs) でエラー: 'probs' outside [0,1] 
+```
+
+## `NA`について取り組む
+次に`NA`について取り組みます。デフォルトの動作は`NA`を`quantile()`まで運び、そこで処理させるか、予め処理してエラーを発生させるかになります。`quantile()`はベクトルに`NA`が混ざっているとエラーを返します。これはデフォルトで`na.rm = FALSE`が設定されており、`NA`がある場合はエラーを返すように作られています。
+
+```R:R
+quantile(c(0,1,NA), probs = c(0, 1))
+# quantile.default(c(0, 1, NA), probs = c(0, 1)) でエラー: 
+# 'na.rm ' が FALSE なら、欠測値及び NaN は許されません 
+```
+
+なので、`na.rm = TRUE`にすれば`NA`が取り除かれて、計算されます。
+
+```R:R
+quantile(c(0,1,NA), probs = c(0, 1), na.rm = TRUE)
+  0% 100% 
+   0    1 
+```
+
+`max_minus_min()`で`NA`をどう処理するかを選択できるようにしておきます。また、`quantile()`と同様に、`na.rm = FALSE`としておきます。
+
+```R:R
+max_minus_min <- function(x, probs = c(0, 1), na.rm = FALSE){
+  stopifnot(is.numeric(x))
+  stopifnot(length(probs) == 2)
+  
+  tmp <- quantile(x, probs = probs, na.rm = na.rm)
+  res <- max(tmp) - min(tmp)
+  res
+} 
+```
+
+## `...`に取り組む
+`...`は非常に便利な機能(便利な半面、予期しないことも引き起こします)です。今回のように内部で`quantile()`に値を渡す関数の場合、`quantile()`の他の引数を、`...`を通して、`max_minus_min()`から渡すことが可能です。例えば、`quantile()`には`type`という引数があり、1~9の整数を指定することで、計算のアルゴリズムを選択することができます。
+
+```R:R
+x <- rnorm(100)
+all.equal(quantile(x, type = 1), 
+          quantile(x, type = 9)) 
+
+[1] "Mean relative difference: 0.01263352"
+```
+
+`...`を使うからと言って、特別なことをしないと行けないわけではなく、`max_minus_min()`と`quantile()`の引数に`...`を追加するだけです。
+
+```R:R
+max_minus_min <- function(x, probs = c(0, 1), na.rm = FALSE, ...){
+  stopifnot(is.numeric(x))
+  stopifnot(length(probs) == 2)
+  
+  tmp <- quantile(x, probs = probs, na.rm = na.rm, ...)
+  res <- max(tmp) - min(tmp)
+  res
+} 
+
+max_minus_min(iris$Sepal.Length, probs = c(1, 0), type = 1)
+[1] 3.6
+```
+
+`...`は、引数名にタイプミスがあり、自作関数内部に複数の関数があるような場合に、意図しない引数に吸い込まれる可能性もあります。詳細は"[18 Data, dots, details](https://principles.tidyverse.org/dots-position.html)"を参照ください。
+
+パッケージ化する場合などは、`{test_that}`の　`test_that()`を利用することをオススメします。詳細は、WEB上に解説がなされているのではぶきますが、`test_that()`は実際の結果と期待される結果を確認することができる便利な関数です。
+
+```R:R
+library(testthat)
+
+test_that('NA handling works', {
+  expect_error(max_minus_min(c(1:5, NA), na.rm = TRUE))
+})
+
+# エラー: Test failed: 'NA handling works'
+# * `max_minus_min(c(1:5, NA), na.rm = TRUE)` did not throw an error.
+```
+
+以上、関数の作成方法でした。関数をまとめてパッケージとして公開する際は、それはそれで他にも山程やることがあるので、いつの日かまとめられればと思います。

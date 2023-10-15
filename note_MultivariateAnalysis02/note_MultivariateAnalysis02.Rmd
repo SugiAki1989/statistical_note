@@ -1,0 +1,133 @@
+---
+title: "Memo〜多次元尺度構成法 MDS:Multi-Dimensional Scaling〜"
+pagetitle: "Memo〜多次元尺度構成法 MDS:Multi-Dimensional Scaling〜"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+時系列データをk-meansで分類する。本来であれば、時系列データのクラスタリング手法であるk-Shapeまたは他の手法のほうが**妥当**なんだろうけども…今回は単純にk-meansをやってみて、時系列の傾向を掴めそうかためしてみる(そんなのデータによるだろうけども…)。
+
+k-Shapeについては、"[k-Shapeによる時系列クラスタリングの論文：「k-Shape: Efficient and Accurate Clustering of Time Series」を読んだ](https://blog.tsurubee.tech/entry/2019/02/06/223555)"がわかりやすかった。
+
+## サンプルデータ
+サンプルデータは`{gapminder}`のデータ。
+
+```{r}
+library(tidyverse)
+library(gapminder)
+
+head(gapminder, 10)
+
+```
+
+## データ加工
+このままでは計算できないので、データを加工していきます。`{tidyr}`の`pivot_wider()`を使います。`pivot_wider()`は最近(2019-11-14時点)実装されたので、使い方はドキュメントを参照ください。やっていることは単純で必要な変数を選んで、Long型をWide型に変換しています。
+
+```{r}
+gapminder_wide <- gapminder %>% 
+  dplyr::select(country, year, lifeExp) %>% 
+  tidyr::pivot_wider(names_from = year, values_from = lifeExp)
+
+
+head(gapminder_wide, 10)
+
+```
+
+k-meansを行うときは標準化するほうがいいとか言われますが、今回は同じようなスケールのはずなので、一旦、標準化はなしで。
+
+## エルボー法でクラスタ数を考える
+`tot.withinss`はクラスター内平方和のことで、各クラスター内の観測値のばらつき具合みたいなもの。クラスター内平方和が小さなクラスターはコンパクトで、平方和が大きなクラスターは、クラスター内のばらつきが大きくなります。
+
+なので、クラスター数が少ないときは大きくなりやすいので、その状態からクラスター数を増やしていくことで、クラスター内平方和が大きく変化するのであれば、クラスターを増やす意味があるけども、クラスター数を増やしても、クラスター内平方和がそこまで変わらないのであれば、解釈の観点からも少ないほうが良いとなる。その変化曲線が肘みたいなのでエルボー法。
+
+エルボー法で計算した結果を可視化すると、今回は3とか4で良さそう。
+
+```{r}
+# compute Within-Cluster-Sum of Squared Errors(=wss)
+n_clust <- 1L:10L
+wss <- n_clust %>%
+  purrr::map_dbl(
+    .x = .,
+    .f = function(x) {
+      kmeans(x = gapminder_wide %>% select(-country),
+             centers = x,
+             nstart = 50,
+             iter.max = 15)$tot.withinss})
+
+tibble(n_clust = n_clust, wss = wss) %>% 
+  ggplot(.) +
+  geom_line(aes(x = n_clust, y = wss), col = "#006E4F") +
+  scale_x_continuous(breaks = n_clust) +
+  theme_bw()
+```
+
+## K-means
+クラスタ数は4つでK-meansをやってみる。その後は、Wide型のデータに対して、クラスタを付与して、可視化するためにLong型に変換しています。
+
+```{r}
+set.seed(1989)
+clusters <- kmeans(x = gapminder_wide %>% select(-country),
+                   centers = 4)
+
+gapminder_long <- gapminder_wide %>% 
+  dplyr::bind_cols(tibble(cluster = clusters$cluster)) %>% 
+  tidyr::pivot_longer(cols = c(-country, -cluster), names_to = "year", values_to = "lifeExp")
+
+head(gapminder_long, 10)
+
+```
+
+クラスタの中心点もクラスタ毎に可視化できるようにしておく。
+
+```{r}
+centers_long <- tibble::rownames_to_column(as_tibble(clusters$centers), "cluster") %>%
+  tidyr::pivot_longer(cols = -cluster, names_to = "year", values_to = "lifeExp") 
+
+head(centers_long, 10)
+
+```
+
+## 可視化
+可視化した結果を見る限り、考察としてはこんな感じだろうか。
+
+```{r}
+ggplot() +
+  geom_line(data = gapminder_long, aes(y = lifeExp, x = year, group = country), col = "gray") +
+  geom_line(data = centers_long, aes(y = lifeExp, x = year, group = cluster), col = "#006E4F", size = 1) +
+  facet_wrap( ~ cluster, nrow = 1) + 
+  theme_bw()
+```
+
+- クラスタ1は1952年~2007年にかけて相対的に急激に成長している国
+- クラスタ2は1952年~2007年にかけて相対的に緩やかに成長している国
+- クラスタ3は1952年~1990年にかけて相対的に急激に成長したが、下降した国
+- クラスタ4は1952年~2007年にかけて相対的に成長速度も遅く、下降していたりする国
+
+
+うん…今回のデータであれば、クラスタ3と4でもう少し、上手く別れてくれるといいが、成長の仕方について、そこそこうまく分類できてそうなので、今回のデータであればよさそう。なので、とりあえず計算コストがそこまでかからないので、k-meansを時系列にやってみるのはありかも。

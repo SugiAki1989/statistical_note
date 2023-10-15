@@ -1,0 +1,427 @@
+---
+title: "Robyn Featuresを読む"
+pagetitle: "Robyn Featuresを読む"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+Marketing Mix Modeling(MMM)のシリーズでは、Meta社(Facebook)が開発したRobynパッケージのドキュメントをなぞりながら、MMMを理解するために必要な知識を整理し、RでMMMを実行するまでをまとめている。基本的には下記の公式ドキュメントを参考にしている。
+
+- [Robyn](https://facebookexperimental.github.io/Robyn)
+
+ここでは、[Robyn Features](https://facebookexperimental.github.io/Robyn/docs/features)を日本語に翻訳しながら、mmmへの理解を進めていく。2023年4月25日時点のドキュメントを参考にしている。私の知識不足のせいで、NeverGradの最適化の部分の理解があまり進んでない。
+
+## 特徴(Features)
+
+Robynの実装と技術的な基盤の両方についての詳細な議論は、次のとおりです。
+
+### モデルのインプット(Model Inputs)
+
+`robyn_inputs()`関数は、主にデータセットのすべてのモデル仕様を取得します。ここでは、基本的な概念のいくつかを分解して説明します。
+
+```
+InputCollect <- robyn_inputs(
+  dt_input = dt_simulated_weekly
+  , dt_holidays = dt_prophet_holidays
+  , date_var = "DATE" # date format must be "2020-01-01"
+  , dep_var = "revenue" # there should be only one dependent variable
+  , dep_var_type = "revenue" # "revenue" or "conversion"
+  , prophet_vars = c("trend", "season", "holiday") # "trend","season", "weekday" & "holiday"
+  , prophet_country = "DE"# input one country. dt_prophet_holidays includes 59 countries by default
+  , context_vars = c("competitor_sales_B", "events") # e.g. competitors, discount, unemployment etc
+  , paid_media_spends = c("tv_S","ooh_S","print_S","facebook_S", "search_S")
+  , paid_media_vars = c("tv_S", "ooh_S,"print_S","facebook_I","search_clicks_P")
+  , organic_vars = c("newsletter") # marketing activity without media spend
+  , factor_vars = c("events") # specify which variables in context_vars or organic_vars are factorial
+  , window_start = "2016-01-01"
+  , window_end = "2018-12-31"
+  , adstock = "geometric" # geometric, weibull_cdf or weibull_pdf.
+)
+```
+
+### ペイドメディア変数(Paid Media Variables)
+
+ペイドメディア変数の選択に関するベストプラクティスは、『Analyst's Guide to MMM』の「[Data Collection](https://facebookexperimental.github.io/Robyn/docs/analysts-guide-to-MMM#data-collection)」のセクションを参照。
+
+ペイドメディア変数については、現在、`paid_media_vars`と`paid_media_spends`の両方を指定する必要がある。これらのベクトルは同じ長さで、各リストの同じ位置の要素は対応する必要がある(例えば、`paid_media_vars`の要素2が`tv`変数であれば、`paid_media_spends`の要素2がその`tv`データに対応する支出であるべき)。
+
+エクスポージャー指標が`paid_media_vars`で提供された場合、Robynは`Michaelis-Menten`非線形フィッティングを使用して、対応する支出に対してそれらを適合させる。適合度が低い場合、露出指標はその支出とは異なる基本パターンを持っていることを示す。したがって、Robynは、より良いモデリング結果を得るために、チャネルを分割することを推奨する。Metaを例にとると、リターゲティングとプロスペクティングのキャンペーンは、CPMや効率が大きく異なる可能性がある。その場合、リターゲティングとプロスペクティングでMetaを分割することは意味があると思われる。
+
+次に進む前に、ペイドメディアのデータが完全で正確であることを確認する。ペイドメディア変数の変数変換については、変数変換のセクションで詳しく説明する。
+
+### オーガニック変数(Organic Variables)
+Robynでは、ユーザーが`organic_vars`を指定することで、直接費用をかけないマーケティング活動をモデル化できる。典型的には、ニュースレター、プッシュ通知、ソーシャルメディアへの投稿、その他の取り組みが含まれるかもしれない。さらに、オーガニック変数は、ペイドメディア変数と同様のキャリーオーバー(adstock)および飽和(saturating)を持つことが期待される。adstockについては幾何学的またはワイブル変換、saturatingについてはHill equation変換のような、それぞれの変換技術が、オーガニック変数にも適用される。これらの変換の詳細については、次のセクションで説明する。
+
+#### 代表的なオーガニック変数の例(Examples of typical organic variables)
+- ブログ記事のリーチ数／インプレッション数
+- オーガニック＆アンペイドソーシャルメディアでのインプレッション数
+- SEOの改善
+- メールキャンペーン
+- UGCでのリーチ
+
+以下は、モデル化できるオーガニック変数の種類を示すチャート。
+
+![organic-media](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/organic-media.png)
+
+#### コンテクスト変数(Contextual Variables)
+すべてのコンテクスト変数は、`context_vars`の要素として指定する必要がある。モデルに含めるべきコンテキスト変数の候補についての詳しい説明は、MMMのアナリストガイドの「[Data Collection](https://facebookexperimental.github.io/Robyn/docs/analysts-guide-to-MMM#data-collection)」のセクションを参照。
+
+
+### 変数変換(Variable Transformations)
+
+MMMは、典型的には次の2つの仮説によって特徴づけられる。
+
+- 広告投資はラグ効果がある／時間経過とともに持ち越される。例えば、今日広告を見て、来週購入する。
+- 広告投資には逓減効果がある。例えば、あるチャネルに費やせば費やすほど、得られる限界リターンは小さくなる。
+
+ロビンはこれらの仮説を考慮し、2種類の変換を行う。
+
+- Adstock transformation
+- Saturation transformation
+
+#### アドストック(Adstock)
+
+アドストックとは、広告のキャリーオーバーの仮説のことで、広告の効果は最初の露出後、遅れ、減衰するという理論を反映している。また、広告再起やキャンペーン認知度など、特定のブランド・エクイティ指標にも関連している。論理的には、「製品を購入する前にX日前に広告を見た」ということになる。通常、この「記憶」は時間の経過とともに減衰していくと考えられてる。しかし、この「記憶」の効果がまず高まってから低下すると考えるのが妥当なケースもある。例えば、自動車やクレジットのような高価な商品は、特にオフラインのチャネルでは、広告の後に直接購入されることはまずない。したがって、これらの商品については、オフラインチャネルではピークが遅くなるラグ効果(lagged effect)を仮定するのが一般的。同時に、デジタルチャネルからのオンラインコンバージョンは、ピークに遅れがなく、減衰のみを扱うことが適しているかもしれない。
+
+Robynで選択できるアドストック変換オプションは3つ。
+
+##### ジオメトリック(Geometric)
+
+1パラメトリック指数減衰関数が使用され、固定の減衰パラメータとして$\theta$が使用される。例えば、$\theta=0.75$のアドストックは、期間1の広告の75%が期間2に繰り越されることを意味する。Robynの[Geometric transformationの実装](https://github.com/facebookexperimental/Robyn/blob/main/R/R/transformation.R#L57)はこちらにあり、以下のように概念的に示される。
+
+$$
+x_{adstocked_{i,j}} = x_{raw_{i,j}} + \theta_{j} x_{raw_{i-1,j}} 
+$$
+
+過去に週次レベルのモデルを構築した経験則から、テレビは0.3～0.8、OOH/プリント/ラジオは0.1～0.4、デジタルは0.0～0.3のアドストックを持つ傾向があることが分かっている。ただし、これはあくまで経験則に基づくアドバイスで、ご自身のモデルを構築する際には、最善の判断で行うこと。
+
+![adstockintro](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/adstockintro.png)
+
+幾何学的減衰のもう1つの有用な特性は、無限和の極限が$1 / (1 -\theta)$に等しいことである。例えば、$\theta＝0.75$の場合、その無限和は4となります。Robynでは、広告費に対して広告費変換を行っているため、広告費変換が生データにどの程度の「インフレ」をもたらすかを、素早く、直感的に知ることができる。
+
+##### ワイブル分布(Weibull PDF & CDF)
+
+Robynでは、2パラメトリックのワイブル関数をPDFとCDFのフォーマットで提供。$\theta$が固定された減衰率に等しい1パラメトリックのジオメトリック関数と比較して、ワイブルはパラメータ`shape`と`scale`でより柔軟に変換することにより、時間的に変化する減衰率を作り出す。Robynのワイブル関数の実装は[ここ](https://github.com/facebookexperimental/Robyn/blob/main/R/R/transformation.R#L123)にあり、以下のように概念的に示される。なお、ワイブルの$\theta$は時間依存である。
+
+$$
+x_{adstocked_{i,j}} = x_{raw_{i,j}} + \theta_{i-1,j} x_{raw_{i-1,j}} 
+$$
+
+下のプロットは、2つのパラメータ`shape`と`scale`に関してワイブルのアドストック変換の柔軟性を示している。この柔軟性は、ハイパーパラメータを追加したことによる計算量の増加という代償を伴う。特に、コンバージョンウィンドウが長いと思われる製品では、ワイブルPDFが強く推奨される。場合によっては、ワイブルPDFの方がはるかに適合度が高くなることもある。
+
+![adstockintro](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/weibulladstocks.png)
+
+##### ワイブルCDFアドストック(Weibull CDF adstock)
+ワイブルの累積分布関数は、`shape`と`scale`の2つのパラメータを持ち、減衰率が固定されているジオメトリックアドストックと比較して、柔軟性がある。`shape`パラメータは、減衰曲線の形状を制御する。推奨される境界は`c(0.0001, 2)`。`shape`が大きいほど、S字型になる。小さくすると、L字型になる。`scale`は、減衰曲線の屈折点を制御。`scale`を大きくするとアドストックの半減期が大きくなるので、`c(0, 0.1)`の保守的なバウンスが推奨される。
+
+##### ワイブルPDF adstock(Weibull PDF adstock)
+ワイブルの確率密度関数も`shape`と`scale`の2つのパラメータを持ち、ワイブルCDFと同様に柔軟な減衰率を持つ。違いは、ワイブルPDFがラグ効果を持つことです。shape > 2の場合、曲線はx = 0以降にピークを持ち、x = 0でNULLの傾きを持つため、ラグ効果やアドストックのシャープな増減が可能となり、`scale`パラメータはx軸におけるピークの相対位置の限界を示す。1 < shape < 2の場合、曲線はx = 0の後にピークを迎え、x = 0で無限大の正の勾配を持つため、ラグ効果や広告宣伝費の増減が緩やかになり、`scale`は上記と同じ効果を持つ。shape = 1の場合、曲線はx = 0でピークを迎え指数関数的に減衰し、 scaleは屈折点を制御する。0 < shape < 1の場合は曲線はx = 0でピークを迎え増加減衰し、 scaleは屈折点の制御になる。すべての`shape`が関係する場合は、`c(0.0001, 10)`を`shape`の境界として推奨し、強い遅延効果だけが関係する場合は、`c(2.0001, 10)`を`shape`の境界として推奨する。すべての場合において、`scale`については`c(0, 0.1)`という保守的な境界を推奨する。ワイブルPDFは非常に柔軟で、`Nevergrad`が探索するハイパーパラメータ空間の自由度が高いため、収束に要する反復回数も大きくなる。
+
+
+##### アドストッキングの実装(Implementation of adstocking is done in a few steps)
+
+1. `InputCollect`で`adstock`を使用する予定の分布(geometric, weibull_cdf, weibull_pdf)と同じにする。
+2. `hyper_names(adstock = InputCollect$adstock, all_media = InputCollect$all_media)`を実行して、モデリングプロセスを開始するために正しく設定する必要があるハイパーパラメータを特定する。すべてのペイドおよびオーガニックメディアの変数には、設定する必要のあるハイパーパラメータがある。
+3. 各ハイパーパラメータに範囲を設定する
+
+#### サチュレーション(Diminishing returns , Saturation)
+
+収穫逓減の理論とは、広告の単位を増やすごとにレスポンスは増加するが、その割合は減少していくというもの。この重要なマーケティングの原則は、マーケティングミックスモデルに変数変換として反映される。
+
+![Diminishing returns](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/diminishingreturns1.png)
+
+メディア変数の従属変数に対する非線形なレスポンスは、様々な関数を用いてモデル化することができる。たとえば、単純な対数変換(広告の単位の対数をとる`log(x)`)、またはべき乗変換(`x^α`)を使用できる。べき乗変換の場合、モデラーはモデル内の変数の最高有意性と式全体の最高有意性を求めて、異なる変数(パラメータ$\alpha$の異なるレベル)をテストする。しかし、最も一般的なアプローチは、柔軟なS字カーブ(Hill equation)変換を使用すること。
+
+
+$$
+x_{saturated_{i,j}} = \frac{x_{adstocked_{i,j}}^{\alpha}}{x_{adstocked_{i,j}}^{\alpha} + \gamma^{\alpha}}
+$$
+
+式中の$\gamma$は、問題の変数の変曲点に対してスケーリングされていることに注意。パラメータのバリエーションにより、モデラーはS字カーブの外観、特に形状や変曲点を自由に変更することができます
+
+![Diminishing returns](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/diminishingreturns3.png)
+
+このグラフを理解するためには、X軸に「支出」、Y軸に「レスポンス」があり、支出が増えるにつれてレスポンスが変化し、その曲線によって限界レスポンスがわかるということを理解する必要がある。この曲線は、MMMの最終段階において、すべてのメディアチャネル間でどのように予算をより最適に配分できるかを理解するために非常に有用となる。
+
+飽和に対するRobynのHill equationは、$\alpha$と$\gamma$を持つ2パラメータ関数です。$\alpha$は指数関数とS字の間の曲線の形状を制御し、推奨される境界は`c(0.5, 3)`です。$\alpha$が大きいほど、S字型になる。小さくすると、C字型になる。$\gamma$は、変曲点を制御し、推奨範囲は`c(0.3, 1)`。$\gamma$を大きくすると、応答曲線の変曲点が遅くなる。
+
+##### すべてハイパーパラメータとして設定(Implementation in Robyn is all done in hyper parameter setting)
+
+1. 各ペイドメディア変数の$\alpha$と$\gamma$のハイパーパラメーターが範囲指定されていることを確認する。
+
+### メタのプロフェット(Meta Prophet)
+#### トレンド、季節性、祝日効果の分解自動化(Automated trend, seasonality and holiday effect decomposition)
+
+Prophetは、応答変数(売上、コンバージョンなど)のトレンド、季節性、休日成分の影響を分解することにより、時系列のフィットと予測を改善するために、コードに含まれる。Prophetは、時系列データを予測するためのメタのオリジナルな手法で、非線形トレンドに年、週、日の季節性、さらに休日の効果を加えたモデルに基づく。強い季節効果を持ち、数シーズンの過去データを持つ時系列データで最も効果を発揮する。詳細は[ここ](https://facebook.github.io/prophet/docs/)を確認。
+
+#### Prophetの分解例(Prophet decomposition plot example)
+
+トレンド、季節性、休日成、そして追加の予測子(今回は"イベント")をProphetで分解したものが下記。Weekdayはサンプルデータが日次ではなく週次であるため使用されていない。RobynはProphetでカテゴリ変数を分解し、追加の予測子として使用することで、後のプログラミングを簡素化できる。分解に関する技術的な詳細については、[ここ](https://facebook.github.io/prophet/docs/trend_changepoints.html)のProphetのドキュメントを参照。
+
+![prophet_decomp](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/prophet_decomp.png)
+
+### リッジ回帰(Ridge Regression)
+
+多重共線性に対処し、オーバーフィッティングを防ぐために、多少のバイアスを導入する代償として分散を減少させる正則化技術を適用する。このアプローチはMMMの予測性能を向上させる傾向がある。最も一般的な正則化で、このコードで使用しているのはリッジ回帰。Ridge regressionの数学的表記は以下の通り。
+
+$$
+\sum_{t=1}^{n} (y_{t} - f_{\beta}(x_{t}))^{2} + \lambda \sum_{j=1}^{p}\beta_{j}^{2},\  where \ \beta_{j}\  is\  the\  weight\  of\  variable \ x_{j}
+$$
+モデル仕様の中で、実際に使用する成分をもう少し深く掘り下げると、上記のラムダペナルティ項以外に、以下の式が確認できる。
+
+$$
+y_{t} = intercept + \overbrace{\beta_{j} \frac{ x_{decay_{t,j}^{\alpha} }}{x_{decay_{t,j}}^{\alpha} + \gamma^{\alpha}}}^{S-Curve \ Component \ for \ each \ media(j)} + \underbrace{\beta_{hol} \cdot hol_{t} + \beta_{sea{t}} \cdot sea_{t} + \beta_{trend} \cdot trend_{t}}_{Holiday, \ Seasonality \ and \ Trend \ Effect} + ... +  \beta_{ETC} \cdot ETC_{t} + \epsilon \\
+$$
+
+$$
+\begin{eqnarray}
+Adstock \ transformation: \ X_{decay_{t,j}} &=& X_{t,j} + \theta_{j} \cdot  X_{decay_{t,j-1}} \\
+S \ curve \ transformation: \ SCurve(x,j) &=& \beta_{j} \cdot \frac{x_{decay_{t,j}^{\alpha}}}{x_{decay_{t,j}^{\alpha}} + \gamma^{\alpha}}
+\end{eqnarray}
+$$
+上記は下記の通り。
+
+- $y_{t}$: $t$時点の収益
+- $t$: 目的変数、説明変数の時点のインデックス
+- $j$: メディアインデックス(Facebook、TV、OOHなど)
+- $\beta,\alpha,\gamma,\theta$: 各メディア$j$の予測子
+- Sカーブに実装された$\gamma$は、$\gamma_{train}=quantile(X_decay \ j , \gamma)$と変換された$\gamma$
+- $\beta_{ETC}, ETC_{t}$: モデルに追加される更なる独立変数(競合の売上やプロモーション情報など)
+- $\epsilon$: 誤差項。モデルで扱われていない他のすべての要素を考慮した上での誤差。
+
+リッジ回帰には、他の複雑な手法と比較して、解釈が比較的容易であるという利点もある。式からわかるように、各変数に設定したハイパーパラメータがこの式で使用される。次のセクションで見るように、最もフィットするリッジ回帰モデルを確実に得るために、自動化されたハイパーパラメータ最適化を使用している。
+
+### Nevergradを用いた多目的ハイパーパラメータ最適化(Multi-Objective Hyperparameter Optimization with Nevergrad)
+
+Robynの最も重要なイノベーションの1つは、MMMに多目的ハイパーパラメータ最適化を実装したこと。これにより、時系列バリデーションのためのアドストック、サチュレーション、正則化ペナルティ、さらにはトレーニングサイズの選択を自動化することができる。同時に、目的関数として実装された複数の「目標("goals")」に向かって最適化できるため、予測力が高く、より現実的な要素分解を持つモデル候補を生み出すことができる。
+
+Robynは、[Metaの勾配なし最適化プラットフォームであるNevergrad](https://facebookresearch.github.io/nevergrad/)を使用し、"ask" and "tell"インターフェースでこのタスクを実行する。つまり、Robynは、どの値がより良いスコア(目的関数)を持つかをNevergradに「伝える(telling)」ことによって、変異するハイパーパラメータの値を「尋ねる(ask)」。
+
+Robynには現在4種類のハイパーパラメータがある。
+
+- アドストック(Adstocking): ジオメトリックアドストッキングを選択した場合は`theta`、ワイブルアドストッキングを選択した場合は`シェイプ`&`スケール`。
+- サチュレーション(Saturation):`alpha`&`gamma`(Hill equation用)
+- 正則化(Regularization): リッジ回帰のペナルティ項の`lambda`
+- 検証(validation): `train_size`はトレーニングデータの割合で、Robynは各メディア変数に対して個別にアドストックとサチュレーション変換を行うため、有料およびオーガニックメディア変数を増やすとハイパーパラメータのカーディナリティは増加する。例えば、10個のメディア変数をジオメトリックアドストッキングで使用する場合、ハイパーパラメータの総量は、`10thetas + 10 alphas + 10 gammas + 1 lambda + 1 train_size`の32個になる。ワイブルアドストッキンの場合、`10 shapes + 10 scales + 10 alphas + 10 gammas + 1 lambda + 1 train_size`で42個になる。ハイパーパラメータを追加すると、Robynはより柔軟に最適解を見つけることができるが、収束に時間がかかるため、モデルのランタイムはトレードオフになる。
+
+Robynは現在、ハイパーパラメータ最適化の「目標」として、3つの目的関数を実装している。
+
+- NRMSE: Normalized Root Mean Square Errorは予測誤差とも呼ばれる。Robynでは、データセットを時系列にtrain/validation/testに分割して検証することができる。正確には、検証用NRMSE`nrmse_val`が目的関数であり、`nrmse_test`はアウトオブサンプルの予測性能を評価するために使用される。
+
+- DECOMP.RSSD: Decomposition Root Sum of Squared Distanceはビジネスエラーとも呼ばれ、Robynの重要な発明。ペイドメディアの変数について、支出のシェアと効果のシェアの差を表す。費用と効果の間の均質なシェアを促進するという仮説が論争の的になっていることを認識しており、現実には、DECOMP.RSSDは最も極端な分解結果を除外することができるので、モデル選択の絞り込みに有用。すべての目的関数が「一緒に働く("work together")」ことで、結果は常にバランスが取れていることを忘れてはいけない。
+
+- MAPE.LIFT: 実験のためのMean Absolute Percentage Errorは、キャリブレーション時に有効で、キャリブレーションエラーと呼ばれる。これはRobynの重要な発明であり、Robynが予測された効果と因果関係のある効果の差を最小化することを可能にする。
+
+Robynは、すべての目的関数をバランスさせるパレート最適の概念を用いて、常に「ベスト」とされるパレート最適なモデル候補のセットを出力する。以下に、パレートモデルソリューションのチャートの例を示す。グラフの各点は、探索されたモデル解を表し、左下の角の線はパレート・フロント1-3(Pareto-fronts 1-3)で、すべての反復から得られる最良のモデル結果を含んでいる。2つの軸(xはNRMSE、yはDECOMP.RSSD)は、最小化すべき2つの目的関数で、反復回数が増えるにつれて、座標の左下が下がる傾向がはっきりと観察される。これは、Nevergradがモデル結果を最適な方向へ導く能力を有していることの証明でもある。
+
+![pareto_front](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/pareto_front.png)
+
+進化的アルゴリズムの前提は自然淘汰である。進化的アルゴリズムでは、モデルによって探索される係数の組み合わせが生き残り、増殖する一方で、適合しないモデルは自然淘汰のように死滅し、次の世代の遺伝子プールに貢献しない反復のセットを持つことができる。Robynは、最低2000回の反復を推奨している。この反復は、それぞれが次の世代にフィードバックを与えるため、alphas、gammas、thetasの最適な係数値に向けてモデルを導くことになる。また、`set_iter`オブジェクトで設定した反復回数で独立した試行を最低5回行うことを推奨する。例として、set_iterの2000回×5回のトライアル＝10000通りのイテレーションとモデル解の可能性がある。
+
+Robynでは、次のような場合にモデルが収束したと判断する。
+
+- 基準1: 最後の分位点の標準偏差 < 最初の3つの分位点の平均標準偏差
+- 基準2: 最後の分位点の絶対中央値 < 第1分位点の絶対中央値-2*最初の3つの分位点の平均標準偏差
+
+この分位数は、モデルの反復によって順序付けられ、1000回の反復を行った場合、最初の200回の反復が最初の分位数を構成することになる。この2つの基準は、NRMSEとDECOMP.RSSDの標準偏差と平均値の両方が、開始時点と比較して改善され、変動が少ないことを示すための試みである。
+
+モデリングが完了したら、下記を実行する。
+
+- `OutputModels$convergence$moo_distrb_plot`
+- `OutputModels$convergence$moo_cloud_plot`
+
+多目的最適化の収束を調べるためにこれらのグラフの例については、以下を参照する。
+
+![moo_distrb_plot](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/moo_distrb_plot.png)
+![moo_cloud_plot](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/moo_cloud_plot.png)
+
+### 時系列バリデーション(Time Series Validation)
+
+`robyn_run()`で `ts_validation = TRUE`とすると、NRMSE検証のための3時点分割時系列バリデーションが有効になる。Robynのハイパーパラメータの1つとして時系列バリデーションパラメータ`train_size`が含まれる。`robyn_run()` で `ts_validation = TRUE` とすると、`train_size`はトレーニング、バリデーション、アウトオブサンプルテストに使用するデータの割合を定義する。例えば、`train_size = 0.7`とすると、`val_size`と`test_size`はそれぞれ0.15となる。このハイパーパラメータはカスタマイズ可能で、デフォルトの範囲`c(0.5, 0.8)`で固定することもでき、`c(0.1, 1)`の間である必要がある。
+
+![time_series_validation_and_convergence](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/time_series_validation_and_convergence.png)
+
+![actual_vs_predicted_response_ts](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/actual_vs_predicted_response_ts.png)
+
+### 実験によるキャリブレーション(Calibration with Experiments)
+
+ランダム化比較実験の結果を適用することで、MMMの精度を飛躍的に向上させることができる。モデルのキャリブレーションを恒久的に維持するために、これらの実験を繰り返し実施することが推奨される。一般に、実験結果をマーケティング・チャネルのMMM推定値と比較したい。概念的には、この方法はベイズ法のようなもので、実験結果をメディア変数の係数を縮める(shrink)ための事前知識として使用する。この種の実験の好例は、Facebookのコンバージョンリフトツールで、モデルを特定の範囲の増分値に誘導することができる。
+
+![calibration1](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/calibration1.png)
+
+図は、1つのMMM候補モデルのキャリブレーションプロセスを示したもの。[Facebookの最適化プラットフォームにNevergrad](https://facebookresearch.github.io/nevergrad/)より、正規化ルート平均二乗誤差(NRMSE)とdecomp.RSSD比の他に、MAPE(cal,fb)を第3の最適化スコアとして含めることができ、最小化してパレート最適モデル候補の集合に収束するパレートを持つ解の集合が得られる。このキャリブレーション手法は、実験を行う他のメディアチャンネルにも適用でき、キャリブレーションを行うチャンネルが多いほど、MMMモデルの精度は向上する。
+
+キャリブレーションの実施方法は以下の通り。
+
+1. 実験結果に対応したデータファイルを作成。
+
+```
+calibration_input <- data.frame(
+  # channel name must in paid_media_vars
+  channel = c("facebook_S",  "tv_S", "facebook_S"),
+  # liftStartDate must be within input data range
+  liftStartDate = as.Date(c("2018-05-01", "2018-04-03", "2018-07-01")),
+  # liftEndDate must be within input data range
+  liftEndDate = as.Date(c("2018-06-10", "2018-06-03", "2018-07-20")),
+  # Provided value must be tested on same campaign level in model and same metric as dep_var_type
+  liftAbs = c(400000, 300000, 200000),
+  # Spend within experiment: should match within a 10% error your spend on date range for each channel from dt_input
+  spend = c(421000, 7100, 240000),
+  # Confidence: if frequentist experiment, you may use 1 - pvalue
+  confidence = c(0.85, 0.8, 0.99),
+  # KPI measured: must match your dep_var
+  metric = c("revenue", "revenue", "revenue")
+)
+```
+
+2. `InputCollectにcalibration_input <- dt_calibration`(またはcalibrationデータフレームの名前)を設定。
+3. 2つの目的関数(NRMSE、Decomp.RSSD)ではなく、3つの目的関数(NRMSE、Decomp.RSSD、MAPE.lift)を最適化する必要があることを考慮して、反復回数を少なくとも1000回増加させる。
+4. モデルを実行。
+
+### アウトプットと診断(Outputs & Diagnostics)
+
+MMMコードは、`model_output_collect`オブジェクトで指定したフォルダの下にプロットのセットを自動的に生成する。これらのプロットはそれぞれ、「ハイパーパラメータの選択と最適化の自動化(Automated hyperparameter selection and optimization’)」で述べた多目的パレート最適化プロセスの結果としての最適モデル解の1つを表す。以下に、モデル出力の例を示す。
+
+![modelresults2](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/modelresults2.png)
+
+上記には6種類のチャートがある。
+
+- 1. Response decomposition waterfall by predictor
+
+このグラフは、レスポンス変数に対する各変数効果(ベースライン変数とメディア変数＋インターセプト)のパーセンテージを反映している。例えば、ニュースレター効果が9.6%であれば、総売上の9.6%がニュースレターの活動に起因していることを意味する。
+
+ヒント: インターセプト、およびトレンドのようなProphet変数は、分解の大部分を構成することができる。これは、ブランドが確立されている場合、基本的にメディアを使わなくても売上の大きなベースラインを持つことができることを意味する。
+
+- 2. Share of spend vs. share of effect
+
+このプロットは、応答変数の係数に分解して総効果で割ることで、各チャネルの効果を比較したものである。また、各チャネルの総費用(コストまたは投資)、および総マーケティング費用に対する相対的なシェアも示している。また、各チャネルの投資収益率(ROI)をプロットすることで、最も収益性の高いチャネルを把握することができる。
+
+ヒント: Decomp.RSSDは、最小化する目的関数の1つで、支出シェアと効果シェアの距離に相当する。つまり、支出シェアと効果シェアの間に極端な距離があると、現実的なビジネスとして最適化できないため、極端な距離を設けたくないということです。モデルソリューションを比較する際には、この点を考慮してください。
+
+- 3. Average adstock decay rate
+
+このグラフは、各チャンネルの減衰率を平均的に表したものであり、減衰率が高いほど、そのチャンネルのメディア露出の時間的効果が長いことを表している。減衰率が高いほど、その特定のチャンネルのメディア露出の時間的効果が長いことを意味する。ジオメトリックアドストックの場合は、平均減衰率=thetaとなり、単純な計算となる。ワイブルアドストックの場合、この計算は少し複雑になる。
+
+ヒント: アドストック率を互いに比較して見ることも有効。例えば、上部ファネルチャネル広告株と下部ファネルチャネル広告との比較。上部ファネルは下部ファネルよりアドストックが長いという論理的な結論もあるので、そうでないケースにも気を配ってほしい。これは確固としたルールではないがが、ソリューションを区別する方法として有効である。
+
+- 4. Actual vs. predicted response
+
+このプロットは、応答変数(例：売上)の実際のデータと、その応答変数のモデル化された予測データが、実際のカーブをどのように捉えているかを示している。実際のデータから分散のほとんどを捕らえることができるモデルを目指しているので、R2乗は1に近く、NRMSEは低くなっている。
+
+ヒント: モデルの予測結果が悪くなっている/良くなっている特定の期間を探す。例えば、プロモーション期間に関連する特定の期間において、モデルの予測値が著しく悪化していることに気づいたら、モデルに含めるべき文脈上の変数を特定する良い方法かもしれない。
+
+- 5. Response curves and mean spend by channel
+
+これらは、Hill equationから得られる逓減(diminishing returns)の応答曲線である。この曲線は、チャンネルがどの程度飽和しているかを表しており、したがって、予算の再配分戦略の可能性を示唆するものである。曲線が変曲点まで速く到達し、水平/平坦な勾配になればなるほど、余分にお金を費やすごとに飽和していくことになる。
+
+ヒント: `robyn_response`関数をループ内で使用すると、これらのレスポンスカーブを再現することができる。例えば、次のような実行のループを作成する。
+
+```
+Spend1 <- 60000
+Response1 <- robyn_response(
+robyn_object = robyn_object
+#, select_build = 1 # 2 means the second refresh model. 0 means the initial model
+, media_metric = "search_S"
+, metric_value = Spend1)
+Response1$response/Spend1 # ROI for search 80k
+```
+
+- 6. Fitted vs. residual
+
+このグラフは、適合値と残差の関係を示している。残差とは、回帰直線がデータ点をどれだけ垂直に外しているかを示す尺度である。残差プロットは、通常、回帰の問題点を見つけるために使用さ れる。データ・セットによっては、直線からの距離が大きく変化している点など、回帰の候補としてふさわしくないものがある。残差プロットのポイントが水平軸の周りにランダムに分散している場合、そのデータには線形回帰モデルが適切であり、そうでない場合は非線形モデルがより適切である。
+
+#### モデルソリューションの分類(Model Solution Clustering)
+
+パレート最適解をすべて探索するのではなく(何十個もあり得る)、クラスタリングを使って類似の解を見つけ、それらの解を最も明確な最適解としてユーザーに探索するよう促す。クラスタリングのプロセスは以下の通り。
+
+
+- 1. 得られたパレートフロント上のモデルのプールを使って、各(有料)メディア変数の(正規化された)ROIデータを用いてk-meansクラスタリングを実行。
+
+- 2. デフォルトの`k = "auto"`場合、`k = 1`から`k = 20`を使ったk-meansクラスタリングでWSS(Within Group Sum of Squares)を計算し、「最適な`k`」を探すことができる。また、手動で`k`を設定することでこれを上書きすることもできる(`robyn_run(..., cluster = TRUE)`, `robyn_outputs(..., clusters = TRUE)`, または`robyn_clusters()`）。
+
+- 3. 定義された`k`を用いてすべてのパレートフロントモデルに対してk-meansを実行した後、lowest normalized combined errorsである正規化結合誤差(NRMSE、DECOM.RSSD、キャリブレーションが使用されている場合はMAPE)が最も小さい「ベストモデル」を選択。
+
+`robyn_clusters()`を実行すると、各モデルのcluster-IDを含むクラスタの計算に使用したデータと、WSS-kの選択、勝者モデルのメディアごとのROI、各クラスタのコンテンツモデルをより理解するためのクラスタごとのROIの相関に関するいくつかの可視化結果リストが表示される。クラスタリング選択に関する出力例は以下の通り。
+
+![pareto_clusters_wss](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/pareto_clusters_wss.png)
+![pareto_clusters_detail](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/pareto_clusters_detail.png)
+
+#### 予算配分(Budget Allocation)
+
+最適モデルの結果プロットを分析し、モデルを選択したら、前節の結果からモデル固有のIDを導入できる。例えば、`select_model = "1_92_12"`と設定すると、`OutputCollect$allSolutions`オブジェクトの最適モデルのリストから選択されたモデルとなる。予算配分を実行すると、結果がプロットされ、モデルのプロットが保存されていたのと同じフォルダの下に保存される。結果は次のようになる。
+
+![optimizer_new](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/optimizer_new.png)
+
+上の例のように3つのチャートに遭遇することがある。
+
+- 1. Initial vs. optimized budget allocation
+
+このチャネルでは、元の支出シェアと、新たに最適化された推奨シェアが表示される。最適化されたシェアが元のシェアより大きい場合、両者の差に応じてそのチャネルの予算を比例的に増やす必要があることを意味する。また、支出シェアが最適化シェアよりも大きい場合は、予算を削減することになる。
+
+- 2. Initial vs. optimized mean response
+
+上のグラフと同様に、初期シェアと最適化シェアがあるが、今回は期待される総反応(例: 売上)に対するものである。最適化されたレスポンスとは、上記で説明したチャートに沿って予算を切り替えた場合に期待される売上高の増加の合計であり、最適化された費用のシェアが高いものには費用を増やし、最適化された費用が初期よりも低いものには費用を減らす。
+
+- 3. Response curve and mean spend by channel
+
+Hill equationから得られる収穫逓減の応答曲線である。この曲線は、チャンネルがどの程度飽和しているかを表しており、したがって、予算の再配分戦略の可能性を示唆するものである。曲線が変曲点まで速く到達し、水平/平坦な勾配になればなるほど、余分にお金を支出するたびに飽和に近づく。初期平均支出は丸の形で、最適化されたものは三角形で表される。
+
+### 継続的なレポーティング(Continuous Reporting)
+
+モデルウィンドウに関連するもう一つの強力な機能要件は、新しいデータが届いたときにモデルをリフレッシュする機能。言い換えれば、以前に選択したモデルに基づいて、新しい新鮮なデータに適用したレポートを、月次、週次、あるいは日次の頻度で継続的に作成することができる。その結果、MMMを継続的なレポーティングツールとして活用することで、実用的でタイムリーな意思決定が可能になり、定義されたケイデンス内でレポートやBIツールに反映することができる。
+
+新しい`robyn_refresh()`関数は、robyn_objectで指定されたRobyn.RDataオブジェクトに保存された以前に選択したモデルに基づいて、任意の周期（週、月など）で新しいモデル期間を継続的に構築して追加することが可能。
+
+例えば、初期ビルドを4週間の新しいデータで更新する場合、`robyn_refresh()`は初期ビルドの選択したモデルを使用する。Robynが行うのは、新しいビルドのハイパーパラメータの下限と上限を、前のビルドの選択されたハイパーパラメータと一致するように設定すること。したがって、新旧のビルド間でコンテクスト変数とオーガニック変数の効果を安定させ、また、新しい追加期間の支出レベルに向けてメディア変数の効果の新しいシェアを調整する。最後に、レポート作成のために、以前のすべてのビルドを含む集計結果と、それに対応するプロットを返す。
+
+以下の例では、2017年と2018年の大半をカバーする初期ウィンドウをベースに、5つの異なる期間についてモデルリフレッシュの仕組みを示している。
+
+![refresh-window](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/refresh-window.png)
+
+また、モデル内の各変数から割り当てられたROIと効果を記述した、各リフレッシュ期間の結果1式を得ることができる。ベースライン変数は、すべてのProphet変数(トレンド、季節性、平日、休日)の合計にインターセプトを加えたものである。グラフはシミュレーションに基づくものであり、現実の意味合いを持つものではない。
+
+![refresh-reporting](/Users/aki/Documents/statistical_note/note_MarketingMixModeling01/refresh-reporting.png)
+
+##### robyn_refresh関数の説明(`robyn_refresh()` description)
+
+`robyn_refresh()`関数は、robyn_object で指定された Robyn.RData オブジェクトに保存された以前に構築されたモデルに基づいて更新モデルを構築する。例えば、4週間の新しいデータで初期ビルドを更新する場合、`robyn_refresh()`は初期ビルドで選択したモデルを使う。
+
+Robynが行うことは、新しいビルドのハイパーパラメータの下限と上限を、前のビルドで選択したハイパーパラメータを中心に設定し、新旧ビルド間のベースライン変数の効果を安定させ、メディア変数の新しい効果シェアを最新の支出レベルに向けて調整することである。また、レポート作成用に、以前のすべてのビルドと集計した結果を返し、レポート用プロットを作成する。
+
+## 参考文献
+
+- [Robyn Features](https://facebookexperimental.github.io/Robyn/docs/features)
+- [Robyn Analysts guide to MMM](https://facebookexperimental.github.io/Robyn/docs/analysts-guide-to-MMM)
+- [Robyn R demo](https://github.com/facebookexperimental/Robyn/blob/main/demo/demo.R)
+- [統計コンサルの議事メモ](https://ushi-goroshi.hatenablog.com/search?q=mmm)
+- [Using R to Build a Simple Marketing Mix Model (MMM) and Make Predictions](https://towardsdatascience.com/building-a-marketing-mix-model-in-r-3a7004d21239)
+- [Media-Mix-Model-Modified/メディアミックスモデルの利点と限界](https://speakerdeck.com/ktgrstsh/medeiamitukusumoderufalseli-dian-toxian-jie)
+
+
+
+

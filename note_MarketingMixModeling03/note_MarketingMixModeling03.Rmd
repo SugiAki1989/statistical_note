@@ -1,0 +1,156 @@
+---
+title: "Robyn が出力するグラフについて"
+pagetitle: "Robyn が出力するグラフについて"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+Marketing Mix Modeling(MMM)のシリーズでは、Meta社(Facebook)が開発したRobynパッケージのドキュメントをなぞりながら、MMMを理解するために必要な知識を整理し、RでMMMを実行するまでをまとめている。基本的には下記の公式ドキュメントを参考にしている。
+
+- [Robyn](https://facebookexperimental.github.io/Robyn)
+
+ここでは、[Outputs & Diagnostics](https://facebookexperimental.github.io/Robyn/docs/features#outputs--diagnostics)に記載されているRobynのアウトプットへの理解を深めていく。MMMシリーズの1回目のノートにもアウトプットの説明があるが、あくまでも日本語訳にしただけなので、こちらのほうが内容としては細かい。
+
+### アウトプットの出力先
+
+MMMコードは、`model_output_collect`オブジェクトで指定したフォルダの下にプロットのセットを自動的に生成する。これらのプロットはそれぞれハイパーパラメータの最適化プロセスの結果として、最適モデル解の1つを表す。
+
+![plt](/Users/aki/Documents/statistical_note/note_MarketingMixModeling03/plt.png)
+
+上記の6種類のチャートが出力される。
+
+## 1. Response Decomposition Waterfall By Predictor
+
+![plt1](/Users/aki/Documents/statistical_note/note_MarketingMixModeling03/plt1.png)
+
+このグラフは、レスポンス変数に対する各変数効果(ベースライン変数とメディア変数＋インターセプト)のパーセンテージを反映している。例えば、`competitor_sale_B`はおそらく競合企業Bの売上だと思うが、この企業と自分の企業は総補完的で、総売上の44.8%が競合企業Bに起因してろい、Positiveな関係であることを意味する。商材自体が共に補い合うような場合はこのような形になると思われる。
+
+画面左上に`Decomp RSSD`という指標がある。これは「既存投資割合`spend share`」と「最適投資割合(`effect share`)」の差の2乗に平方根をとったもの。つまり、既存の投資割合と最適な投資割合の差が小さいような理想的な投資割合であれば小さくなり、既存の投資割合と最適な投資割合の差が大きいのであれば、`Decomp RSSD`は大きくなり、非現実的な関係をモデルが示すことになるため、これを最小化することを目指す。[Decomp RSSD: Optimizing for Politics
+](https://getrecast.com/decomp-rssd/)に解説が載っている。
+
+
+## 2. Share of Spend vs. Share of Effect
+
+![plt3](/Users/aki/Documents/statistical_note/note_MarketingMixModeling03/plt3.png)
+
+このプロットは、目的変数への係数に分解して総効果で割ることで、各チャネルの効果を比較したもの。また、各チャネルの総費用(コストまたは投資)、および総マーケティング費用に対する相対的なシェアも示す。各チャネルの投資収益率(ROI)をプロットすることで、最も収益性の高いチャネルを把握することができる。`Spend share`は使用している金額の割合で、`Effect share`は売上への影響の大きさに対する割合のようなイメージ。
+
+`tv_S`、`search_S`や`print_S`をみると、`Effect share > Spend share`という関係になっており、これらのチャネルはもう少し予算を多めに配分してもよいことがわかる一方で、`ooh_S`や`facebook_S`をみると、`Effect share < Spend share`という関係になっており、これらのチャネルは予算を使っている割に効果がよくないことが示されている。実際にROIも1を割っており、使えば使うほど損をすることがわかる。
+
+## 3. Average Adstock Decay Rate
+
+![plt5](/Users/aki/Documents/statistical_note/note_MarketingMixModeling03/plt5.png)
+
+このグラフは、各チャンネルのアドストックの減衰率を平均的に表したものであり、減衰率が高いほど、そのチャンネルのメディア露出の時間的効果が長いことを表している。減衰率が高いほど、その特定のチャンネルのメディア露出の時間的効果が長いことを意味する。
+
+このチャートでは、アドストックレートを比較して見ることも有効。例えば、上部ファネルチャネルの広告と下部ファネルチャネルの広告との比較する場合、理論的には上部ファネルは下部ファネルよりアドストックが長いはず。つまり、TV広告は認知的な要素が強いので、アドストックレートは高くなるが、検索連動型広告は刈り取りがメインであるため、アドストックレートは小さくなるはずである。このような関係にない場合、想定しているような広告の戦略が機能していない可能性がある。
+
+このケースでは`tv_S`や`ooh_S`の割合が高く、`search_S`や`print_S`の割合は小さいため、`tv_S`や`ooh_S`を認定的な機能、`search_S`や`print_S`は刈り取り機能としているのであれば、戦略通りと言える。
+
+## 4. Actual vs. Predicted Response
+
+![plt2](/Users/aki/Documents/statistical_note/note_MarketingMixModeling03/plt2.png)
+
+このプロットは、応答変数(例：売上)の実際のデータと、その応答変数のモデル化された予測データを折れ線で可視化したもの。単純な話、汎化性能の低いモデルの結果をみて、議論してもしょうがないので、こちらのチャートで、モデルの予測値と観測値を可視化してもモデルのよし悪しを調べる必要がある。
+
+特定の期間で予測が著しく悪いのであれば、それはモデルに組み込む変数が足りていないので、その期間に起こっていたことを振り返る、モデルに追加の変数を組み込んで、再度モデリングする必要がある。
+
+最初のwaterfallチャートの上部にNRMSEの記載があるが、`robyn_run()`で`ts_validation = TRUE`の場合、時期列クロスバリデーションが行われることになる(たぶん)。公式ドキュメントの[Time Series Validation](https://facebookexperimental.github.io/Robyn/docs/features/#time-series-validation)の部分。
+
+## 5. Response Curves and Mean Spend by Channel
+
+![plt4](/Users/aki/Documents/statistical_note/note_MarketingMixModeling03/plt4.png)
+
+これらは、Hill equationから得られる逓減(diminishing returns)の応答曲線である。この曲線は、チャンネルがどの程度飽和しているかを表しており、予算の再配分戦略の可能性を示唆するもの。曲線が変曲点まで速く到達し、水平/平坦な勾配になればなるほど、余分にお金を費やすごとに飽和していくことになる。
+
+このチャートをみると、`facebook_S`や`ooh_S`は今後、広告費用を投下しても売上が伸びにくく飽和していく可能性が高い一方で、`tv_S`は投資すれば、比例して売上が上がっていく可能性がある。また、`print_S`は広告費用に対するリターンがすごく大きいので、広告予算がある、再分配するのであれば、同じ広告費用であっても`facebook_S`よりも`print_S`のほうがリターンが大きくなる。
+
+このチャートは、下記のスクリプトで再現できる。
+
+```
+Spend1 <- 60000
+Response1 <- robyn_response(
+robyn_object = robyn_object
+#, select_build = 1 # 2 means the second refresh model. 0 means the initial model
+, media_metric = "search_S"
+, metric_value = Spend1)
+Response1$response/Spend1 # ROI for search 80k
+```
+
+## 6. Fitted vs. Residual
+
+![plt6](/Users/aki/Documents/statistical_note/note_MarketingMixModeling03/plt6.png)
+
+回帰直線の予測値と残差の散布図で、モデルの問題点を見つけるために使用される。残差が水平軸の周りにランダムに等分散している場合、モデルが適切といえる。そうでない場合、モデルがデータをうまく捉えられていない可能性があるので、考慮できていない変数を追加するなどが必要。また、残差プロットが特定のパターンを持っている場合、線形なモデルではなく非線形なモデルを利用したほうがよい。
+
+## Budget Allocation
+
+RobynではBudget Allocationを分析する機能をもっており、現状の予算配分と最適な予算配分をグラフで示す。
+
+![optimizer_new](/Users/aki/Documents/statistical_note/note_MarketingMixModeling03/optimizer_new.png)
+
+上の例のように3つの予算配分の最適化に関するレポートを出力する。ここで扱うのは予算総額を変えない場合の例。
+
+### 1. Initial vs. Optimized Budget Allocation
+
+このチャートでは、現在の支出シェアと、新たに最適化された推奨シェアが表示される。最適化されたシェアが元のシェアより大きい場合、両者の差に応じてそのチャネルの予算を比例的に増やす必要があることを意味する。また、支出シェアが最適化シェアよりも大きい場合は、予算を削減することになる。
+
+このチャートであれば、`facebook_S`や`ooh_S`は支出シェアが最適化シェアよりも大きので予算を減らし、`print_S`や`search_S`、`tv_S`は最適化されたシェアが元のシェアより大きいので、予算を増やしやすことが望ましい。
+
+> Total response increase 28.1% with optimised spend allocation
+
+また、上部にある通り、この予算配分に変更することで、28.1%の売上増加が見込まれることがわかる。
+
+### 2. Initial vs. Optimized Mean Response
+
+上のグラフと同様に、現在のシェアと最適化シェアがあるが、今回は期待される売上に対するものである。最適化されたレスポンスとは、上記で説明したチャートに沿って予算を切り替えた場合に期待される売上高の増加の合計のこと。最適化された費用のシェアが高いものには費用を増やし、最適化された費用が初期よりも低いものには費用を減らすなどの判断ができる。
+
+先程の28.1%という数字は、このチャートの`Optimised/initial`の比で計算できる。
+
+```{r}
+(13949+72707+129325+44028+121363)/(16321+82594+66491+33179+99051)
+```
+
+### 3. Response Curve and Mean Spend by Channel
+
+Hill equationから得られる収穫逓減の応答曲線。この曲線は、チャンネルがどの程度飽和しているかを表しており、したがって、予算の再配分戦略の可能性を示唆するものである。曲線が変曲点まで速く到達し、水平/平坦な勾配になればなるほど、余分にお金を支出するたびに飽和に近づく。初期平均支出は丸の形で、最適化されたものは三角形で表される。見方としては、三角の最適化された点まで増やせば、対応する売上はいくらなのか、という見方になると思われる。
+
+このチャートを見ると、`print_S`は効果が期待できるが、`facebook_S`や`ooh_S`はあまり期待できないことがわかる。
+
+## 参考文献
+
+- [Robyn Features](https://facebookexperimental.github.io/Robyn/docs/features)
+- [Robyn Analysts guide to MMM](https://facebookexperimental.github.io/Robyn/docs/analysts-guide-to-MMM)
+- [Robyn R demo](https://github.com/facebookexperimental/Robyn/blob/main/demo/demo.R)
+- [統計コンサルの議事メモ](https://ushi-goroshi.hatenablog.com/search?q=mmm)
+- [Using R to Build a Simple Marketing Mix Model (MMM) and Make Predictions](https://towardsdatascience.com/building-a-marketing-mix-model-in-r-3a7004d21239)
+- [Media-Mix-Model-Modified/メディアミックスモデルの利点と限界](https://speakerdeck.com/ktgrstsh/medeiamitukusumoderufalseli-dian-toxian-jie)
+
+
+
+

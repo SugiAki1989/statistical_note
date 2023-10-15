@@ -1,0 +1,307 @@
+---
+title: "因果推論の基礎"
+pagetitle: "因果推論の基礎"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではRを使って因果推論に関する基礎的な理論から分析を実行するための方法をまとめている。ここではRubinの因果モデルについてまとめておく。
+
+## Rubinの因果モデル
+
+個体$i$に対して、処置されたときに得られるであろうアウトカムの値を$Y_{i}(1)$とし、同じ個体が処置されないときに得られるであろうアウトカムの値を$Y_{i}(0)$とする。現実問題として、これは片方しか観測できない。これらを組み合わせて$\{Y_{i}(1),Y_{i}(0)\}$を個体$i$の潜在的な結果(potential outcome)という。また、何らかの処置が行われたことを変数$Z$で表し、$Y_{i}(Z=z),z=0,1$と表記する。Rubinの因果モデルでは、潜在的な結果を用いて、因果効果(causal effect)を定義する。
+
+<div class="tbox">
+<th3>ITE</th3>
+<div class="inner">
+個体$i$の潜在的な結果を$\{Y_{i}(1),Y_{i}(0)\}$とするとき、それらの差
+$$
+\tau_{i} = Y_{i}(1) - Y_{i}(0)
+$$
+を個体処置効果(individual treatment effect: ITE)という。
+</div>
+</div>
+
+これは理論上は定義できても、実際はいずれかしか観測できない。これは因果推論における根本問題と呼ばれる。個体レベルでは処置効果は計算不可能であるため、個体の母集団を考え、その母集団における処置効果を定義する。
+
+<div class="tbox">
+<th3>ATE</th3>
+<div class="inner">
+母集団全体での個体処置効果の期待値の差
+$$
+\tau = E[Y(1) - Y(0)] = E[Y(1)] - E[Y(0)]
+$$
+を平均処置効果(average treatment effect: ATE)という。
+</div>
+</div>
+
+母集団すべての個体に処置を行ったときの結果を$E[Y(1)]$、母集団すべての個体に処置を行わないときの結果を$E[Y(0)]$としているが、これも同時には観測できないので、因果効果は測定不可能であるが、特定の仮定が成り立つのであれば、観測できるようになる。この話をする前にもう一つ効果を定義しておく。
+
+<div class="tbox">
+<th3>ATT</th3>
+<div class="inner">
+Aを処置を受けた個体$Z_{i}=1$の母集団の部分集合とするとき、部分集合の期待値の差
+$$
+\tau = E[Y(1) - Y(0) | A] = E[Y(1) - Y(0) | Z=1] 
+$$
+を処置群での集合における平均処置効果(average treatment effect on the treated: ATT)という。反対に、対象群での集合における平均処置効果(average treatment effect on the untreated: ATC)も定義できる。
+</div>
+</div>
+
+## SUTVA条件
+
+個体処置効果が意味のあるものになるためには、SUTVA条件を満たす必要がある。
+
+<div class="tbox">
+<th3>SUTVA条件</th3>
+<div class="inner">
+個体$i$の潜在的な結果$\{Y_{i}(1),Y_{i}(0)\}$が次の条件を満たすとき、SUTVA(stable unit treatment value assumption)条件を満たしているという。
+
+- 個体${i}$の潜在的な結果$\{Y_{i}(1),Y_{i}(0)\}$は、他の個体の処置に依存しない
+- 個体${i}$に対する処置は1通りのみ
+</div>
+</div>
+
+例えば、個体がコロナワクチンを受けたとすると、周りの人も感染する可能性は低くなることが予想される。この場合は、個体${i}$への処置が他の個体に影響していることになる。また、個体${i}$に対する処置は1通りというのは、ワクチンと言っても色々あるので、モデルナ社のワクチンなのか、ファイザー社のワクチンなのか、処置の内容を明確にしておくというもの。
+
+## 正値性と独立性
+
+平均処置効果が計算可能になるためには、下記の通りいくつかの条件が必要になる。
+
+<div class="tbox">
+<th3>正値性</th3>
+<div class="inner">
+処置を受ける確率が
+$$
+0 \lt P(Z=1) \lt 1
+$$
+となることを正値性(positivity)という
+</div>
+</div>
+
+正値性は個体が処置を受ける確率が0でも1でもない、つまり、処理と対照に割り付けられると仮定する。0や1となってしまうと、個体すべてが処理群と割り付けられることが発生する。つまり比較のしようがなくなる。正値性のもとでの条件つき期待値は
+
+$$
+\begin{eqnarray}
+E[Y|Z=1] = E[Y(1)|Z=1] \\
+E[Y|Z=0] = E[Y(0)|Z=0]
+\end{eqnarray}
+$$
+
+$$
+$$
+と定義でき、これらは観測可能な値である。
+$$
+E[Y(1)|Z=1] - E[Y(0)|Z=0]
+$$
+は、期待している平均処理効果ではない。観察された平均値の単純比較を行っている下記の式を少し変形するとATTとセレクションバイアスに分解される。これはATEでないことに加え、$E[Y(0)|Z=1] = E[Y(0)|Z=0]$が成立しなければ、バイアスを含むことになる。つまり、処置群と対照群ごとのアウトカムの期待値の差を計算しても平均処置効果ではない。期待している平均処置効果を計算するためには、「独立(independent)」という条件を考える必要がある。
+
+$$
+\begin{eqnarray}
+E[Y(1)|Z=1] - E[Y(0)|Z=0] &=& E[Y(1)|Z=1] - E[Y(0)|Z=0] - E[Y(0)|Z=1] + E[Y(0)|Z=1] \\
+&=& E[Y(1)|Z=1] - E[Y(0)|Z=1] + E[Y(0)|Z=1] - E[Y(0)|Z=0] \\
+&=& E[Y(1) - Y(0)|Z=1] + E[Y(0)|Z=1] - E[Y(0)|Z=0] \\ 
+&=& ATT + bias
+\end{eqnarray}
+$$
+
+<div class="tbox">
+<th3>独立性</th3>
+<div class="inner">
+割付$Z$が潜在的な結果$\{Y_{i}(1),Y_{i}(0)\}$に依存しないことを、$\{Y_{i}(1),Y_{i}(0)\}$と$Z$は独立という。
+$$
+\{Y_{i}(1),Y_{i}(0)\} \amalg Z
+$$
+</div>
+</div>
+
+処置が各個体に対してランダムに割り付けられる場合、$Z$はすベての個体の共変量や属性とは無関係になる。一般に、$A \amalg B$であれば、$P(A|B)=P(A)$となるので、
+
+$$
+\begin{eqnarray}
+E[Y|Z=1] = E[Y(1)|Z=1] = E[Y(1)] \\
+E[Y|Z=0] = E[Y(0)|Z=0] = E[Y(0)]
+\end{eqnarray}
+$$
+
+これらの条件が仮定できるのであれば、結果として、下記の通り、右辺は観測不可能ではあるが、左辺から計算可能であることになる。つまり、平均処置効果が計算できるようになる。
+
+$$
+E[Y(1)|Z=1] - E[Y(0)|Z=0] = E[Y(1)] - E[Y(0)]
+$$
+となる。また、独立を仮定することで、平均独立(mean exchangeability)も成り立つ。
+
+<div class="tbox">
+<th3>平均独立</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+E[Y(1)|Z=1] = E[Y(1)|Z=0] \\
+E[Y(0)|Z=1] = E[Y(0)|Z=0]
+\end{eqnarray}
+$$
+</div>
+</div>
+
+平均独立が表していることは、処置群$Z=1$に割り付けた個体すべてを$Z=0$としても、統制群$Z=0$に割付けた個体すべてに$Z=1$を与えても、結果が同じになることを意味する。
+
+平均独立が成り立つのであれば、セレクションバイアスを含む式からもATEが計算できることがわかる。ただ、独立も独立から導かれる平均独立も、反事実のアウトカムが含まれるため、観測はできないため、独立性を担保するためにランダム化無作為試験(RCT)などを通じて、独立性を担保する必要がある。
+
+## 共変量と条件付き独立性
+
+共変量$X$が与えられたとき、潜在的な結果$\{Y_{i}(1),Y_{i}(0)\}$に割付$Z$が依存しないことを、$X$が与えられた条件のもとで$\{Y_{i}(1),Y_{i}(0)\}$と$Z$は条件付き独立(conditionally independent)という。
+
+$$
+\{Y_{i}(1),Y_{i}(0)\} \amalg Z | X
+$$
+共変量$X$のみが割付に影響する交絡因子であり、他の交絡要因がないことを意味する。条件付き独立性のイメージは下記のスプレッドシートを参照。
+
+- [条件付き独立スプレッドシート](https://docs.google.com/spreadsheets/d/1AhRyhgodKlef0NDmUybFFdPO2DBCcyNvGaPVWqBotdw/edit?usp=sharing)
+
+条件付き独立があるのであれば、同様には条件付き正値性(conditional positivity)も存在する。
+
+$$
+0 \lt P(Z=1|X) \lt 1
+$$
+
+つまり、共変量$X$が与えられているもとで、処置か対照に割り付けられる確率は0ではないということになる。条件付き独立、条件付き正値性をあわせて「強い意味での無視可能な割付け(Strongly Ignorable Treatment Assignment)」と呼ぶ。すべての$X$について成り立つ必要があるので、強い条件である。条件付き独立、条件付き正値性が成り立つのであれば、
+
+$$
+\begin{eqnarray}
+E[Y|Z=1,X] = E[Y(1)|Z=1,X] = E[Y(1)|X] \\
+E[Y|Z=0,X] = E[Y(0)|Z=0,X] = E[Y(0)|X]
+\end{eqnarray}
+$$
+が成り立つ。これらを$X$で期待値(繰り返し期待値の法則)を取ることで、平均処置効果が計算できる。
+
+$$
+\begin{eqnarray}
+E_{X}[E[Y|Z=1,X]] = E_{X}[E[Y(1)|X]] = E[Y(1)] \\
+E_{X}[E[Y|Z=0,X]] = E_{X}[E[Y(0)|X]] = E[Y(0)] 
+\end{eqnarray}
+$$
+
+したがって、観察研究であっても、条件付き独立、条件付き正値性が成り立つのであれば、共変量$X$を使えば実験研究と同じような枠組みにもってこれる。
+
+## 傾向スコア
+処理の割付を表す変数を$Z$として、観測済みの共変量$X$とする。傾向スコアは下記のように定義される。
+
+<div class="tbox"><th3>傾向スコア</th3>
+<div class="inner">
+処理の割付を表す変数を$Z$として、観測済みの共変量$X$に対し、$X$が与えられたときに個体が処置に割り付けられる確率
+$$
+e(X) = P(Z=1|X)
+$$
+を傾向スコア(propensity score)という。
+</div></div>
+
+傾向スコアは、複数の共変量がもつ割り付けに関する情報を1つに集約した値と考えることができる。
+
+
+<div class="tbox"><th3>平均処置効果の識別可能性条件</th3>
+<div class="inner">
+- 条件付き独立性：観測された共変量$X$以外に割付$Z$に影響する変数はなく、潜在的な結果$\{Y_{i}(1),Y_{i}(0)\}$と$Z$は条件付き独立となる
+
+$$
+\{Y_{i}(1),Y_{i}(0)\} \amalg Z|X
+$$
+
+- 条件付き正値性：与えられた共変量$X$のもとで、処理に割り付けられる確率0より大きく1未満
+$$
+0 \lt e(X) \lt 1
+$$
+</div></div>
+
+上記の条件を満たすのであれば、処置の割付に関しては観測された共変量$X$のみを考えれば良く、1つに集約された傾向スコアが処置に関する割付の情報を担うことになる。
+
+<div class="tbox"><th3>条件付き独立</th3>
+<div class="inner">
+傾向スコア$e(X)$が与えられたとき、潜在的な結果$\{Y_{i}(1),Y_{i}(0)\}$と$Z$は条件付き独立となる。
+$$
+\{Y_{i}(1),Y_{i}(0)\} \amalg Z|e(X)
+$$
+</div></div>
+
+<div class="tbox"><th3>バランシング</th3>
+<div class="inner">
+同じ傾向スコア$e(X)$の値に対応する個体の共変量の分布は、処置群と対照群で等しくバランシングする。つまり、$e(X)$の条件付きで$X$と$Z$は条件付き独立となる。
+$$
+X \amalg Z|e(X)
+$$
+</div></div>
+
+その結果、傾向スコアが与えられれば、その条件付きで処置の割付はランダムと考えることができ、条件付きでの平均処置効果は、
+
+$$
+\begin{eqnarray}
+E[Y(1)-Y(0)|e(X)] &=& E[Y(1)|e(X)] -E[Y(0)|e(X)] \\
+&=& E[Y(1)|Z=1,e(X)] - E[Y(0)|Z=0,e(X)] \\
+&=& E[Y|Z=1,e(X)] - E[Y|Z=0,e(X)]
+\end{eqnarray}
+$$
+となり、
+
+$$
+\begin{eqnarray}
+E[Y|Z=1,e(X)] - E[Y|Z=0,e(X)] = E_{e(X)}[E[Y|Z=1,e(X)] - E[Y|Z=0,e(X)]] = E[Y(1)-Y(0)] = \tau
+\end{eqnarray}
+$$
+
+傾向スコアの分布で期待値を取ることで、平均処置効果を計算できる。ここで、同じ傾向スコア$e(X)$を持つ個体においては、それらの観測された共変量$X$の分布は、理論的には両群で等しくバランシングする。処置の割付に関する情報は傾向スコア$e(X)$が持っているため、傾向スコア$e(X)$で条件付ければ、傾向スコア$e(X)$以外の共変量$X$の条件付き分布は群間で等しくなる。
+
+## 参考文献および参考資料
+下記の参考文献および参考資料ではイメージ図やデータを用いた具体例が豊富なので、上記の説明での不明点は下記のページ番号を参照するべし。
+
+#### セレクションバイアス
+
+- [安井翔太(2020) 効果検証入門 技術評論社](https://gihyo.jp/book/2020/978-4-297-11117-5)のp4
+- [矢内勇生 統計的因果推論入門](https://yukiyanai.github.io/jp/classes/econometrics2/contents/slides/metrics2_topic02_slides_pub.pdf)のp3,p29
+- [星野匡郎,田中久稔(2016)Rによる実証分析 オーム社](https://shop.ohmsha.co.jp/shopdetail/000000004800/)のp117
+
+#### Rubinの因果モデル(ITE, ATE, ATT, ATC)
+
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)のp69
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp17
+- [矢内勇生 統計的因果推論入門](https://yukiyanai.github.io/jp/classes/econometrics2/contents/slides/metrics2_topic02_slides_pub.pdf)のp16
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://raw.githubusercontent.com/JaehyunSong/kobe_ci/master/Slide/Slide_Day1.pdf)のp25
+
+#### SUTVA条件、識別性条件、(条件付き)正値性(Positivity)、(条件付き)独立性(Independent)、平均独立性(Mean Exchangeable)
+
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)のp77、p80、p87
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://raw.githubusercontent.com/JaehyunSong/kobe_ci/master/Slide/Slide_Day2.pdf)のp14
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp35
+- [矢内勇生 統計的因果推論入門](https://yukiyanai.github.io/jp/classes/econometrics2/contents/slides/metrics2_topic03_slides.pdf)のp11
+
+#### 傾向スコア
+
+- [岩崎学(2015) 統計的因果推論 朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)のp96
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://raw.githubusercontent.com/JaehyunSong/kobe_ci/master/Slide/Slide_Day2.pdf)のp41
+- [矢内勇生 統計的因果推論入門](http://yukiyanai.github.io/jp/classes/econometrics2/contents/slides/metrics2_topic05_slides.pdf)のp1
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp136

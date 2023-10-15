@@ -1,0 +1,323 @@
+---
+title: "Rで勾配降下(上昇)法を行う"
+pagetitle: "Rで勾配降下(上昇)法を行う"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではRを使った勾配降下法(最急降下法)の方法についてまとめておく。
+
+## 勾配降下法とは
+
+勾配降下法(Gradient Descent)は関数の傾き(1階微分)を利用して、目的関数の最小値を探索するアルゴリズム。下記の更新式を用いて行われる。$\eta$は学習率であり、係数をかけることで学習速度を早めることもできる。
+
+$$
+x_{n+1} = x_{n} - \eta f^{\prime}(x_{n})
+$$
+
+1次関数で考えると、この式は、ある点で微分した際に、点の傾きがマイナスであれば右に動かし、傾きがプラスなら左に動かせるようにしている。例えば、$\eta=1$で$f(x)=x^{2}$を$x=-2$で微分すると、$f^{\prime}(-2)=2x=2(-2)=-4$となるため、更新式では$x_{n} - \eta(-4)=-2 + 4 = +2$となり、右に動くことになる。反対に、$x=2$で微分すると、$f^{\prime}(2)=2x=2(2)=4$となるため、更新式では$x_{n} - \eta(4)=2 - 4 = -2$となって、左に動く。
+
+以前ノートにまとめたニュートン法が機械学習であまり使われないのかは、下記が詳しい。
+
+- [なぜニュートン法は機械学習であまり使われないのですか？](https://de-vraag.com/ja/71975149)
+
+勾配降下法をRで実装していく。今回は、可視化用の更新履歴データを保存している。
+
+```{r}
+f <- function(x) 1.2 * (x-2)^2 + 3.2
+iter <- 200
+eta <- 0.01
+h <- 0.01
+x <- 10
+
+xtrace <- ftrace <- vector('numeric', length = iter)
+for (i in seq_along(1:iter)) {
+  dx <- ((f(x + h) - f(x)) / h)
+  x <- x - eta * dx
+  xtrace[i] <- x
+  ftrace[i] <- f(x)
+  if (i %% 10 == 0) print(sprintf("%d times: (x=%2.3f, f(x)=%2.3f)", i, x, f(x)))
+}
+```
+
+この結果を可視化すると、うまく関数の最小値を探索できていそうです。
+
+```{r}
+df <- data.frame(
+  i  = 1:iter,
+  x  = xtrace,
+  fx = ftrace
+)
+
+x_base <- seq(-3,15,0.1)
+y_base <- f(x_base)
+df_base <- data.frame(x_base, y_base)
+
+library(ggplot2)
+ggplot() + 
+  geom_line(data = df_base, aes(x_base, y_base)) + 
+  geom_point(data = df, aes(x, fx), col = 'red', size = 2) +
+  geom_hline(yintercept = df[max(df$i),'fx']) +
+  scale_x_continuous(breaks = seq(-3, 15, 1)) +
+  scale_y_continuous(breaks = seq(0, 100, 10), limits = c(0,100)) +
+  labs(title = 'f(x) = 1.2 * (x-2)^2 + 3.2', x = 'x', y = 'y') + 
+  theme_classic()
+```
+
+
+## 線形回帰と勾配降下法
+
+勾配降下法を用いて、線形回帰のパラメタを探索してみる。線形回帰では2乗誤差を目的関数として、この関数を最小化できれば良いので、下記の関数を最小化する。
+
+$$
+s = \sum(y_{i} - (\alpha + \beta x_{i}))^{2} = \sum(y_{i} - \alpha - \beta x_{i})^{2}
+$$
+
+サンプルデータを擬似的に生成し、得られるべきパラメタを確認しておく。
+
+```{r}
+set.seed(1989)
+x <- rnorm(100,0,1)
+y <- 5 + 2.5*x + rnorm(100, 10, 1)
+lm(y ~ x)
+```
+
+$\alpha, \beta$ともに初期値は1として、50回の繰り返しを行う。ここでは関数$s$を偏微分して得られた式を予め使うのではなく、目的関数をそのまま利用し、微分しながら更新する。
+
+```{r}
+# 目的関数
+f <- function(alpha, beta) sum((y - alpha-beta*x)^2)
+
+# 初期設定
+beta <- 1
+alpha <- 1
+iter <- 50
+eta <- 0.001
+h <- 0.01
+
+for(i in seq_along(1:iter)){
+  # 更新前のalpha, beta
+  params <- c(alpha, beta)
+  
+  # alphaを更新
+  dalpha <- (f(params[1] + h, params[2]) - f(params[1], params[2])) / h
+  alpha <- alpha - eta * dalpha
+  # betaを更新
+  dbeta <- (f(params[1], params[2] + h) - f(params[1], params[2])) / h
+  beta  <-  beta - eta * dbeta
+  
+  if (i %% 5 == 0) print(sprintf("%d times: (alpha=%2.3f, beta=%2.3f)", i, alpha, beta))
+}
+
+```
+
+最小二乗法で正規方程式を利用する`lm()`の結果と似たような結果が得られている。
+
+## ポアソン分布と勾配上昇法
+
+関数の形によっては、勾配を上昇する必要がある。その例としてポアソン分布の尤度を取り上げる。ポアソン分布の尤度関数$L$は、
+
+$$
+L = \prod {\frac{\lambda^{x_{i}}}{x_{i}!}e^{-\mu}}
+$$
+
+であり、対数尤度関数$log L$に直すと、
+
+$$
+log L = \sum x_{i} log(\lambda) - n\lambda - \sum log(x_{i}!)
+$$
+
+となる。これを勾配上昇法で最大となる点を探索する。ポアソン分布の場合、最尤推定量は`mean()`で計算できるので、探索結果として得られだろう値を確認しておく。
+
+```{r}
+# Data From 
+set.seed(1989)
+x <- rpois(n = 100, lambda = 3.5)
+mean(x)
+```
+
+さきほどの対数尤度関数をそのまま書いて、勾配上昇法を実行すると、最尤推定値とほとんど同じ値が得られている。
+
+```{r}
+loglik <- function(lam) sum(x)*log(lam) - length(x)*lam - sum(log(factorial(x)))
+lambda <- 1
+iter <- 500
+eta <- 0.001
+h <- 0.01
+
+for(i in seq_along(1:iter)){
+  lambda <- lambda + eta * (loglik(lambda + h) - loglik(lambda)) / h
+
+  if (i %% 50 == 0) print(sprintf("%d times: (loglik=%2.3f, lambda=%2.3f)", i, loglik(lambda), lambda))
+}
+```
+
+関数の最大値、最小値を探索できる`optimize()`でも同じような結果が得られている。
+
+```{r}
+optimize(loglik, c(0, 10), maximum = TRUE)
+```
+
+## 正規分布と勾配上昇法
+
+次の例として正規分布を取り上げる。正規分布は、
+
+$$
+f(x; \mu, \sigma^2)=\frac{1}{\sqrt{2 \pi \sigma^2}}exp \left[-\frac{(x-\mu)^2}{2 \sigma^2}\right]
+$$
+
+であり、正規分布の対数尤度関数および偏微分の値は、
+
+$$
+\begin{eqnarray}
+log L &=& - \frac{n}{2}log(2 \pi \sigma^2) - \frac{1}{2 \sigma^2} \sum (x_{i}-\mu)^2 \\
+\frac{ \partial L(\mu, \sigma^2) }{ \partial \mu } &=& - \frac{1}{\sigma^2} \sum (x_{i}-\mu) = 0 \\
+\frac{ \partial L(\mu, \sigma^2) }{ \partial \sigma^2 } &=& - \frac{n}{2\sigma^2} + \frac{1}{2\sigma^4}\sum (x_{i}-\mu)^2 = 0 \\
+\end{eqnarray}
+$$
+
+である。これを勾配上昇法で探索することで、パラメタを求められる。Rで実装していく前に、サンプルデータを擬似的に生成し、得られるべきパラメタを確認しておく。
+
+```{r}
+# mu = 2, sigma2 = 9
+set.seed(1989)
+x <- rnorm(100, mean = 2, sd = sqrt(9))
+list(
+  mean = mean(x),
+  sigma2 = var(x)
+  )
+```
+
+まずは、偏微分の結果を利用して更新していく。下記では$\sigma$を更新しているので、分散$\sigma^2$は$\sigma$の結果を2乗する必要がある
+
+```{r}
+iter <- 500
+h <- 0.01
+eta <- 0.01
+mu <- 1
+sigma <- 1
+n <- length(x)
+
+# 下記ではσを更新しているので、分散σ^2はsigmaの結果を2乗する必要がある
+for (i in seq_along(1:iter)) {
+  mu <- mu + eta * sum(x - mu)/(sigma^2)
+  sigma <- sigma + eta * (-n/(2*sigma^2)+sum((x - mu)^2)/(2*sigma^4))
+  
+  if (i %% 50 == 0) print(sprintf("%d times: (mu=%2.3f, sigma2=%2.3f, sigma=%2.3f)", i, mu, sigma^2, sigma))
+
+}
+```
+
+対数尤度関数をそのまま使う方法もメモしておく。この式は少し分解すると、下記の通り分解でき、第1項はパラメタが含まれていないので、最大化する際はあってもなくてもよい。
+
+$$
+\begin{eqnarray}
+log L &=& - \frac{n}{2}log(2 \pi \sigma^2) - \frac{1}{2 \sigma^2} \sum (x_{i}-\mu)^2 \\ 
+      &=& - \frac{n}{2}log(2 \pi) - \frac{n}{2}log(\sigma^2)- \frac{1}{2 \sigma^2} \sum (x_{i}-\mu)^2 \\ 
+\end{eqnarray}
+$$
+
+そのため、第1項を除いた下記の式をここでは利用する。
+
+$$
+\begin{eqnarray}
+log L &=& - \frac{n}{2}log(\sigma^2)- \frac{1}{2 \sigma^2} \sum (x_{i}-\mu)^2 \\ 
+\end{eqnarray}
+$$
+
+さきほどと同様の結果が得られている。
+
+```{r}
+mu <- 1
+sigma <- 1
+
+loglik <- function(mu, sig){
+  - (n/2)*log(sig^2) - (1/(2*sig^2))*sum((x - mu)^2)
+}
+
+for(i in seq_along(1:iter)){
+  mu <- mu + eta * (loglik(mu + h, sigma) - loglik(mu, sigma)) / h
+  sigma <- sigma + eta * (loglik(mu, sigma + h) - loglik(mu, sigma)) / h
+
+  if (i %% 50 == 0) print(sprintf("%d times: (mu=%2.3f, sigma2=%2.3f, sigma=%2.3f)", i, mu, sigma^2, sigma))
+}
+```
+
+`optim()`でも同様の計算結果が得られている。
+
+```{r}
+loglik2 <- function(x){
+  return(function(par){
+    mu <- par[1]
+    sig <- par[2]
+    - n / 2*log(sig^2) - 1/2 * (sum((x - mu)^2) / sig^2)
+    # 分散sigma2を直接計算したい場合
+    # sigma2 <- par[2]
+    # - n / 2*log(sigma2) - 1/2 * (sum((x - mu)^2) / sigma2)
+})
+}
+
+res <- optim(
+  par = c(1, 10), 
+  fn = loglik2(x),
+  # 最大化するための引数
+  control = list(fnscale = -1)
+)
+
+list(
+  mu = res$par[1],
+  sigma2 = (res$par[2])^2,
+  sigma = res$par[2]
+)
+```
+
+分散$\sigma^{2}$を直接計算したい場合は下記の通り書き直せば良い。
+
+```{r}
+loglik3 <- function(x){
+  return(function(par){
+    mu <- par[1]
+    # 分散sigma2を直接計算したい場合
+    sigma2 <- par[2]
+    - n / 2*log(sigma2) - 1/2 * (sum((x - mu)^2) / sigma2)
+})
+}
+
+res <- optim(
+  par = c(1, 10), 
+  fn = loglik3(x),
+  # 最大化するための引数
+  control = list(fnscale = -1)
+)
+
+list(
+  mu = res$par[1],
+  sigma2 = res$par[2],
+  sigma = sqrt(res$par[2])
+)
+```

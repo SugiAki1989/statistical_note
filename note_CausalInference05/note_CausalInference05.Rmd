@@ -1,0 +1,345 @@
+---
+title: "回帰不連続デザイン"
+pagetitle: "回帰不連続デザイン"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではRを使って因果推論に関する基礎的な理論から分析を実行するための方法をまとめている。ここでは回帰不連続デザインについて、下記の矢内先生の資料(資料のライセンスに基づく)を参考にしながら、回帰不連続デザインをまとめている。私の記事は分析の方法メインなので、矢内先生の資料を読む方が数理も学べて良いと思う。
+
+- [KUT 計量経済学応用 統計的因果推論入門](https://yukiyanai.github.io/econometrics2/regression-discontinuity.html)
+
+上記の資料のライセンスは下記の通り。
+
+> The text of this work is licensed under the [Creative Commons Attribution 4.0 International License](http://creativecommons.org/licenses/by/4.0/). The R Code in this work is licensed under the [MIT License](https://yukiyanai.github.io/econometrics2/license.txt).
+
+## 回帰不連続デザインの数理
+回帰不連続デザインの数理については下記が詳しいので、ここでは扱わない。
+
+### 回帰不連続デザイン
+- [矢内勇生 KUT計量経済学応用](https://yukiyanai.github.io/econometrics2/regression-discontinuity.html)
+- [矢内勇生 統計的因果推論入門](http://yukiyanai.github.io/jp/classes/econometrics2/contents/slides/metrics2_topic05_slides.pdf)
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://github.com/JaehyunSong/kobe_ci)
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp243  
+
+### 回帰不連続デザインとカーネル密度推定
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp232
+
+### 回帰不連続デザインとバンド幅
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp236
+
+## 準備
+
+必要なライブラリを読み込んでおく。
+
+```{r}
+library(tidyverse)
+library(broom)
+library(rdd)
+library(raincloudplots)
+library(rdrobust)
+```
+
+ここで使用するサンプルデータは、参考資料と同じく法定飲酒年齢の引き下げと21歳の誕生日付近の死亡者数に関する研究のデータ。
+
+このデータにはMLDAが21歳の場合のみが含まれており、このデータの1レコードは「誕生日によって区切られた年齢グループ」とのことで、１レコードが19歳の誕生日からおよそ30日単位のブロックになっているデータ。
+
+```{r}
+# data: http://masteringmetrics.com/wp-content/uploads/2015/01/AEJfigs.dta
+# agecell: 19歳の誕生日からおよそ30日単位のブロック(0-30/31-60/61-90/...)のようなイメージ
+# all: 死者数
+df <- read_csv('~/Desktop/AEJfigs.csv', show_col_types = FALSE)
+df
+```
+
+回帰不連続デザインの解説で、(個人的に)よく見かける変数変換を行う。変数を中心化することで、基準値からのプラス・マイナスのズレで表現できる。
+
+```{r}
+df <- df %>% 
+  mutate(age = agecell - 21,  # 21歳が基準
+         over = as.integer(agecell > 21), # 21歳以上を表す処置変数
+         age_sq = age^2)
+df
+```
+
+21という値が0に位置するので、イメージとしてはこのようになる。
+
+```{r}
+df_1x1 <- data_1x1(
+  array_1 = df %>% pull(agecell),
+  array_2 = df %>% pull(age),
+  jit_distance = .09,
+  jit_seed = 1)
+
+raincloud_1x1_repmes(
+  data = df_1x1,
+  colors = (c('dodgerblue', 'darkorange')),
+  fills = (c('dodgerblue', 'darkorange')),
+  line_color = 'gray',
+  # line_alpha = .3,
+  # size = 1,
+  # alpha = .5,
+  align_clouds = FALSE) + theme_bw()
+```
+
+## パラメトリックRD
+パラメトリックRDでは、回帰式の関数形を仮定し、割当変数(running variable)の最小から最大までの範囲について回帰式の予測値を計算することで局所平均処置効果を計算する。
+つまり、回帰不連続デザインでは回帰モデルの関数形を正しく特定する必要がある。誤った関数形で効果があったように見えても、正しい関数形では効果はないかもしれないため。ここでは参考資料に従い、4つのモデルを作成する。
+
+```{r}
+models <- alist(
+  model1 = all ~ over + age,
+  model2 = all ~ over * age,
+  model3 = all ~ over + age + age_sq,
+  model4 = all ~ over * age + over * age_sq) %>% 
+  enframe(name = "model_name", value = "formula")
+models
+```
+
+用意したモデルを`map()`を利用して、一気に回帰係数を推定し、予測、結果の整形を行う。`map()`が理解し難い場合は`for-loop`で4回繰り返したと思えばOK。
+
+```{r}
+rdd <- models %>% 
+  mutate(
+    model = map(.x = formula, .f = function(x){lm(formula = x, data = df)}),
+    pred = map(.x = model, .f = function(x){predict(x)}),
+    result = map(.x = model, .f = function(x){tidy(x)})
+  )
+rdd
+```
+
+1つ目のモデルの結果を可視化すると、基準点を境に死亡数が高くなっていることがわかる。
+
+```{r}
+df %>% 
+  mutate(pred = rdd$pred[[1]]) %>% 
+  ggplot(aes(x = agecell, color = as.factor(over))) +
+  geom_point(aes(y = all)) +
+  geom_line(aes(y = pred)) +
+  geom_vline(xintercept = 21, color = "gray") +
+  theme_bw() + 
+  theme(legend.position = "none") 
+
+```
+
+この場合の局所平均処置効果は`over`の係数に該当するので、回帰係数を取り出すと、`7.66`ほど10万人あたりの死亡数が高くなっていることになる。
+
+```{r}
+rdd %>% 
+  unnest(cols = result) %>% 
+  filter(model_name == "model1", term == "over") %>% 
+  select(term, estimate, std.error)
+```
+
+他のモデルも可視化して、基準点でジャンプがあるか確認してみると、すべての関数形でジャンプが確認できるため、21歳を基準に10万人あたりの死亡数が高くなっていると思われる。
+
+
+```{r}
+df %>% 
+  select(agecell, over, all) %>% 
+  mutate(
+    model1 = rdd$pred[[1]],
+    model2 = rdd$pred[[2]],
+    model3 = rdd$pred[[3]],
+    model4 = rdd$pred[[4]],
+         ) %>% 
+  pivot_longer(
+    cols = model1:model4,
+    names_to = "model",
+    values_to = "pred"
+  ) %>% 
+  ggplot(aes(x = agecell, color = as.factor(over))) +
+  geom_point(aes(y = all)) +
+  geom_line(aes(y = pred)) +
+  geom_vline(xintercept = 21, color = "gray") +
+  facet_wrap( ~ model) + 
+  theme_bw() + 
+  theme(legend.position = "none") 
+
+```
+
+推定した4つのモデルの結果を比べると、4つ目のモデルの局所平均処置効果は`9.54`となっており、関数形の違いで結果が異なってしまうことが回帰不連続デザインで起こりうる。つまり、誤った関数形を仮定すると、誤った推定結果を得ることにつながる。
+
+```{r}
+rdd %>% 
+  unnest(cols = result) %>% 
+  filter(term == "over") %>% 
+  select(term, estimate, std.error)
+```
+
+## ノンパラメトリックRD
+ノンパラメトリックRDでは回帰式の関数形を考えず、推定対象となる範囲(バンド幅)を基準値の周辺に限定し、処置群と統制群の平均値を比較する。つまり、バンド幅の選び方によって推定値が変わる。ノンパラメトリックRDではバンド幅の選び方が重要。ただ、基準値付近の値を利用するので、サンプルサイズが大きい場合、バンド幅が狭いほどバイアスは小さくなる。
+
+暫定的にバンド幅を下記の通り0.25刻みで用意し、
+
+```{r}
+df2 <- tibble(bandwidth = seq(from = 0.5, to = 1.5, by = 0.25))
+df2
+```
+
+このバンド幅でデータをフィルタリングする。
+
+```{r}
+df2 %>% 
+  mutate(
+    banding_data = map(.x = bandwidth, .f = function(x){df %>% filter(age > -1*x, age < x)})
+  ) %>% unnest(banding_data) %>% 
+  group_by(bandwidth) %>% 
+  summarise(min = min(agecell), 
+            max = max(agecell), 
+            diff = max(agecell) - min(agecell),
+            sanplesize = n()
+            )
+```
+
+フィルタリングしたデータをもとに回帰係数を計算すると、バンド幅が小さいほど標準誤差が大きく、バンド幅が大きくなると標準誤差は小さくなるし、バンド幅によって回帰係数の推定値も変化する。
+
+```{r}
+df3 <- df2 %>% 
+  mutate(
+    # formula = "all ~ over + age"として、map2で渡すときにas.formulaでも良い
+    formula = alist(all ~ over + age),
+    banding_data = map(.x = bandwidth, .f = function(x){df %>% filter(age > -1*x, age < x)}),
+    model = map2(.x = banding_data, .y = formula, 
+                 .f = function(x, y){lm(formula = y, data = x)}),
+    result = map(.x = model, .f = function(x){tidy(x)}),
+    pred = map2(.x = banding_data, .y = model, 
+                .f = function(x, y){predict(y, newdata = x)}),
+  )
+df3 %>% 
+  unnest(result) %>% 
+  filter(term == "over") %>% 
+  select(bandwidth, term, estimate, std.error)
+```
+
+各バンド幅でフィルタリングされたデータや予測値を可視化すると各モデルの設定がわかりやすい。
+
+```{r}
+df3 %>% 
+  select(bandwidth, banding_data, pred) %>% 
+  unnest(c(banding_data, pred)) %>% 
+  ggplot(aes(x = agecell, color = as.factor(over))) +
+  geom_point(aes(y = all)) +
+  geom_line(aes(y = pred)) +
+  geom_vline(xintercept = 21, color = "gray") +
+  facet_wrap( ~ bandwidth) + 
+  theme_bw() + 
+  theme(legend.position = "none") 
+
+```
+
+## rdrobustパッケージ
+
+回帰不連続デザインを行えるRのrdrobustパッケージを利用して同じ分析を行う。バンド幅を`0.5`で行うと、先程と同じく、基準値前後で6サンプル(Eff. Number of Obs.)が計算対象になっており、`Coef.=8.878`局所局所平均処置効果を表している。
+
+```{r}
+rdd <- rdrobust(df$all, df$age, c = 0, h = 0.5 , kernel = "uniform")
+summary(rdd)
+```
+
+### カーネル関数とバンド幅
+
+rdrobustパッケージでは、カーネル関数を選択できる。回帰不連続デザインでのカーネル関数の役割はバンド幅のデータに対する重み付けである。下記のようなカーネル関数を利用して重み付けを行う。`uniform`は重みが`1`なので、手計算で行ってきた数値と一致する。デフォルトでは三角形の関数が利用され、線形で重みが付けられる。
+
+```{r}
+layout(matrix(1:4, 2, 2, byrow = TRUE))
+plot(density(0, bw = 1, kernel = "gaussian"), main = "gaussian")
+plot(density(0, bw = 1, kernel = "rectangular"), main = "uniform")
+plot(density(0, bw = 1, kernel = "triangular"), main = "triangular")
+plot(density(0, bw = 1, kernel = "epanechnikov"), main = "epanechnikov")
+```
+
+バンド幅の推奨される設定方法として、Imbens and kalyanaramanが考案したIKバンドもしくは、Coverage Error rate Regression Discontinuity(CER)がある。詳細は下記が詳しい。
+
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)のp237
+
+IKバンドは`rdbwselect_2014()`の`h`で計算でき、
+
+```{r}
+list(
+  rdbwselect_2014(df$all, df$age, c = 0, bwselect = "IK")
+  )
+```
+
+CERバンド幅を使用するときは、`bwselect = "cerrd"`と指定する。
+
+```{r}
+rdd2 <- rdrobust(df$all, df$age, c = 0, bwselect = "cerrd")
+summary(rdd2)
+```
+
+### RDプロット
+
+回帰不連続デザインではRDプロットと呼ばれる可視化方法がある。これはx軸をビニングしてサンプルを分割し、そのビンでの平均値を計算し、多項式を当てはめることで、分布形を調べることができる。
+
+```{r}
+rdplt <- rdplot(df$all, df$age, c = 0, p = 4)
+```
+
+RDプロットの設定詳細は`sumamry()`で確認でき、引数を調整することで、設定は変更可能である。
+
+```{r}
+summary(rdplt)
+```
+
+### 連続性の仮定
+
+回帰不連続デザインを実行するにあたり条件付き回帰関数の連続性を満たす必要がある。グラフ化して確認する方法と検定で行う方法がある。
+
+グラフで確認する場合は、基準値の前後がなめらかになっているかどうかを確認する。基準値の後に大きな変化があるようであれば、回帰不連続デザインの仮定が満たされない可能性がある。
+
+```{r}
+set.seed(1989)
+x <- rnorm(500, 0, 5)
+hist(x, breaks = 30)
+abline(v = 0)
+```
+
+検定を行う際は、Cattaneo, Jansson and Maが提案する方法で検定できる。この検定では、帰無仮説が右連続と左連続が一致する、つまり連続であるが設定され、対立仮説は連続ではない、である。つまり、連続であるためには、帰無仮説が棄却されると困るので、p値が大きければ帰無仮説を棄却できにくくなるので、そのほうが望ましい。
+
+さきほどの`x`で検定すると、`p=0.2925`なので、帰無仮説が棄却できず、帰無仮説を採択することになる。つまり、連続性の仮定を満たしていることになる。
+
+```{r}
+library(rddensity)
+res <- rddensity(x, c = 0)
+summary(res)
+```
+
+検定結果を可視化する際は、`rdplotdensity()`を利用する。これをみると連続ではないようにも見える。`P-values of binomial tests`の結果は、どれも0.05を基準とすると下回っていないため、連続性の仮定が満たされていると思われる。
+
+```{r}
+plt <- rdplotdensity(res, X = x, type = "both")
+```
+
+## 参考文献および参考資料
+- [高橋将宜(2022) 統計的因果推論の理論と実装 共立出版](https://www.kyoritsu-pub.co.jp/book/b10011781.html)
+- [矢内勇生 統計的因果推論入門](https://yukiyanai.github.io/econometrics2/)
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://github.com/JaehyunSong/kobe_ci)
+

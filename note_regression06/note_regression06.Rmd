@@ -1,0 +1,332 @@
+---
+title: "対数正規分布を用いた回帰モデル"
+pagetitle: "対数正規分布を用いた回帰モデル"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+対数正規分布を用いた一般化線形モデルの調べごとのまとめ。下記のノートを参考に自分用にまとめたメモ。ちょっと色々と理解が追いついてない部分もあるので誤りもあるかも。
+
+- [A note on regression with log Normal errors: linear and piecewise linear modelling in R.](https://www.researchgate.net/publication/326319616_A_note_on_regression_with_log_Normal_errors_linear_and_piecewise_linear_modelling_in_R)
+- [対数正規分布](https://data-science.gr.jp/theory/tpd_log_normal_distribution.html)
+
+## 準備
+サンプルデータとライブラリの読み込んでおく。
+
+```{r}
+library(logNormReg)
+library(tidyverse)
+library(patchwork)
+
+n <- 10000
+s <- 0.5
+x <- seq(0, 10, l = n) 
+#the true regression function
+mu <- 10 + 2 * x 
+set.seed(1989)
+# exp(log(mu)-s^2/2 +rnorm(n,0,s))
+y <- rlnorm(n, meanlog = (log(mu) - s^2)/2, sdlog = s) 
+df <- data.frame(y, x)
+head(df)
+```
+
+## 対数正規分布の定義
+少しややこしいが、「対数をとった値が正規分布に従う確率変数」の従う確率分布を「対数正規分布」という。対数正規分布の確率密度関数の定義は下記の通り。
+
+$$
+f(y; \theta, \sigma^{2}) = \frac{1}{y \sqrt{2 \pi \sigma^{2}}} \exp {- \frac{(\ln y - \mu)^{2}}{2 \sigma^{2}}}
+$$
+
+期待値は、
+
+$$
+E[Y] = \exp { \mu + \frac{\sigma^{2}}{2}}
+$$
+
+であり、分散は
+
+$$
+V[Y] = \exp { \sigma^{2} - 1}   \exp { 2 \mu + \sigma^{2}}
+$$
+
+である。
+
+```{r}
+# sdは固定
+x <- seq(0, 10, 0.01)
+mean <- seq(0,2,0.2)
+sd <- rep(1, length(mean))
+
+n <- length(sd)
+df_d <- df_p <- data.frame(x)
+pattern <- paste0('logmean=', mean, ',logsd=', sd)
+for (i in 1:n) {
+  d <- dlnorm(x, meanlog = mean[[i]], sdlog = sd[[i]])
+  df_d <- cbind(df_d, d)
+}
+names(df_d) <- c('x', pattern)
+df_d %>% 
+  tidyr::pivot_longer(cols = -x, names_to = 'patterns') %>% 
+  ggplot(., aes(x, value, col = patterns, fill = patterns)) + 
+  geom_line(size = 1) + 
+  theme_classic() + 
+  scale_y_continuous(breaks = seq(0, 5, 0.2)) +
+  ylab('f(x)') + 
+  ggtitle('Probability Distribution Function')
+
+```
+
+```{r}
+# muは固定
+x <- seq(0, 5, 0.01)
+sd <- seq(0,2,0.2)
+mean <- rep(1, length(sd))
+
+n <- length(sd)
+df_d <- df_p <- data.frame(x)
+pattern <- paste0('logmean=', mean, ',logsd=', sd)
+for (i in 1:n) {
+  d <- dlnorm(x, meanlog = mean[[i]], sdlog = sd[[i]])
+  df_d <- cbind(df_d, d)
+}
+names(df_d) <- c('x', pattern)
+df_d %>% 
+  tidyr::pivot_longer(cols = -x, names_to = 'patterns') %>% 
+  ggplot(., aes(x, value, col = patterns, fill = patterns)) + 
+  geom_line(size = 1) + 
+  theme_classic() + 
+  scale_y_continuous(breaks = seq(0, 5, 0.2)) +
+  ylab('f(x)') + 
+  ggtitle('Probability Distribution Function')
+```
+
+## データの状態
+例えば、下記のような分布のデータに対して、回帰モデルを実行する場合、最小2乗法でパラメタを推定することには関係はないが、誤差構造が正規分布ではない(誤差の正規性仮定を満たさない)ので、誤差が正規分布していることを仮定する信頼区間や回帰係数の仮説検定などにの計算に問題が出てくる。
+
+```{r}
+ggplot(data = df, aes(y , y = ..count.., col = 1, fill = 1)) + 
+  geom_histogram(position = 'identity', binwidth = 1/2, alpha = 1/2) + 
+  theme_classic() +
+  theme(legend.position = 'none') +
+  ggtitle('Y ~ LogNormal')
+```
+
+
+この問題を回避するために、変数変換することで正規分布に従うように変換してから回帰分析を行うことが、しばしばあると思われる。
+
+```{r}
+ggplot(data = df, aes(log(y) , y = ..count.., col = 1, fill = 1)) + 
+  geom_histogram(position = 'identity', binwidth = 1/5, alpha = 1/2) + 
+  theme_classic() +
+  theme(legend.position = 'none') +
+  ggtitle('Log(Y)')
+```
+
+つまり、下記のような冪関数や
+
+$$
+y = \alpha x ^{\beta}
+$$
+
+指数関数を考える。Gelman先生のHPの[Log transformations and generalized linear models](https://statmodeling.stat.columbia.edu/2006/04/10/log_transformat/)やスタックオーバーフローの[Choosing between LM and GLM for a log-transformed response variable](https://stats.stackexchange.com/questions/43930/choosing-between-lm-and-glm-for-a-log-transformed-response-variable)に書かれているように
+
+$$
+y = \alpha \exp^{\beta x}
+$$
+
+指数関数であれば、下記のようなモデルになる。誤差$\epsilon$は指数のところに入ってくる。
+
+$$
+y = \alpha \exp^{\beta x + \epsilon}
+$$
+
+説明のために下記のように書き直すと、
+
+$$
+\ln y = \ln \alpha + \beta x + \epsilon
+$$
+
+線形予測子$\ln \alpha + \beta x$と$\ln y$が最小となるようなパラメタが推定されることになる。このとき、$\epsilon$は、$y$のスケールではなく、$\ln y$のスケールで誤差が考慮される。つまり、最小となるのは対数スケールでの実測値と予測値の差ということになり、乗法的(multiplicative)な誤差構造になる。その結果として$\epsilon$は、対数スケールでの加算は、オリジナルスケールでの乗算となり、$\epsilon$が正規分布するということは、$\exp^{\epsilon}$は対数正規分布に従うことになる。
+
+対数正規分布は、分散が平均に依存する(分散は平均の2乗に比例)ため、誤差は$y$の予測値が大きいほど大きいという仮定が反映されたモデルになる。
+
+このモデルは$\ln y$  左辺にだけ対数が使用されているのでセミログモデルともよばれる。半対数モデルは$\ln y$と$x$の直線的な関係をみており、$x$が1単位増えると、$\ln y$は$\beta$％だけ変化する。要するに対数差分ということになる。$\beta$の意味は$x$が1単位増えるときの$\ln y$の変化量ということであり、変化率の近似値ということ。
+
+## 対数正規分布を用いた回帰モデル
+これまでは最小2乗法からパラメタを計算する方法について見てきたが、誤差が正規分布しないようなデータを直接扱うために、尤度法を用いて、対数正規分布を用いた回帰モデルを構築する。そのために、対数尤度関数を計算すると、下記のようになる。ちなみに最小2乗法は、誤差が従う確率分布を平均が0の正規分布でモデル化する最尤法に等しい。
+
+
+$$
+\ell = - \ln x - 0.5 \ln(2 \pi \sigma^{2}) - \frac{(\ln x -  \ln\mu_{i}(\beta) + \frac{\sigma^{2}}{2})^{2}}{2 \sigma^{2}}
+$$
+
+ここで、$\theta$を下記の通りまとめておく。
+
+$$
+\theta\_{i} =  \ln\mu_{i}(\beta) - \frac{\sigma^{2}}{2}
+$$
+
+Rで上記の関数を作成し、対数尤度関数を最大化するために`optim()`でパラメタを求める。
+
+```{r}
+loglik_lognormal <- function(b, x, y) {
+  theta <- log(b[1] + b[2] * x) - (b[3]^2 / 2)
+  l <- -1 * log(y) - 0.5 * log(2 * pi * b[3]^2) - ((log(y) - theta)^2 / (2 * b[3]^2))
+  res <- sum(l)
+  return(res)
+}
+
+res <-
+  optim(
+    par = c(0.01, 0.01, 0.01),
+    fn = loglik_lognormal,
+    x = df$x,
+    y = df$y,
+    method = 'BFGS',
+    #デフォルトで最小化される。fnscale=-1で最大化。
+    control = list(fnscale = -1) 
+  )
+res$par
+```
+
+## logNormRegパッケージ
+`logNormReg`パッケージを利用してみる。`y`の分布を再掲しておく。
+
+```{r}
+ggplot(data = df, aes(y , y = ..count.., col = 1, fill = 1)) + 
+  geom_histogram(position = 'identity', binwidth = 1/2, alpha = 1/2) + 
+  theme_classic() +
+  theme(legend.position = 'none') +
+  ggtitle('Y ~ LogNormal')
+```
+
+`x`と`y`の関係は下記の通り。
+
+```{r}
+ggplot(df, aes(x, y, col = 1, fill = 1)) +
+  geom_point(alpha = 1/10) +
+  theme_classic() +
+  theme(legend.position = 'none')
+```
+
+
+モデルのパラメタの値と手書きの対数尤度関数から計算した値が一致していることがわかる。
+
+```{r}
+library(logNormReg)
+
+fit <- logNormReg::lognlm(y ~ x, data = df)
+summary(fit)
+```
+
+推定された3つのパラメタを使って、対数正規分布から乱数を生成すると、元の`y`の分布がうまく再生成されていることがわかる。このモデルで推定しているの予測子のパラメタは$\mu$なので、`rlnorm()`にわたす際には`log()`を忘れないように注意。
+
+```{r}
+# the true regression function
+# mu <- 10 + 2 * x 
+
+p_origin <- ggplot(data = df, aes(y , y = ..count.., col = 1, fill = 1)) + 
+  geom_histogram(position = 'identity', binwidth = 1/2, alpha = 1/2) + 
+  theme_classic() +
+  scale_x_continuous(breaks = seq(0, 50, by = 5), limits = c(0, 30)) +
+  theme(legend.position = 'none') +
+  ggtitle('Y ~ LogNormal')
+
+set.seed(1989)
+repro <- rlnorm(n=10000, 
+                meanlog = log(fit$coefficients[[1]] + fit$coefficients[[2]] * df$x),
+                sdlog = sqrt(fit$s2))
+
+p_repro <- ggplot(data = data.frame(y = repro), aes(y , y = ..count.., col = 1, fill = 1)) + 
+  geom_histogram(position = 'identity', binwidth = 1/2, alpha = 1/2) + 
+  scale_x_continuous(breaks = seq(0, 50, by = 5), limits = c(0, 30)) +
+  theme_classic() +
+  theme(legend.position = 'none') +
+  ggtitle('Y from model paramters')
+
+p_origin + p_repro
+```
+
+```{r}
+summary(df$y)
+
+summary(repro)
+```
+
+##おまけ
+
+確率密度関数から対数尤度関数までの計算過程のメモ。
+
+![メモ](/Users/aki/Documents/statistical_note/note_regression06/memo.jpg)
+
+## データ分析例
+関西学院大学の清水先生の[心理学者のための統計モデリング](https://www.slideshare.net/simizu706/ss-58585233)のページの野球データをお借りする。この野球データの給料(単位は100万円)とHR数の関係をモデル化していく。最終的には、モデルの良し悪しをはかるAICを比較する。
+
+まずは給料の分布を可視化する。正規分布ではないことが明らかなので、データは正規分布からサンプリングされていると考えるのは妥当ではなさそう。
+
+```{r}
+df <- read_csv(file = '~/Desktop/baseball.csv') %>% 
+  dplyr::select(salary, HR)
+ggplot(data = df, aes(salary , y = ..density.., col = 1, fill = 1)) + 
+  geom_histogram(position = 'identity', alpha = 1/2) + 
+  geom_density(alpha = 1/2) +
+  theme_classic() +
+  theme(legend.position = 'none') +
+  ggtitle('Distribution of Salary')
+```
+
+そんなことはさておき、正規分布を仮定した一般化線形モデルでモデル化してみる。HRが1本増えると、675万円給料が増加するという結果が得られる。
+
+```{r}
+fit_normal <- glm(salary ~ HR, data = df, family = gaussian(link = 'identity'))
+summary(fit_normal)
+```
+
+半対数モデルで実行した結果は下記の通り。
+
+```{r}
+fit_log <- glm(log(salary) ~ HR, data = df, family = gaussian(link = 'identity'))
+summary(fit_log)
+```
+
+では、対数正規分布を利用した一般化線形モデルでモデル化してみる。HRが1本増えると541万円給料が増加するという結果が得られるが、今回はそこはどうでもよい。
+
+```{r}
+fit_lognormal <- logNormReg::lognlm(salary ~ HR, data = df)
+summary(fit_lognormal)
+```
+
+3つのモデルを使った結果、結論ありきでだが、AICが最小のモデルは、対数正規分布を利用した回帰モデルとなった。
+
+```{r}
+AIC(fit_normal, fit_log, fit_lognormal)
+```
+
+## 参考文献やサイト
+- [A note on regression with log Normal errors: linear and piecewise linear modelling in R.](https://www.researchgate.net/publication/326319616_A_note_on_regression_with_log_Normal_errors_linear_and_piecewise_linear_modelling_in_R)

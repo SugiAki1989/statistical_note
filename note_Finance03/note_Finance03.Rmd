@@ -1,0 +1,169 @@
+---
+title: "SaaSサブスクの平均契約期間をワイブル分布で推定する試み"
+pagetitle: "SaaSサブスクの平均契約期間をワイブル分布で推定する試み"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではSaaSのLTVを計算するために必要な平均契約期間を推定することを目的としている。SaaSのLTVを計算することは、自社のビジネスにとって、LTV基準で優良な顧客を識別するためにも役立てられるし、慣習的な`LTV/CAC > 3x`基準で広告がうまく運用できているかを調べるために必要だったりする。そこで今回は、LTVの推定に必要な平均契約期間を推定する方法をまとめておく。適切かどうかはわからない。
+
+
+## 平均契約期間の問題点
+
+インターネットで検索すれば、平均契約期間は$\frac{1}{ChurnRate}$で計算できると書かれている記事が沢山でてくる。ある仮定のもとで$\frac{1}{ChurnRate}$が示されているものは良いと思うが、$\frac{1}{ChurnRate}$という計算式だけを記載しているものも多い。
+
+$\frac{1}{ChurnRate}$が平均契約期間となるのは、ChurnRateが固定のときの話であって、ChurnRateが変化しやすい実際のサービスでは、ChurnRateが固定であるという仮定は正しいのかもわからない。そもそもBtoB系のサービスで、リテンションカーブを描くと、大概は最初が急で、あとはなだらかになるため、チャーンレートは一定ではない。
+
+また、ChurnRateが1%改善することで、月数ベースで計算しているのあれば、1%の改善で`1/0.02=50ヶ月`から`1/0.01=100ヶ月`へと変化し、平均契約期間がプラス50ヶ月されることになる。これに粗利単価をかけるとLTVとなるので、月次でLTVを計算していると、LTVが安定しなくなってしまう。
+
+この問題を回避するために、単価に生存曲線の生存確率を現在価値(Present Value)の割引率として利用して、LTVを推定する方法を前回まとめてたが、あの方法は確かに現在価値を総和することでLTVを計算できるように見える。ただ問題があって、「期間に応じて何円」という形で提示できるが、
+平均的に「何円」とは言えない。平均契約期間がないので、どこまでの期間を総和すればよいかわからないためである。
+
+そこで、平均契約期間を推定するためにワイブル分布を利用してみようというのが今回のノートの内容。
+
+## ワイブル分布
+
+事象の生起確率が期間内において一定ではなく、変化する場合、その事象が発生するまでの時間を確率変数と考えると、その確率変数が従う分布はワイブル分布となる。
+
+$$
+f(x) = \left( \frac{shape}{scale} \right)\left( \frac{1}{scale} \right)^{shape-1}e^-{\left( \frac{x}{scale} \right)^{shape}}, x \ge 0, shape \ge 0, scale \ge 0
+$$
+
+ワイブル分布の期待値の導出をPCで書くのは少し手間なので、今回は手書きのノートを載せておく。なんでか1年前くらいに導出していた模様で、Rでは関数のパラメタが逆のことも書いてある。多分、。ワイブル分布を使う用事があって、Rでうまくいかなかったんだろう。
+
+![ワイブル分布のE(X),V(X)](/Users/aki/Documents/statistical_note/note_Finance03/weibull_expected_value.png)
+
+さておき、ワイブル分布は何らの製品が故障するまでの時間を確率変数として事象を説明する際に利用されることが多く、バスタブ曲線の例がよく挙げられるが、故障するまでの確率を一定としていない。SaaSサブスクに置き換えると、サービスを契約してから解約するまでの期間において、解約率が一定ではないとも考えれるので、ワイブル分布の期待値を計算すれば平均契約期間を計算できそうである。これが適切かどうかはわからない。
+
+ただ問題点があって、ワイブル分布に従うであろうデータがあるから期待値をすぐに計算できるわけでもない。`shape`と`scale`パラメタが必要になるので、まずはこれを推定する。そのためにワイブル分布を仮定してパラメトリックサバイバルモデリングを行い、`shape`と`scale`パラメタを手に入れてから、期待値を計算する。
+
+ここではサンプルデータとして、`lung`データセットを利用する。
+
+```{r}
+library(tidyverse)
+library(survival)
+
+# status: 1=censored, 2=dead
+# sex: 1=male, 2=female
+lung2 <- lung %>% 
+  dplyr::mutate(
+    status = status - 1,
+    is_female = sex - 1
+  ) %>% 
+  dplyr::select(time, status, is_female) %>% 
+  dplyr::filter(time != 0)
+
+head(lung2)
+
+```
+
+`survreg`関数では、モデルのフィッティングは対数スケールで行われるため、回帰係数は対数生存時間への係数を表す。ここでは、`is_female=1`という条件のデータの期待値を最終的に計算するので、説明変数として`is_female`を使っている。
+
+結果を見ると、`exp(0.3956)=1.48`より、女性のほうが生存時間が1.48倍長いことを意味する。
+
+```{r}
+lung_reg <- survreg(
+  formula = Surv(time, status) ~ is_female,
+  data = lung2,
+  dist = 'weibull'
+)
+
+summary(lung_reg)
+```
+
+
+生存時間の予測は下記の通り、`predict`関数で予測できる。
+
+```{r}
+# 対数生存時間から生存時間の予測
+# getS3method("predict", "survreg")の通りデフォルトは指数変換後の生存時間を返す
+lung_pred_lp <- predict(lung_reg, type = 'lp')
+lung_pred <- exp(lung_pred_lp)
+head(lung_pred, 5)
+```
+
+生存曲線も可視化しておく。
+
+```{r}
+# 生存曲線を可視化
+# Ref:https://stats.stackexchange.com/questions/177679/using-quantile-in-predict-for-survival
+pct <- seq(0, 1, 0.01)
+pred_female <- predict(
+  lung_reg,
+  type = 'quantile',
+  newdata = data.frame(is_female = 1),
+  se = TRUE,
+  p = pct
+  )
+fit_female <- pred_female$fit
+upr_female <- fit_female + 1.96 * pred_female$se.fit
+lwr_female <- fit_female - 1.96 * pred_female$se.fit
+plot(fit_female, 1-pct, type = 'l', col = 'tomato')
+lines(upr_female, 1-pct, lty = 2, col = 'tomato')
+lines(lwr_female, 1-pct, lty = 2, col = 'tomato')
+```
+
+このモデルからパラメタを取り出すことができる。下記の慶応大学の山本先生の記事を参考にさせていただいた。
+
+- [Rによる生存時間解析](http://stat.inf.uec.ac.jp/doku.php?id=r:survival)
+
+実際にここでは、`is_female=1`という条件のデータの期待値を計算する。計算された`shape`と`scale`パラメタを使った結果、491日となった。
+
+```{r}
+# shapeはscaleの逆数
+shape_female <- 1/lung_reg$scale
+# intercept, is_female=1という条件
+x_female <- c(1, 1) 
+# 係数に変数を掛けて総和=線形予測子
+lp_female <- coef(lung_reg) %*% x_female
+# 線形予測子を指数変換する
+scale_female <- exp(lp_female)
+# ワイブル分布の期待値を計算
+expected_value <- scale_female * gamma(1 + 1/shape_female)
+expected_value
+```
+
+計算された`shape`と`scale`パラメタを使ってワイブル分布を可視化しておく。
+
+```{r}
+# 推定されたパラメタをもとにワイブル分布を可視化
+time <- seq(min(lung2$time), max(lung2$time), 1)
+y_female <- dweibull(time, shape = shape_female, scale = scale_female)
+plot(time, y_female, type = 'l', col = 'tomato')
+```
+
+期待値が491日(≒平均契約期間)が得られたので、LTVを総和する期間はこれを目安すればよい。`lung`データセットは日数が長いので、491日となっているが、例えば、月単位で計算した結果、期待値が30ヶ月となった場合、30ヶ月までの単価に生存曲線を掛けたPVを総和すれば、LTV「何円」と推定できる。
+
+ワイブル分布の期待値の95％信頼区間を計算する方法は分からないが(ブートストラップ法で計算できなくはなさそう)、計算できれば幅をもってLTVを推定できそう。知らんけど。
+
+## 参考文献
+
+- [Rによる生存時間解析](http://stat.inf.uec.ac.jp/doku.php?id=r:survival)
+

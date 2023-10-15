@@ -1,0 +1,618 @@
+---
+title: "RのTidy evaluation_05"
+pagetitle: "RのTidy evaluation_05"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+## はじめに
+この記事は[Tidy evaluation](https://tidyeval.tidyverse.org/)をもとにTidy evaluationについて学習した内容を自分の備忘録としてまとめたものです。
+
+### 関数の作成
+`{dplyr}`およびパイプを使って関数を作成するには、抽象化(Abstraction)、クオート(Quoting)、およびアンクオート(Unquoting)の3つのステップで考えると効率がよいとのこと。
+
+- 抽象化(Abstraction)のステップ
+まずは変化する部分を特定しましょう。この例だと先頭の`df1`、`df2`、`df3`、`df4`と、`group_by()`の`x1`、`x2`、`x3`、`x4`と、`mean()`の`y1`、`y2`、`y3`、`y4`が変化する部分です。
+
+```R:R
+df1 %>% group_by(x1) %>% summarise(mean = mean(y1))
+df2 %>% group_by(x2) %>% summarise(mean = mean(y2))
+df3 %>% group_by(x3) %>% summarise(mean = mean(y3))
+df4 %>% group_by(x4) %>% summarise(mean = mean(y4))
+```
+
+この変化する部分をわかりやすい引数名で抽象化します。つまり、`df*`を`data`、`x*`を`group_var`、`y*`を`summary_var`で抽象化します。
+
+```R:R
+data %>% group_by(group_var) %>% summarise(mean = mean(summary_var))
+```
+
+抽象化の最後のステップは関数でラップすることです。
+
+```R:R
+grouped_mean <- function(data, group_var, summary_var) {
+  data %>%
+    group_by(group_var) %>%
+    summarise(mean = mean(summary_var))
+}
+```
+
+- クオート(Quoting)のステップ
+直接参照できるようにデータフレームにあるカラムを引数として、識別させます。関数は、これらの引数をすぐには評価でききない代わりに、それらは自動的にクオートされるべきです。そのために、引数を`enquo()`しましょう。
+
+```R:R
+group_var <- enquo(group_var)
+summary_var <- enquo(summary_var)
+```
+
+- アンクオート(Unquoting)のステップ
+これらの変数が、関数で使われる場所を特定し、`!!(bang-bang)`でアンクオートしましょう。このケースでは、`group_var`は`group_by()`の中で、`summary_var`は`summarise()`の中です。
+
+```R:R
+data %>%
+  group_by(!!group_var) %>%
+  summarise(mean = mean(!!summary_var))
+```
+
+こうすることで、自動的にその引数である`group_var`、`summary_var`はクオートされ、アンクオートされるべき関数に渡されると、アンクオートされるようになります。
+
+```R:R
+grouped_mean <- function(data, group_var, summary_var) {
+  group_var <- enquo(group_var)
+  summary_var <- enquo(summary_var)
+
+  data %>%
+    group_by(!!group_var) %>%
+    summarise(mean = mean(!!summary_var))
+}
+
+grouped_mean(mtcars, cyl, mpg)
+# A tibble: 3 x 2
+    cyl  mean
+  <dbl> <dbl>
+1     4  26.7
+2     6  19.7
+3     8  15.1
+```
+
+### 列名の作成
+`as_label()`はクオートされている式を列名に変換するために使用します。
+
+```R:R
+simple_var <- quote(height)
+simple_var
+height
+
+as_label(simple_var)
+[1] "height"
+```
+
+このままだと、見て分かるように、デフォルト名が明らかに最適ではないですね。
+
+```R:R
+complex_var <- quote(mean(height, na.rm = TRUE))
+as_label(complex_var)
+[1] "mean(height, na.rm = TRUE)"
+```
+
+`:=`と`!!`演算子を組み合わせて使うことで、この問題に対処します。下記の例のように、名前はクオートされます。クオートされているので、名前を含む変数を間接的に参照することはできません。
+
+```R:R
+name <- "the real name"
+c(name = NA)
+name 
+  NA 
+```
+
+Tidy evaluationでは、引数名の引用符を`!!`で外すことが可能です。ただし、特別な`:=`演算子が必要になります。
+
+```R:R
+# 関数の中でしかえないエラーがでるので、リンク元の結果を一旦そのまま表記
+# エラー: `:=` can only be used within a quasiquoted argument
+
+rlang::qq_show(c(!!name := NA))
+c("the real name" := NA)
+```
+
+この`!!`と`:=`演算子を使用し、カスタム列名を`group_by()`と`summarise()`に渡します。
+
+```R:R
+grouped_mean <- function(data, group_var, summary_var) {
+  group_var <- enquo(group_var)
+  summary_var <- enquo(summary_var)
+  
+  # Create default column names
+  group_nm <- as_label(group_var)
+  summary_nm <- as_label(summary_var)
+  
+  # Prepend with an informative prefix
+  group_nm <- paste0("group_", group_nm)
+  summary_nm <- paste0("mean_", summary_nm)
+  
+  data %>%
+    group_by(!!group_nm := !!group_var) %>%
+    summarise(!!summary_nm := mean(!!summary_var))
+}
+```
+
+実行してみましょう。
+
+```R:R
+grouped_mean(mtcars, cyl, mpg)
+# A tibble: 3 x 2
+  group_cyl mean_mpg
+      <dbl>    <dbl>
+1         4     26.7
+2         6     19.7
+3         8     15.1
+```
+
+### 複数のグループ化引数を持つ関数
+1つのグループ化変数と1つの要約変数をとる関数を作成しました。ここでは、1つではなく複数のグループ化変数を使用する関数を`...`を使って関数を発展させていきます。
+
+- `group_var`を`...`に変更
+
+```R:R
+function(data, ..., summary_var)
+```
+
+- `...`と`summary_var`をスワップします。`...`があると、`summary_var`に引数名をとらないと区別できないためです。
+
+```R:R
+function(data, summary_var, ...)
+```
+
+- 衝突の危険性を減らすために、名前付き引数の前に`.`をつけましょう。
+
+```R:R
+function(.data, .summary_var, ...)
+```
+
+実行してみましょう。注意点として、`...`は手軽ですが、名前を変更できないという欠点があります。
+
+```R:R
+grouped_mean <- function(.data, .summary_var, ...) {
+  summary_var <- enquo(.summary_var)
+  
+  .data %>%
+    group_by(...) %>%  # Forward `...`
+    summarise(mean = mean(!!summary_var))
+}
+
+grouped_mean(mtcars, disp, cyl, am)
+# A tibble: 6 x 3
+# Groups:   cyl [3]
+    cyl    am  mean
+  <dbl> <dbl> <dbl>
+1     4     0 136. 
+2     4     1  93.6
+3     6     0 205. 
+4     6     1 155  
+5     8     0 358. 
+6     8     1 326  
+```
+
+これらの問題を対処するために、複数の引数をクオートし、アンクオートできる`enquos()`と`!!!(bang-bang-bang)`を使いましょう。複数の引数を引用するには、2つの方法があります。`enquo()`の複数形にあたる`enquos()`による**内部クオート**と`vars()`による**外部クオート**です。関数が`...`で式を受け取るときは、「内部クオート」を使用し、関数が式のリストを取るときは「外部クオート」を使用します。
+
+```R:R
+grouped_mean2 <- function(.data, .summary_var, ...) {
+  summary_var <- enquo(.summary_var)
+  group_vars <- enquos(...)  # Get a list of quoted dots
+
+  .data %>%
+    group_by(!!!group_vars) %>%  # Unquote-splice the list
+    summarise(mean = mean(!!summary_var))
+}
+
+grouped_mean2(mtcars, disp, cyl, am)
+# A tibble: 6 x 3
+# Groups:   cyl [3]
+    cyl    am  mean
+  <dbl> <dbl> <dbl>
+1     4     0 136. 
+2     4     1  93.6
+3     6     0 205. 
+4     6     1 155  
+5     8     0 358. 
+6     8     1 326  
+```
+
+### 複数の集計対象引数を持つ関数
+複数の引数を扱う場合は、クオートされた式を変更することが必要になります。複数の要約変数を使用する関数`grouped_mean()`が欲しいとします。つまり、下記のように集計する変数を変更したい場合です。
+
+```R:R
+iris %>% summarise(mean = mean(Petal.Length, na.rm = TRUE))
+iris %>% summarise(mean = mean(Petal.Width, na.rm = TRUE))
+```
+
+`quote()`と`expr()`は一部違いがあります。こう使えば同じです。
+
+```R:R
+quote(height)
+height
+
+expr(height)
+height
+
+quote(mean(height))
+mean(height)
+
+expr(mean(height))
+mean(height)
+```
+
+こう使うと同じではありません。
+
+```R:R
+vars <- list(quote(height), quote(mass))
+
+quote(mean(!!vars[[1]]))
+mean(!!vars[[1]])
+ 
+expr(mean(!!vars[[1]]))
+mean(height)
+
+quote(group_by(!!!vars))
+group_by(!!!vars)
+
+expr(group_by(!!!vars))
+group_by(height, mass)
+```
+
+この性質を使って、`map()`でループさせて修正します。
+
+```R:R
+purrr::map(vars, function(var) expr(mean(!!var, na.rm = TRUE)))
+[[1]]
+mean(height, na.rm = TRUE)
+
+[[2]]
+mean(mass, na.rm = TRUE)
+```
+
+`qq_show()`でクオート、アンクオートの関係を確認します。
+
+```R:R
+grouped_mean3 <- function(.data, .group_var, ...) {
+  group_var <- enquo(.group_var)
+  summary_vars <- enquos(...)  # Get a list of quoted summary variables
+  
+  summary_vars <- purrr::map(summary_vars, function(var) {
+    expr(mean(!!var, na.rm = TRUE))
+  })
+  
+  qq_show(
+  .data %>%
+    group_by(!!group_var) %>%
+    summarise(!!!summary_vars)  # Unquote-splice the list
+  )
+}
+
+grouped_mean3(mtcars, cyl, disp, hp)
+.data %>% group_by(^cyl) %>% summarise(mean(^disp, na.rm = TRUE), mean(^hp, na.rm = TRUE))
+```
+
+問題なさそうなので、`qq_show()`を削除して実行します。
+
+```R:R
+grouped_mean3 <- function(.data, .group_var, ...) {
+  group_var <- enquo(.group_var)
+  summary_vars <- enquos(...)  # Get a list of quoted summary variables
+
+  summary_vars <- purrr::map(summary_vars, function(var) {
+    expr(mean(!!var, na.rm = TRUE))
+  })
+
+  .data %>%
+    group_by(!!group_var) %>%
+    summarise(!!!summary_vars)  # Unquote-splice the list
+}
+
+grouped_mean3(mtcars, cyl, disp, hp)
+# A tibble: 3 x 3
+    cyl `mean(disp, na.rm = TRUE)` `mean(hp, na.rm = TRUE)`
+  <dbl>                      <dbl>                    <dbl>
+1     4                       105.                     82.6
+2     6                       183.                    122. 
+3     8                       353.                    209. 
+```
+
+### 複数の集計化引数と集計対象引数を持つ関数
+ここまでくるとやりたいことはわかりますね。複数のグループ化引数に加えて、複数の集計引数を持つ関数は、どのようにつくればよいでしょうか。`vars()`を使うことで、問題に対処でできそうです。
+
+```R:R
+vars(name_hight = height,  name_mass  = mass / 100)
+
+$name_hight
+<quosure>
+expr: ^height
+env:  global
+
+$name_mass
+<quosure>
+expr: ^mass / 100
+env:  global
+```
+
+`vars()`は「外部クオート」なので`enquos()`は必要ありません。関数内の式のリストを取り出し、そのリストを他の引用関数に渡し、`!!!`でアンクオートするだけです。
+
+```R:R
+grouped_mean3 <- function(.data, .group_vars, .summary_vars) {
+  stopifnot(
+    is.list(.group_vars),
+    is.list(.summary_vars)
+  )
+  
+  .summary_vars <- purrr::map(.summary_vars, function(var) {
+    expr(mean(!!var, na.rm = TRUE))
+  })
+  
+  .data %>%
+    group_by(!!!.group_vars) %>%
+    summarise(n = n(), !!!.summary_vars)
+}
+
+grouped_mean3(.data = starwars, 
+              .group_vars = vars(species, gender), 
+              .summary_vars = vars(height))
+
+# A tibble: 43 x 4
+# Groups:   species [38]
+   species  gender     n `mean(height, na.rm = TRUE)`
+   <chr>    <chr>  <int>                        <dbl>
+ 1 NA       female     3                          137
+ 2 NA       male       2                          183
+ 3 Aleena   male       1                           79
+ 4 Besalisk male       1                          198
+ 5 Cerean   male       1                          198
+ 6 Chagrian male       1                          196
+ 7 Clawdite female     1                          168
+ 8 Droid    NA         3                          120
+ 9 Droid    none       2                          200
+10 Dug      male       1                          112
+# … with 33 more rows
+```
+
+`vars()`は名前も変更できます。
+
+```R:R
+grouped_mean3(.data = starwars, 
+              .group_vars = vars(skin_color, gender, hair_color), 
+              .summary_vars = vars(avg_height = height, avg_bod = birth_year))
+
+# A tibble: 57 x 6
+# Groups:   skin_color, gender [39]
+   skin_color   gender hair_color     n avg_height avg_bod
+   <chr>        <chr>  <chr>      <int>      <dbl>   <dbl>
+ 1 blue         female none           1        178      48
+ 2 blue         male   none           1        196     NaN
+ 3 blue, grey   male   black          1        137     NaN
+ 4 blue, grey   male   none           1         94     NaN
+ 5 brown        male   black          1        171     NaN
+ 6 brown        male   brown          2        161       8
+ 7 brown        male   none           1        198     NaN
+ 8 brown mottle male   none           1        180      41
+ 9 brown, white male   none           1        216     NaN
+10 dark         female none           1        184     NaN
+# … with 47 more rows
+```
+
+### 名前を自動で作成する
+`quos_auto_name()`は「外部クオート」されている変数のリストにデフォルト名を手動で追加できます。「外部クオート」である`vars()`は、名前をインデックスでもっています。`quos_auto_name()`することで、`expr`から名前を取得してくれます。
+
+```R:R
+vars(height, birth_year)
+[[1]]
+<quosure>
+expr: ^height
+env:  global
+
+[[2]]
+<quosure>
+expr: ^birth_year
+env:  global
+
+quos_auto_name(vars(height, birth_year))
+$height
+<quosure>
+expr: ^height
+env:  global
+
+$birth_year
+<quosure>
+expr: ^birth_year
+env:  global
+```
+
+`qq_show()`をつけて実行してみても、とくに問題はなさそうですね。
+
+```R:R
+grouped_mean3 <- function(.data, .group_vars, .summary_vars) {
+  stopifnot(
+    is.list(.group_vars),
+    is.list(.summary_vars)
+  )
+  
+  # making name to vals
+  unnamed <- names(.summary_vars) == ""
+  .summary_vars <- rlang::quos_auto_name(.summary_vars)
+  prefixed_nms <- paste0("avg_", names(.summary_vars)[unnamed])
+  names(.summary_vars)[unnamed] <- prefixed_nms
+
+  # listing vals  
+  .summary_vars <- purrr::map(.summary_vars, function(var) {
+    expr(mean(!!var, na.rm = TRUE))
+  })
+  
+  qq_show(
+  .data %>%
+    group_by(!!!.group_vars) %>%
+    summarise(n = n(), 
+              !!!.summary_vars)
+  )
+}
+
+grouped_mean3(.data = starwars, 
+              .group_vars = vars(skin_color, gender, hair_color), 
+              .summary_vars = vars(height, birth_year))
+
+.data %>% 
+  group_by(^skin_color, ^gender, ^hair_color) %>% 
+  summarise(n = n(),
+            avg_height = mean(^height, na.rm = TRUE), 
+            avg_birth_year = mean(^birth_year, na.rm = TRUE)
+```
+
+では、`qqshow()`を外して実行してみます。
+
+```R:R
+grouped_mean3 <- function(.data, .group_vars, .summary_vars) {
+  stopifnot(
+    is.list(.group_vars),
+    is.list(.summary_vars)
+  )
+  
+  # making name to vals
+  unnamed <- names(.summary_vars) == ""
+  .summary_vars <- rlang::quos_auto_name(.summary_vars)
+  prefixed_nms <- paste0("avg_", names(.summary_vars)[unnamed])
+  names(.summary_vars)[unnamed] <- prefixed_nms
+
+  # listing vals  
+  .summary_vars <- purrr::map(.summary_vars, function(var) {
+    expr(mean(!!var, na.rm = TRUE))
+  })
+  
+  .data %>%
+    group_by(!!!.group_vars) %>%
+    summarise(n = n(), 
+              !!!.summary_vars)
+}
+
+grouped_mean3(.data = starwars, 
+              .group_vars = vars(skin_color, gender, hair_color), 
+              .summary_vars = vars(height, birth_year))
+
+# A tibble: 57 x 6
+# Groups:   skin_color, gender [39]
+   skin_color   gender hair_color     n avg_height avg_birth_year
+   <chr>        <chr>  <chr>      <int>      <dbl>          <dbl>
+ 1 blue         female none           1        178             48
+ 2 blue         male   none           1        196            NaN
+ 3 blue, grey   male   black          1        137            NaN
+ 4 blue, grey   male   none           1         94            NaN
+ 5 brown        male   black          1        171            NaN
+ 6 brown        male   brown          2        161              8
+ 7 brown        male   none           1        198            NaN
+ 8 brown mottle male   none           1        180             41
+ 9 brown, white male   none           1        216            NaN
+10 dark         female none           1        184            NaN
+# … with 47 more rows
+```
+
+もちろん、名前を付けることも可能です。
+
+```R:R
+grouped_mean3(.data = starwars, 
+              .group_vars = vars(skin_color, gender, hair_color), 
+              .summary_vars = vars(HHH = height, 
+                                   BBB = birth_year,
+                                   mass))
+
+# A tibble: 57 x 7
+# Groups:   skin_color, gender [39]
+   skin_color   gender hair_color     n   HHH   BBB avg_mass
+   <chr>        <chr>  <chr>      <int> <dbl> <dbl>    <dbl>
+ 1 blue         female none           1   178    48       55
+ 2 blue         male   none           1   196   NaN      NaN
+ 3 blue, grey   male   black          1   137   NaN      NaN
+ 4 blue, grey   male   none           1    94   NaN       45
+ 5 brown        male   black          1   171   NaN      NaN
+ 6 brown        male   brown          2   161     8       78
+ 7 brown        male   none           1   198   NaN      102
+ 8 brown mottle male   none           1   180    41       83
+ 9 brown, white male   none           1   216   NaN      159
+10 dark         female none           1   184   NaN       50
+# … with 47 more rows
+```
+
+### 集計関数を変更する
+ここまでは`mean()`を使っていましたが、集計関数を変更できるバージョンの関数`grouped_summary`を作成します。
+
+```R:R
+grouped_summary <- function(.data, .group_vars, .summary_vars, .fun) {
+  stopifnot(
+    is.list(.group_vars),
+    is.list(.summary_vars)
+  )
+  
+  # making name to vals
+  tmp <- enquo(.fun)
+  .fun_nm <- as_label(tmp)
+  unnamed <- names(.summary_vars) == ""
+  .summary_vars <- rlang::quos_auto_name(.summary_vars)
+  prefixed_nms <- paste0(.fun_nm, "_", names(.summary_vars)[unnamed])
+  names(.summary_vars)[unnamed] <- prefixed_nms
+
+  # listing vals  
+  .summary_vars <- purrr::map(.summary_vars, function(var) {
+    expr(.fun(!!var, na.rm = TRUE))
+  })
+
+  .data %>%
+    group_by(!!!.group_vars) %>%
+    summarise(n = n(), 
+              !!!.summary_vars)
+}
+
+grouped_summary(.data = iris, 
+              .group_vars = vars(Species), 
+              .summary_vars = vars(Sepal.Length, Sepal.Width),
+              .fun = sum)
+
+# A tibble: 3 x 4
+  Species        n sum_Sepal.Length sum_Sepal.Width
+  <fct>      <int>            <dbl>           <dbl>
+1 setosa        50             250.            171.
+2 versicolor    50             297.            138.
+3 virginica     50             329.            149.
+
+grouped_summary(.data = iris, 
+                .group_vars = vars(Species), 
+                .summary_vars = vars(Sepal.Length, Sepal.Width),
+                .fun = sd)
+
+# A tibble: 3 x 4
+  Species        n sd_Sepal.Length sd_Sepal.Width
+  <fct>      <int>           <dbl>          <dbl>
+1 setosa        50           0.352          0.379
+2 versicolor    50           0.516          0.314
+3 virginica     50           0.636          0.322
+```
+### まとめ
+Tidy evaluationに基づいて、関数を作成するためには、まず、抽象化(Abstraction)、クオート(Quoting)、およびアンクオート(Unquoting)の3つのステップを考え、複数の引数をとるのかどうか、内部クオートなのか外部クオートなのかを考えることで、効率よく関数作成することができそう。

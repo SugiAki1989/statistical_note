@@ -1,0 +1,200 @@
+---
+title: "{fastknn}を使った特徴量エンジニアリング"
+pagetitle: "{fastknn}を使った特徴量エンジニアリング"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここでは[`{FastKNN}`](https://github.com/davpinto/fastknn)の使い方まとめておく。`{FastKNN}`を使えば、高速にk最近傍分類器が作れたり、K近傍を用いた特徴量エンジニアリングが可能。通常の`{knn}`よりも50倍は速いそうで、Kaggleなんかでは特徴量エンジニアリングの手法として使われているK近傍を用いた特徴量エンジニアリングも可能。とりあえずこのパッケージの特徴は下記の通り。
+
+- 数秒で大きなデータセット(>100k)でもKNN分類器が構築できる
+- 「dist」推定量を使用して、より調整された確率を予測し、Loglossを減らせる
+- クロスバリデーションを使用して、さまざまな損失関数に従って最良のパラメタ数kを見つけられる
+- 分類決定境界をプロットできる
+- 特徴量エンジニアリングとして、新たな特徴量を抽出できる
+
+## パッケージインストール
+
+```{r}
+library(remotes)
+install_github("davpinto/fastknn")
+library(fastknn)
+```
+
+`{RANN}`、`{foreach}`、`{Metrics}`、`{matrixStats}`、`{ggplot2}`、`{viridis}`などのパッケージに依存しているみたいです。`{RANN}`や`{foreach}`があるように高速化、並列化することで、大きなサイズのデータでも高速に動作するパッケージであることがわかる。
+
+## K近傍を用いた特徴量エンジニアリング
+`{fastknn}`を使うことで、K近傍を用いた特徴量エンジニアリングが可能。ざっくり説明すると、クラスラベルの数cと近傍数kの間の距離をもとにk×c個の特徴量を生成。なので、クラス数c=3で、近傍数をk=5とすると、15個の特徴量が生成される。
+
+イメージとしては、あるクラスに属する訓練データの最近傍までの距離を1つ目の特徴量として、第2近傍までの距離の和(最近傍までの距離+第2近傍までの距離)を2つ目の特徴量として……という感じでこれをkに関して繰り返すことで特徴量を作る。
+
+具体的な計算イメージについては、こちらの記事に詳しくのっている。
+
+- [Python: k-NN Feature Extraction について](https://blog.amedama.jp/entry/knn-feature-extraction)
+
+ここでは、`{fastknn}`のGithub上の例を再現する。この例では、K近傍を用いた特徴量エンジニアリングを行うことで、10％もAccuracyが向上している。
+
+```{r}
+library(mlbench)
+library(caTools)
+library(glmnet)
+
+# Load data
+data("Ionosphere", package = "mlbench")
+x <- data.matrix(subset(Ionosphere, select = -Class))
+y <- Ionosphere$Class
+
+# Remove near zero variance columns
+x <- x[, -c(1,2)]
+
+# Split data
+set.seed(123)
+tr.idx <- which(sample.split(Y = y, SplitRatio = 0.7))
+x.tr <- x[tr.idx,]
+x.te <- x[-tr.idx,]
+y.tr <- y[tr.idx]
+y.te <- y[-tr.idx]
+
+# GLM with original features
+glm <- glmnet(x = x.tr, y = y.tr, family = "binomial", lambda = 0)
+yhat <- drop(predict(glm, x.te, type = "class"))
+yhat1 <- factor(yhat, levels = levels(y.tr))
+
+# Generate KNN features
+set.seed(123)
+new.data <- knnExtract(xtr = x.tr, ytr = y.tr, xte = x.te, k = 3)
+
+# GLM with KNN features
+glm <- glmnet(x = new.data$new.tr, y = y.tr, family = "binomial", lambda = 0)
+yhat <- drop(predict(glm, new.data$new.te, type = "class"))
+yhat2 <- factor(yhat, levels = levels(y.tr))
+
+# Performance
+list(
+sprintf("Accuracy: %.2f", 100 * (1 - classLoss(actual = y.te, predicted = yhat1))),
+sprintf("Accuracy: %.2f", 100 * (1 - classLoss(actual = y.te, predicted = yhat2)))
+)
+```
+
+K近傍を用いた特徴量エンジニアリングを行っている部分はここ。kには近傍の点としていくつ使用するかを設定。
+
+```{r}
+knnExtract(xtr = x.tr, ytr = y.tr, xte = x.te, k = 3)
+```
+
+アウトプットには訓練データとテストデータ用の新しい特徴量が生成される。
+
+```{r}
+str(new.data)
+```
+
+## ナニヲシテイルノカ？
+K近傍を用いた特徴量エンジニアリングは何をやっているのか…。ざっくり説明すると、KNNは元の空間の非線形写像を作り、それを線形のものに射影することで、クラスを線形に分離できる特徴量を生成しているとのことです。
+
+```{r}
+library("caTools")
+library("fastknn")
+library("ggplot2")
+library("gridExtra")
+
+# Load data
+data("chess")
+x <- data.matrix(chess$x)
+y <- chess$y
+
+# Split data
+set.seed(123)
+tr.idx <- which(sample.split(Y = y, SplitRatio = 0.7))
+x.tr <- x[tr.idx,]
+x.te <- x[-tr.idx,]
+y.tr <- y[tr.idx]
+y.te <- y[-tr.idx]
+
+# Feature extraction with KNN
+set.seed(123)
+new.data <- knnExtract(x.tr, y.tr, x.te, k = 1)
+
+# Decision boundaries
+g1 <- knnDecision(x.tr, y.tr, x.te, y.te, k = 10) +
+  labs(title = "Original Features")
+g2 <- knnDecision(new.data$new.tr, y.tr, new.data$new.te, y.te, k = 10) +
+  labs(title = "KNN Features")
+grid.arrange(g1, g2, ncol = 2)
+```
+
+
+
+```{r}
+# Load data
+data("spirals")
+x <- data.matrix(spirals$x)
+y <- spirals$y
+
+# Split data
+set.seed(123)
+tr.idx <- which(sample.split(Y = y, SplitRatio = 0.7))
+x.tr <- x[tr.idx,]
+x.te <- x[-tr.idx,]
+y.tr <- y[tr.idx]
+y.te <- y[-tr.idx]
+
+# Feature extraction with KNN
+set.seed(123)
+new.data <- knnExtract(x.tr, y.tr, x.te, k = 1)
+
+# Decision boundaries
+g1 <- knnDecision(x.tr, y.tr, x.te, y.te, k = 10) +
+   labs(title = "Original Features")
+g2 <- knnDecision(new.data$new.tr, y.tr, new.data$new.te, y.te, k = 10) +
+   labs(title = "KNN Features")
+grid.arrange(g1, g2, ncol = 2)
+
+```
+
+
+## 最適なkを求める
+ハイパーパラメタであるkを決める必要があるのですが、このパッケージには、様々な指標のもとでクロスバリデーションを行い、最適なkを決めることができるようです。「overall_error」「mean_error」「auc」「logloss」が利用可能です。
+
+この例の場合、loglossのもとでクロスバリデーションした結果、loglossを最も小さくするkは10であることがわかります。
+
+```{r}
+# Load dataset
+library("mlbench")
+data("Sonar", package = "mlbench")
+x <- data.matrix(Sonar[, -61])
+y <- Sonar$Class
+
+# 5-fold CV using log-loss as evaluation metric
+set.seed(123)
+cv.out <- fastknnCV(x,
+                    y,
+                    k = 3:15,
+                    method = "vote", #method = "dist"もある
+                    folds = 5,
+                    eval.metric = "logloss")
+cv.out$cv_table
+```

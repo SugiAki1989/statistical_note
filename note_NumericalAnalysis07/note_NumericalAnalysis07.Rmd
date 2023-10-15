@@ -1,0 +1,321 @@
+---
+title: "ポアソン回帰とスコア法"
+pagetitle: "ポアソン回帰とスコア法"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではポアソン回帰のパラメタをスコア法で計算する方法についてまとめておく。
+
+## フィッシャーのスコア法
+
+ポアソン回帰分析の詳しい説明はさておき、ポアソン分布は下記の通り定義される。
+
+$$
+f(Y_{i}=y_{i}) = \frac{exp[-\lambda_{i}]\lambda_{i}^{y_{i}}}{y_{i}!}, \lambda_{i}>0,y=0,1,2, \dots
+$$
+
+まず、ここでは下記の通り定義する。
+
+$$
+\boldsymbol{X} = 
+\begin{bmatrix}
+x_{11} & \cdots & x_{1p} \\
+\vdots & \ddots & \vdots \\
+x_{n1} & \cdots & x_{np} 
+\end{bmatrix},
+\boldsymbol{x} = 
+\begin{bmatrix}
+x_{i1} \\
+\vdots \\
+x_{ip}  
+\end{bmatrix},
+\boldsymbol{\beta} = 
+\begin{bmatrix}
+\beta_{1} \\
+\vdots \\
+\beta_{p}  
+\end{bmatrix},
+\boldsymbol{ x_{i}^{T} \boldsymbol{\beta}} = x_{i1}\beta_{1} + \cdots + x_{ip}\beta_{p}
+$$
+
+ポアソン回帰分析は説明変数と回帰係数パラメタの積に指数を取ったもので$\lambda$を計算する。
+
+$$
+f(Y_{i}=y_{i}) = \frac{exp[-\lambda_{i}]\lambda_{i}^{y_{i}}}{y_{i}!}, \lambda_{i}=exp[\boldsymbol{ x_{i}^{T} \boldsymbol{\beta}}]
+$$
+
+ポアソン分布を最尤法で計算してパラメタを求めることを考える。
+
+$$
+L(\boldsymbol{\beta})=\prod \frac{exp[-\lambda_{i}]\lambda_{i}^{y_{i}}}{y_{i}!}
+$$
+
+尤度関数を対数尤度関数に変換し、
+
+$$
+log L(\boldsymbol{\beta})=\sum (y_{i} \boldsymbol{ x_{i}^{T} \boldsymbol{\beta}} - exp[\boldsymbol{ x_{i}^{T} \boldsymbol{\beta}}] - log y_{i}!)
+$$
+
+$\beta$について微分する。この結果を0とすることで、対数尤度関数$logL(β)$が$β$について最大化されるときの1階条件となる。
+
+$$
+\begin{eqnarray}
+\frac{ \partial log L(\boldsymbol{\beta}) }{ \partial \beta} &=& \sum (y_{i} - exp[\boldsymbol{ x_{i}^{T} \boldsymbol{\beta}}])\boldsymbol{ x_{i}} = 0 \\
+ &=& \boldsymbol{ X^{T}}[\boldsymbol{y} - exp[\boldsymbol{X} \boldsymbol{\beta}]]= \boldsymbol{0}
+\end{eqnarray}
+$$
+
+各パラメタの要素を書き下すと、下記の通りである。$\boldsymbol{g}$は勾配のGradientを意味する。対数尤度関数の各パラメタの1階微分は勾配であるため。
+
+$$
+\boldsymbol{g(\beta)}=
+\begin{bmatrix}
+\frac{ \partial log L(\boldsymbol{\beta}) }{ \partial \beta_{1}} \\
+\vdots \\
+\frac{ \partial log L(\boldsymbol{\beta}) }{ \partial \beta_{p}}
+\end{bmatrix}=
+\begin{bmatrix}
+[y_{1} - exp[\boldsymbol{x}^{T}_{1} \boldsymbol{\beta}]x_{11} + \cdots + [y_{n} - exp[\boldsymbol{x}^{T}_{n}] \boldsymbol{\beta}]x_{1n} \\
+\vdots \\
+[y_{1} - exp[\boldsymbol{x}^{T}_{1} \boldsymbol{\beta}]x_{p1} + \cdots + [y_{n} - exp[\boldsymbol{x}^{T}_{n}] \boldsymbol{\beta}]x_{pn}
+\end{bmatrix}=
+\begin{bmatrix}
+0 \\
+\vdots \\
+0
+\end{bmatrix}
+$$
+
+これまでに扱ってきたニュートン法で計算することを考える。$β=β_{k}$として、$k$回目の更新で得られた値を意味する。
+
+$$
+\boldsymbol{g(\beta_{k})}=
+\begin{bmatrix}
+\frac{ \partial log L(\boldsymbol{\beta}_{k}) }{ \partial \beta_{1(k)}} \\
+\vdots \\
+\frac{ \partial log L(\boldsymbol{\beta}_{k}) }{ \partial \beta_{p(k)}}
+\end{bmatrix}
+$$
+
+ニュートン法の計算に必要なヘシアン行列$\boldsymbol{H(\beta)}$は下記となる。
+
+$$
+\boldsymbol{H(\beta)}=\frac{ \partial \boldsymbol{g(\beta)} }{ \partial \boldsymbol{\beta}}=
+\begin{bmatrix}
+\frac{ \partial^{2} logL(\boldsymbol{\beta})}{ \partial \beta_{1} \partial \beta_{1}} & \cdots & \frac{ \partial^{2} logL(\boldsymbol{\beta})}{ \partial \beta_{1} \partial \beta_{p}} \\
+\vdots & \ddots & \vdots \\
+\frac{ \partial^{2} logL(\boldsymbol{\beta})}{ \partial \beta_{p} \partial \beta_{1}} & \cdots & \frac{ \partial^{2} logL(\boldsymbol{\beta})}{ \partial \beta_{p} \partial \beta_{p}}
+\end{bmatrix}
+$$
+
+また、$k$は、$k$回目の更新で得られた値を意味する。
+
+$$
+\boldsymbol{H(\beta_{k})}=
+\begin{bmatrix}
+\frac{ \partial^{2} logL(\boldsymbol{\beta_{k}})}{ \partial \beta_{1(k)} \partial \beta_{1(k)}} & \cdots & \frac{ \partial^{2} logL(\boldsymbol{\beta_{k}})}{ \partial \beta_{1(k)} \partial \beta_{p(k)}} \\
+\vdots & \ddots & \vdots \\
+\frac{ \partial^{2} logL(\boldsymbol{\beta_{k}})}{ \partial \beta_{p(k)} \partial \beta_{1(k)}} & \cdots & \frac{ \partial^{2} logL(\boldsymbol{\beta_{k}})}{ \partial \beta_{p(k)} \partial \beta_{p(k)}}
+\end{bmatrix}
+$$
+
+以上より、ニュートン法の反復計算は次のようになる。
+
+$$
+\boldsymbol{\beta}_{k+1} = \boldsymbol{\beta}_{k} - [\boldsymbol{H(\beta}_{k})]^{-1} \boldsymbol{g(\beta}_{k})
+$$
+
+ただ、ポアソン回帰分析では、ヘシアン行列を使わず、Fisherスコアリング法を用いる。詳しい話は一般化線形モデルの書籍を参照。
+
+Fisherスコアリング法は、ヘシアン行列$\boldsymbol{H(\beta)}$の代わりに負の符号を持つフィッシャー情報行列$\boldsymbol{I(\beta)}$を用いて反復計算を行う。
+
+$$
+\boldsymbol{\beta}_{k+1} = \boldsymbol{\beta}_{k} + [\boldsymbol{I(\beta}_{k})]^{-1} \boldsymbol{g(\beta}_{k})
+$$
+
+フィッシャー情報行列$\boldsymbol{I(\beta)}$は下記の通り計算できる。
+
+$$
+\begin{eqnarray}
+\boldsymbol{I(\beta)} &=& - E[\boldsymbol{H(\beta)}] \\
+&=& - E \left[ \frac{\partial^{2} logL(\boldsymbol{\beta})}{\partial \boldsymbol{\beta} \partial \boldsymbol{\beta}} \right] \\
+&=& \sum \boldsymbol{ x_{i}^{T}exp[x_{i}^{T} \beta]x_{i}} \\
+&=& \boldsymbol{ X^{T} W X} \\
+&=& \begin{bmatrix}
+x_{11} & \cdots & x_{np} \\
+\vdots & \ddots & \vdots \\
+x_{1p} & \cdots & x_{np} 
+\end{bmatrix}
+\begin{bmatrix}
+exp[x_{1}^{T} \beta] & \cdots & 0 \\
+\vdots & \ddots & \vdots \\
+0 & \cdots & exp[x_{n}^{T} \beta]
+\end{bmatrix}
+\begin{bmatrix}
+x_{11} & \cdots & x_{1p} \\
+\vdots & \ddots & \vdots \\
+x_{n1} & \cdots & x_{np} 
+\end{bmatrix}
+\end{eqnarray}
+$$
+
+以上より、ポアソン回帰分析は、フィッシャー情報行列$\boldsymbol{I(\beta)}$を用いて繰り返してパラメタを更新することで、回帰係数を求めることができる。
+
+ここからは回帰係数の分散に関する話。回帰係数の推定量$\hat{ \beta }$の漸近分布は、
+
+$$
+\boldsymbol{ \hat {\beta} } \sim N[\boldsymbol{ \beta }, [\boldsymbol{ I(\beta) }]^{-1}]
+$$
+
+であり、回帰係数の推定量$\hat{ \beta }$̂の分散共分散行列フィッシャー情報行列より、下記となる。
+
+$$
+\boldsymbol{ V[\hat \beta] } = [\boldsymbol{ I(\beta) }]^{-1} = (\boldsymbol{ X^{T} W X} )^{-1}
+$$
+
+分散共分散行列の対角要素が各パラメタの分散となり、平方根を計算すれば、標準誤差が得られる。
+
+$$
+\boldsymbol{ V[\hat \beta] } = 
+\begin{bmatrix}
+V[\hat \beta_{1}] & \cdots & C[\hat \beta_{1}, \hat \beta_{p}] \\
+\vdots & \ddots & \vdots \\
+C[\hat \beta_{p}, \hat \beta_{1}] & \cdots & V[\hat \beta_{p}]
+\end{bmatrix}
+$$
+
+以上より、回帰係数を標準化して、漸近分布が正規分布に従うことを利用して、回帰係数の検定を行う。
+
+$$
+z_{i} = \frac{\boldsymbol{\hat \beta}_{i}}{ \sqrt { V[\boldsymbol{\hat \beta}_{i}] } }
+$$
+
+
+
+
+## ポアソン回帰分析
+
+まずは`glm`関数を利用して、ポアソン回帰分析を実行する。サンプルデータは下記よりお借りする。
+
+- [生態学のデータ解析 - 本/データ解析のための統計モデリング入門](https://kuboweb.github.io/-kubo/ce/IwanamiBook.html)
+
+```{r}
+library(tidyverse)
+d <- read.csv("https://kuboweb.github.io/-kubo/stat/iwanamibook/fig/poisson/data3a.csv") %>% 
+  mutate(f = ifelse(f == 'C', 0, 1),
+         x0 = 1) %>% 
+  select(y, x0, x1 = x, x2 = f) 
+head(d)
+```
+
+計算したい回帰係数の値を予め確認しておく。この値が得られるであろうパラメタの数値である。
+
+```{r}
+Y <- as.vector(d$y)
+Xnms <- c('x0', 'x1','x2')
+X <- as.matrix(d[, names(d) %in% Xnms])
+
+summary(glm(Y ~ X - 1, family = poisson(link = 'log')))
+```
+
+さきほどの数式の部分をRで実装して実行する。`glm`関数と同じようなパラメタが計算できている。
+
+```{r}
+iter <- 50
+tolerance <- 10^-5
+B <- rep(1, ncol(X))
+
+for(i in 1:iter){
+    # 更新前のパラメタを保存
+    pre_B <- B
+
+    # 偏回帰係数と説明変数の積で計算されるλハット
+    lam <- exp(X %*% B)
+    
+    # 勾配の計算
+    grad <- t(X) %*% (Y - lam)
+
+    # フィッシャー情報行列の計算用λハットの対角行列
+    W <- diag(nrow(X))
+    diag(W) <- lam
+    
+    # フィッシャー情報行列を計算
+    I <- t(X) %*% W %*% X
+    
+    # フィッシャー情報行列の逆行列と勾配を使ってパラメタを更新
+    B <- pre_B + solve(I) %*% grad
+    
+    # 計算結果を表示
+    cat(sprintf("%d times: (x0=%2.3f, x1=%2.3f, x2=%2.3f)\n", i, B[1], B[2], B[3]))
+    if(sqrt(crossprod(B - pre_B)) < tolerance) {
+        cat(sprintf("The algorithm converged.\n%d times: (x0=%2.3f, x1=%2.3f, x2=%2.3f)", i, B[1], B[2], B[3]))
+        break
+    }
+}
+```
+
+これまでと同じく、`optim`関数でも同じ値が得られるかを確認しておく。最大化する対数尤度関数は下記のとおり。
+
+$$
+log L(\boldsymbol{\beta})=\sum (y_{i} \boldsymbol{ x_{i}^{T} \boldsymbol{\beta}} - exp[\boldsymbol{ x_{i}^{T} \boldsymbol{\beta}}] - log y_{i}!)
+$$
+
+`optim`にこの対数尤度関数を渡し、フィッシャーのスコア法がないので、準ニュートン法で最適化を行う。
+
+```{r}
+# lfactorial(n) = log(factorial(n))
+loglik <- function(B) sum(Y * X %*% B - exp(X %*% B) - log(factorial(Y)))
+B <- rep(1, ncol(X))
+
+set.seed(1989)
+res <-
+  optim(
+    par = B,
+    fn = loglik,
+    control = list(fnscale = -1), # 最大化
+    hessian = TRUE,
+    method = "BFGS" #準ニュートン法
+  )
+
+# 標準誤差
+se <- sqrt(diag(solve(-res$hessian)))
+
+# summary風
+cbind(coef = res$par,
+      se   = se,
+      zval = res$par / se )
+```
+
+## 参考文献
+
+- [一般化線形モデル入門 原著第2版](https://www.kyoritsu-pub.co.jp/book/b10010684.html)
+- [一般化線形モデルと生存分析](https://www.asakura.co.jp/detail.php?book_code=12195)
+- [データ解析のための統計モデリング入門](https://kuboweb.github.io/-kubo/ce/IwanamiBook.html)
+- [15.2 ポアソン回帰分析結果の解釈](http://www.snap-tck.com/room04/c01/stat/stat15/stat1502.html)
+- [もしも最尤推定をフルスクラッチで書いたら](https://rstudio-pubs-static.s3.amazonaws.com/683068_c7e8ca57403e4674b0c4f8f4447a6257.html)

@@ -1,0 +1,113 @@
+---
+title: "GoogleFormのマルチアンサーを処理する"
+pagetitle: "GoogleFormのマルチアンサーを処理する"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+GoogleFormのマルチアンサーを処理する方法をここではまとめておく。
+
+## GoogleFormのマルチアンサー
+
+GoogleFormのマルチアンサーをエクスポートすると下記のような`q2`カラムの形式でエクスポートされるらしい。確かに一般的なアンケートツールからエクスポートされる値の形式とは異なる。ちなみに`c`という選択肢は存在しているが、だれも回答していケースを想定している。
+
+```{r}
+library(tidyverse)
+library(rlang)
+
+df <- tibble(
+  id = 1:5,
+  q1 = c(1,2,3,4,2),
+  q2 = c('a,b,d','a,b','b,d','a,d','d')
+)
+df
+```
+
+すぐに思いつく方法としては、文字列を含んでいたら、`TRUE`なり、その選択肢を`if_else`関数で返す方法。
+
+```{r}
+df %>% 
+  mutate(
+    q2_a = if_else(str_detect(q2, 'a'), 'a', NA),
+    q2_b = if_else(str_detect(q2, 'b'), 'b', NA),
+    q2_c = if_else(str_detect(q2, 'c'), 'c', NA),
+    q2_d = if_else(str_detect(q2, 'd'), 'd', NA)
+  )
+
+```
+
+できなくはないが、これでは選択肢20個あるなら、20行必要になるし、マルチアンサー質問が5つあると、100行必要になる。上記のように機能する関数を書けば良いのでは？という話があるが、下記のよううな方法でもできそうなので、ここではその方法をまとめておく。
+
+まずは選択肢のユニークなベクトルを作成しておく。
+
+```{r}
+col_val <- separate_rows(df, q2, sep = ",") %>% 
+  select(q2) %>% 
+  distinct() %>% 
+  pull() %>% 
+  append('c') %>% 
+  sort()
+
+col_val
+
+```
+
+この選択肢ベクトルを利用して、`map2_dfc`関数で、カラム内の値を選択肢ベクトルの値の長さ分、判定してリストを作成する。そして、そのリストをデータフレーム化する。あとは、`mutate`関数の部分で、カラム名を使って、値を置換し、再度カラム名を修正する。
+
+```{r}
+df %>%
+  dplyr::select(q2) %>%
+  purrr::map2_dfc(.x = ., .y = col_val, .f = function(x, y) {str_detect(x, pattern = y)}) %>% 
+  rlang::set_names(col_val) %>% 
+  # dplyr::mutate_if(is.logical, function(x){if_else(x, quo_text(quo(x)), NA_character_)})
+  dplyr::mutate(across(is.logical, ~ if_else(.x, quo_text(quo(.x)), NA_character_))) %>% 
+  rlang::set_names(str_c('q2_', col_val)) %>%
+  dplyr::bind_cols(df, .)
+```
+
+
+場合にもよるが、アンケートの仕様がそこまで変わらないのであれば、めんどくさいけど`if_else`関数の方法のほうが可読性は高いかも。
+
+## 追記
+
+一晩寝たらそもそもこんなことしなくても下記の方法でも実現できそうなことに気がついたのでメモしておく。
+
+```{r}
+df %>% 
+  dplyr::select(-q1) %>% 
+  tidyr::separate_rows(q2, sep = ',') %>% 
+  tidyr::pivot_wider(
+    names_from = q2,
+    names_prefix = 'q2_',
+    values_from = q2,
+    values_fill = NA_character_
+  ) %>% 
+  mutate(q2_c = NA_character_) %>% 
+  dplyr::select(-id) %>% 
+  dplyr::bind_cols(df, .)
+```

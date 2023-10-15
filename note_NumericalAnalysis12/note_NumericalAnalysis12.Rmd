@@ -1,0 +1,590 @@
+---
+title: "非線形最小二乗法のまとめ"
+pagetitle: "非線形最小二乗法のまとめ"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+
+## 非線形最小二乗法のまとめ
+
+ここでは非線形最小二乗法を用いて、非線形な関数のフィッティングについての実装をまとめる。使用しているパッケージは`nls`パッケージではなく、`gslnls`パッケージ。便利な計算アルゴリズムや漸近信頼区間と予測区間の計算ができる便利なパッケージ。
+
+- [GSL nonlinear least squares fitting in R](https://www.jchau.org/2021/10/12/gsl-nonlinear-least-squares-fitting-in-r/#ref-R83)
+- [Asymptotic confidence intervals for NLS regression in R](https://www.jchau.org/2021/07/12/asymptotic-confidence-intervals-for-nls-regression-in-r/)
+- [JorisChau/gslnls](https://github.com/JorisChau/gslnls)
+- [A collection of self-starters for nonlinear regression in R](https://www.statforbiology.com/2020/stat_nls_usefulfunctions/)
+- [Nonlinear regression](https://rpubs.com/abbyhudak/nonlinreg)
+
+このノートは、非線形最小二乗法の理論やデータに対する関数についての説明もない。ただただ実装をまとめているだけ。必要なライブラリを読み込んでおく。
+
+```{r}
+library(NISTnls)    
+library(gslnls)
+library(tidyverse)
+library(aomisc)
+```
+
+## 非線形関数
+### Michaelis-Menten equation
+
+```{r}
+set.seed(1989)
+x <- seq(0, 50, 1)
+y <- ((runif(1, 10, 20)*x)/(runif(1, 0, 10) + x)) + rnorm(n = length(x), 0, 1)
+MichaelisMenten <- data.frame(y, x)
+
+MichaelisMenten_nsl <- gsl_nls(
+  fn = y ~ (b1 * x / (b2 + x)), 
+  data = MichaelisMenten,     
+  start = c(b1 = 1, b2 = 1), 
+  control = gsl_nls_control(maxiter = 50),
+  algorithm = 'lm'
+)
+
+# as.matrix(coef(MichaelisMenten_nsl))
+cbind(
+  MichaelisMenten, 
+  predict(MichaelisMenten_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit), linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: MichaelisMenten')
+```
+
+### Polynomial
+
+```{r}
+Polynomial <- data.frame(
+  x = seq(5, 50, 5),
+  y = c(12.6, 74.1, 157.6, 225.5, 303.4, 462.8, 669.9, 805.3, 964.2, 1169)
+)
+
+Polynomial_nsl <- gsl_nls(
+  fn = y ~ a + b*x + c*x^2, 
+  data = Polynomial,     
+  start = c(a = 1, b = 1, c = 1), 
+  control = gsl_nls_control(maxiter = 50),
+  algorithm = 'lm'
+)
+
+# as.matrix(coef(Polynomial_nsl))
+cbind(
+  Polynomial, 
+  predict(Polynomial_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Polynomial')
+
+```
+
+### ExponentialDecay
+
+```{r}
+ExponentialDecay <- structure(list(
+  x = c(0L, 10L, 20L, 30L, 40L, 50L, 60L, 70L, 0L, 10L, 20L, 30L, 40L, 50L, 60L, 70L, 0L, 10L, 20L, 30L, 40L, 50L, 60L, 70L),
+  y = c(96.4, 46.3, 21.2, 17.89, 10.1, 6.9, 3.5, 1.9, 102.3, 49.2, 26.31, 14.22, 5.4, 3.4, 0.5, 0.2, 101.33, 54.89, 28.12, 13.33, 6.11, 0.35, 2.1, 0.922)), 
+  class = "data.frame", row.names = c(NA, -24L)
+  )  
+
+ExponentialDecay_nsl <- gsl_nls(
+  fn = y ~ a*exp(k*x), 
+  data = ExponentialDecay,     
+  start = c(a = 100, k = 0.01), 
+  control = gsl_nls_control(maxiter = 100),
+  algorithm = 'lm'
+)
+
+# as.matrix(coef(ExponentialDecay_nsl))
+cbind(
+  ExponentialDecay, 
+  predict(ExponentialDecay_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: ExponentialDecay')
+```
+
+### Asymptotic
+
+```{r}
+Asymptotic <- data.frame(
+  x = c(1, 3, 5, 7, 9, 11, 13, 20),
+  y = c(8.22, 14.0, 17.2, 16.9, 19.2, 19.6, 19.4, 19.6)
+)
+
+
+Asymptotic_nsl <- gsl_nls(
+  fn = y ~ a-(a-b)*exp(-c*x), 
+  data = Asymptotic,     
+  start = c(a = 1, b = 1, c = 0.01), 
+  control = gsl_nls_control(maxiter = 1000),
+  algorithm = 'lm'
+)
+
+# as.matrix(coef(Asymptotic_nsl))
+cbind(
+  Asymptotic, 
+  predict(Asymptotic_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Asymptotic')
+```
+
+### Power
+
+```{r}
+Power <- structure(list(
+  x = c(1L, 2L, 4L, 8L, 16L, 32L, 64L, 128L, 256L), 
+  y = c(4, 5, 7, 8, 10, 14, 19, 22, 26)), 
+  row.names = c(NA, -9L), class = "data.frame")
+
+
+Power_nsl <- gsl_nls(
+  fn = y ~ a*x^b, 
+  data = Power,     
+  start = c(a = 0.1, b = 0.01), 
+  control = gsl_nls_control(maxiter = 1000),
+  algorithm = 'lm'
+)
+
+# as.matrix(coef(Power_nsl))
+cbind(
+  Power, 
+  predict(Power_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Asymptotic')
+```
+
+### Logarithmic
+
+```{r}
+Logarithmic <- data.frame(
+  x = c(1,2,4,5,7,12),
+  y = c(1.97, 2.32, 2.67, 2.71, 2.86, 3.09)
+  )
+
+
+Logarithmic_nsl <- gsl_nls(
+  fn = y ~ a + b * log(x), 
+  data = Logarithmic,     
+  start = c(a = 0.1, b = 0.1), 
+  control = gsl_nls_control(maxiter = 1000),
+  algorithm = 'lm'
+)
+
+# as.matrix(coef(Logarithmic_nsl))
+cbind(
+  Logarithmic, 
+  predict(Logarithmic_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Logarithmic')
+
+```
+
+### Rectangular
+
+```{r}
+Rectangular <- data.frame(
+  x = c(0, 5, 7, 22, 28, 39, 46, 200),
+  y = c(12.74, 13.66, 14.11, 14.43, 14.78, 14.86, 14.78, 14.91)
+)
+
+
+Rectangular_nsl <- gsl_nls(
+  fn = y ~ a*x/(b+x), 
+  data = Rectangular,     
+  start = c(a = 10, b = 0.5), 
+  control = gsl_nls_control(maxiter = 1000),
+  algorithm = 'lm'
+)
+
+# as.matrix(coef(Rectangular_nsl))
+cbind(
+  Rectangular, 
+  predict(Rectangular_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Rectangular')
+
+```
+
+### Weibull
+
+```{r}
+Weibull <- structure(list(
+  x = c(0L, 0L, 0L, 0L, 1L, 1L, 1L, 1L, 2L, 2L,2L, 2L, 5L, 5L, 5L, 5L, 7L, 7L, 7L, 7L, 10L, 10L, 10L, 10L, 20L, 20L, 20L, 20L, 50L, 50L, 50L, 50L), 
+  y = c(4.74, 4.57, 4.51, 4.5, 4.12, 3.84, 3.13, 2.92, 3.75, 3.18, 2.6, 2.04, 2.46, 1.8, 1.03, 1.02, 1.01, 0.95, 0.86, 0.71, 0.92, 0.85, 0.81, 0.67, 0.65,0.61, 0.6, 0.48, 0.55, 0.44, 0.4, 0.39)), 
+  class = "data.frame", row.names = c(NA, -32L))
+
+Weibull1_nsl <- gsl_nls(
+  fn = y ~ c + (d-c)*exp(-exp(-b*(log(x)-log(e)))), 
+  data = Weibull,     
+  start = c(b = 1, c = 0.5, d = 5, e = 3), 
+  control = gsl_nls_control(maxiter = 1000),
+  algorithm = 'lm'
+)
+
+# as.matrix(coef(Weibull1_nsl))
+cbind(
+  Weibull, 
+  predict(Weibull1_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Weibull type1')
+
+```
+
+```{r}
+
+Weibull2_nsl <- gsl_nls(
+  fn = y ~ c + (d-c)*(1-exp(-exp(b*(log(x)-log(e))))),
+  data = Weibull,     
+  start = c(b = 1, c = 0.5, d = 5, e = 3), 
+  control = gsl_nls_control(maxiter = 1000),
+  algorithm = 'lm'
+)
+
+# as.matrix(coef(Weibull2_nsl))
+cbind(
+  Weibull, 
+  predict(Weibull2_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Weibull type2')
+```
+
+### Bragg
+
+```{r}
+Bragg <- data.frame(
+  x = c(5, 10, 15, 20, 25, 30, 35, 40, 45, 50),
+  y = c(0.1, 2, 5.7, 9.3, 19.7, 28.4, 20.3, 6.6, 1.3, 0.1)
+)
+
+Bragg_nsl <- gsl_nls(
+  fn = y ~ d * exp(-b*(x-e)^2), 
+  data = Bragg,     
+  start = c(b = 0.1, d = 30, e = 30), 
+  control = gsl_nls_control(maxiter = 1000),
+  algorithm = 'lm'
+)
+
+# as.matrix(coef(Bragg_nsl))
+cbind(
+  Bragg, 
+  predict(Bragg_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Bragg')
+
+```
+
+### Lorentz
+
+```{r}
+Lorentz <- Bragg
+
+Lorentz_nsl <- gsl_nls(
+  fn = y ~ d / (1 + b*(x-e)^2), 
+  data = Lorentz,     
+  start = c(b = 0.1, d = 30, e = 30), 
+  control = gsl_nls_control(maxiter = 1000),
+  algorithm = 'lm'
+)
+
+# as.matrix(coef(Lorentz_nsl))
+cbind(
+  Lorentz, 
+  predict(Lorentz_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Lorentz')
+
+```
+
+### Beta
+
+Betaのデータは`gsl_nls()`関数では収束させることができなかったため、`aomisc`パッケージの関数を利用している。このパッケージの関数は特定の関数系に対して、初期値を自動的に計算できるため、非線形回帰分析を線形回帰分析と同じくらいスムーズに実行できる。
+
+下記に使用方法がまとまっており、ここでもその利用方法に従っている。
+
+- [A collection of self-starters for nonlinear regression in R](https://www.statforbiology.com/2020/stat_nls_usefulfunctions/)
+
+```{r}
+Beta <- data.frame(
+  x = c(1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50),
+  y = c(0, 0, 0, 7.7, 12.3, 19.7, 22.4, 20.3, 6.6, 0, 0)
+)
+# 
+# Beta_nsl <- gsl_nls(
+#   fn = y ~ d * (((x-xb)/(xo-xb))*((xc-x)/(xc-xo))^((xc-xo)/(xo-xb)))^b,
+#   data = Beta,     
+#   start = c(b = 1.291, d = 22.294, xb = 9.438, xc = 40.464, xo = 31.154), 
+#   control = gsl_nls_control(maxiter = 1000),
+#   algorithm = 'lm'
+# )
+
+model <- nls(y ~ NLS.beta(x, b, d, Xb, Xo, Xc), data = Beta)
+# summary(model)
+
+cbind(
+  Beta, 
+  fit = predict(model, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Beta')
+
+```
+
+## NIST StRD Nonlinear Regression
+
+下記は[NIST StRD Nonlinear Regression](https://www.itl.nist.gov/div898/strd/nls/nls_main.shtml)でアーカイブされているデータを扱っている。レベルはHigherのみ。
+
+### Ratkowsky2
+
+```{r}
+Ratkowsky2_nsl <- gsl_nls(
+  fn = y ~ b1 / (1 + exp(b2 - b3 * x)),   
+  data = Ratkowsky2,                      
+  start = c(b1 = 100, b2 = 1, b3 = 0.1),
+  control = gsl_nls_control(maxiter = 100)
+)
+
+#as.matrix(coef(Ratkowsky2_nsl))
+cbind(
+  Ratkowsky2, 
+  predict(Ratkowsky2_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Ratkowsky2')
+```
+
+### MGH09
+
+```{r}
+MGH09_nsl <- gsl_nls(
+  fn = y ~ (b1*(x^2 + b2*x)) / (x^2 + b3*x + b4),   
+  data = MGH09,                      
+  start = c(b1 = 25, b2 = 39, b3 = 41.5, b4 = 39),
+  control = gsl_nls_control(maxiter = 100)
+)
+
+# as.matrix(coef(MGH09_nsl))
+cbind(
+  MGH09, 
+  predict(MGH09_nsl, interval = "confidence", level = 0.95)
+  ) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: MGH09')
+```
+
+### Thurber
+
+```{r}
+Thurber_nsl <- gsl_nls(
+  fn = y ~ (b1 + b2*x + b3*x^2 + b4*x^3)/(1 + b5*x + b6*x^2 + b7*x^3),   
+  data = Thurber,                      
+  start = c(b1 = 1000, b2 = 1000, b3 = 400, b4 = 40, b5 = 0.7, b6 = 0.3, b7 = 0.03),
+  control = gsl_nls_control(maxiter = 100)
+)
+# as.matrix(coef(Thurber_nsl))
+
+cbind(
+  Thurber, 
+  predict(Thurber_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Thurber')
+```
+
+### MGH10
+
+```{r}
+MGH10_nsl <- gsl_nls(
+  fn = y ~ b1 * exp(b2 / (x + b3)),   
+  data = MGH10,                      
+  start = c(b1 = 2, b2 = 400000, b3 = 25000), 
+  control = gsl_nls_control(maxiter = 100000)
+)
+
+# as.matrix(coef(MGH10_nsl))
+cbind(
+  MGH10, 
+  predict(MGH10_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: MGH10')
+```
+
+### Eckerle4
+
+```{r}
+Eckerle4_nsl <- gsl_nls(
+  fn = y ~ (b1/b2) * exp((-1/2)*((x-b3)/b2)^2),   
+  data = Eckerle4,                      
+  start = c(b1 = 1, b2 = 10, b3 = 500), 
+  control = gsl_nls_control(maxiter = 100)
+)
+
+# as.matrix(coef(Eckerle4_nsl))
+cbind(
+  Eckerle4, 
+  predict(Eckerle4_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Eckerle4')
+```
+
+### Ratkowsky3
+
+```{r}
+Ratkowsky3_nsl <- gsl_nls(
+  fn = y ~ b1 / (1 + exp(b2-b3*x))^(1/b4), 
+  data = Ratkowsky3,                      
+  start = c(b1 = 100, b2 = 10, b3 = 1, b4 = 1), 
+  control = gsl_nls_control(maxiter = 100)
+)
+
+# as.matrix(coef(Ratkowsky3_nsl))
+cbind(
+  Ratkowsky3, 
+  predict(Ratkowsky3_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Ratkowsky3')
+```
+
+### Bennett5
+
+```{r}
+Bennett5_nsl <- gsl_nls(
+  fn = y ~ b1 * (b2 + x)^(-1/b3), 
+  data = Bennett5,                      
+  start = c(b1 = -2000, b2 = 50, b3 = 0.8), 
+  control = gsl_nls_control(maxiter = 100)
+)
+
+# as.matrix(coef(Bennett5_nsl))
+cbind(
+  Bennett5, 
+  predict(Bennett5_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: Bennett5')
+```
+
+### BoxBOD
+
+```{r}
+BoxBOD <- tribble(
+  ~y,~x,
+109, 1,
+149, 2,
+149, 3,
+191, 5,
+213, 7,
+224, 10
+)
+
+BoxBOD_nsl <- gsl_nls(
+  fn = y ~ b1 * (1 - exp(-1*b2 * x)), 
+  data = BoxBOD,     
+  start = c(b1 = 1, b2 = 1), 
+  control = gsl_nls_control(maxiter = 100),
+  algorithm = 'lmaccel', # デフォルトのlm(levenberg-Marquardt)では収束しない
+)
+
+# as.matrix(coef(BoxBOD_nsl))
+cbind(
+  BoxBOD, 
+  predict(BoxBOD_nsl, interval = "confidence", level = 0.95)
+) %>% 
+  ggplot(., aes(x, y))+
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2) +
+  geom_line(aes(x, fit),linetype = 'dashed') + 
+  geom_point(col = 'red') + 
+  ggtitle('Dataset: BoxBOD')
+
+```

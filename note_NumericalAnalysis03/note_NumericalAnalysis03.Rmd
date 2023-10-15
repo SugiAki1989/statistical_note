@@ -1,0 +1,419 @@
+---
+title: "Rで多変数ニュートンラフソン法を行う"
+pagetitle: "Rで多変数ニュートンラフソン法を行う"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではRを使ったニュートンラフソン法についてまとめておく。
+
+## 1変数ニュートンラフソン法
+
+$n$回微分可能な関数$f(x)$において、異なる2点$a,b$を取る時、テイラー展開で近似できる。
+
+$$
+f(x) = f(a) + \frac{f^{ (1)} (a)}{1!}(x-a)^{1} + \frac{f^{ (2) }(a)}{2!}(x-a)^{2} + \frac{f^{ (3) }(a)}{3!}(x-a)^{3} + \dots
+$$
+
+1次までの項で近似し、$a = x_{i}, x=x_{i+1}$とおくと、
+
+
+$$
+f(x_{i+1}) \approx f(x_{i}) + f^{(1)}(x_{i})(x_{i+1}-x_{i})
+$$
+
+となり、
+
+$$
+f(x_{i + 1}) = x_{i} - \frac{f(x_{i})}{f^{(1)}(x_{i})}
+$$
+
+上記の漸化式が得られる。これを許容誤差や試行回数を設定し、繰り返すことで、$f(x) = 0$となる$x$を求めることができる。これがニュートンラフソン法である。
+
+下記の関数の$f(x)=0$となる$x$を求める。
+
+```{r}
+f <- function(x) x*log(x)-x 
+curve(f(x), 0, 5)
+abline(h = 0)
+abline(v = 0)
+title(main = 'f(x) = x*log(x) - x')
+```
+
+さきほどの計算式をRで実装していく。
+
+```{r}
+x = 10
+iter = 5
+h = 0.01
+
+for (i in seq_along(1:iter)) {
+  df = (f(x + h) - f(x)) / h
+  x = x - f(x) / df
+  print(sprintf("iter%02d: x=%2.5f", i, x))
+}
+```
+
+組み込み関数の`uniroot()`の結果と、ほとんど同じ値が得られていることがわかる。
+
+```{r}
+# (1~10)の範囲でf(x)=0の解を求める
+uniroot(f, c(1, 10))
+```
+
+例えば下記の多項式は初期値によって結果が変わってしまう可能性がある。
+
+```{r}
+f <- function(x) 4*x^3 - 10*x
+curve(f(x), -2, 2)
+abline(h = 0)
+abline(v = -1.58114, col = 'red')
+abline(v = 0, col = 'green')
+abline(v =  1.58114, col = 'blue')
+title(main = 'f(x) = 4x^3 - 10x')
+```
+
+
+初期値は`10`として始める。
+
+
+```{r}
+x <- 10
+iter <- 10
+h <- 0.01
+
+for (i in seq_along(1:iter)) {
+  df = (f(x + h) - f(x)) / h
+  x = x - f(x) / df
+  print(sprintf("iter%02d: x=%2.5f", i, x))
+}
+```
+
+初期値は`-10`として始める。
+
+```{r}
+x <- -10
+iter <- 10
+h <- 0.01
+
+for (i in seq_along(1:iter)) {
+  df = (f(x + h) - f(x)) / h
+  x = x - f(x) / df
+  print(sprintf("iter%02d: x=%2.5f", i, x))
+}
+
+```
+
+初期値は`-0.5`として始める。
+
+```{r}
+x <- -0.5
+iter <- 10
+h <- 0.01
+
+for (i in seq_along(1:iter)) {
+  df = (f(x + h) - f(x)) / h
+  x = x - f(x) / df
+  print(sprintf("iter%02d: x=%2.5f", i, x))
+}
+
+```
+
+このように初期値で値が変わってしまう。`polyroot()`を使えば、先程の結果をすべて返してくれる。
+
+```{r}
+# 4*x^3 - 10*x + 0の係数を左から並べる
+polyroot(c(0, -10, 0, 4))
+```
+
+関数の最大値、最小値を求めたい場合は、`optimize()`で求めることができ、`$minimum`が最小となる$x$で、`$objective`はその時の$y$の値を表す。
+
+```{r}
+f <- function(x) x*log(x)-x 
+minval <- optimize(f, c(0, 5), maximum = FALSE)
+minval
+```
+
+可視化しておく。
+
+```{r}
+curve(f(x), 0, 5)
+abline(h = minval$objective)
+abline(v = minval$minimum)
+title(main = 'f(x) = x*log(x) - x')
+```
+
+## 2変数ニュートンラフソン法
+
+$n$回微分可能な関数$f(x, y)$において、テイラー展開は下記の通りとなる。
+
+$$
+f(a+h, b+k) = f(a,b) + \frac{1}{1!}f_{x}(a,b)(x-a) + \frac{1}{1!}f_{y}(a,b)(y-b) + \frac{1}{2!}\left \{ f_{xx}(a,b)(x-a)^{2} + 2f_{xy}(a,b)(x-a)(y-b) + f_{yy}(a,b)(y-b)^{2} \right \} + \dots
+$$
+
+$h$は$x$軸、$k$は$y$軸の微小変化を表し、$x=a+h \Leftrightarrow h=x-a, y=b+k \Leftrightarrow k=y-b$として1次の項で近似する。また、$n$回微分可能な関数$g(x, y)$があると、
+
+$$
+\begin{eqnarray}
+f(a+h,b+k) &\approx& f(a,b) + f_{x}(a,b)h + f_{y}(a,b)k  \\
+g(a+h,b+k) &\approx& g(a,b) + g_{x}(a,b)h + g_{y}(a,b)k  \\
+\end{eqnarray}
+$$
+となる。ここで、
+
+$$
+\begin{eqnarray}
+\Delta f &=& f(a+h,b+k) - f(a,b) \\
+\Delta g &=& g(a+h,b+k) - g(a,b) 
+\end{eqnarray}
+$$
+
+とおくと、
+
+$$
+\begin{eqnarray}
+\Delta f &\approx& f_{x}(a,b)h + f_{y}(a,b)k  \\
+\Delta g &\approx& g_{x}(a,b)h + g_{y}(a,b)k 
+\end{eqnarray}
+$$
+
+と表せる。ここで、表記を行列に直し、
+
+$$
+\begin{pmatrix}
+\Delta f \\
+\Delta g
+\end{pmatrix}
+=
+\begin{pmatrix}
+f_{x} & f_{y} \\
+g_{x} & g_{y}
+\end{pmatrix}
+\begin{pmatrix}
+h \\
+k
+\end{pmatrix}
+$$
+
+また、1変数のときと同様に、
+
+$$
+\begin{eqnarray}
+\Delta f &=& 0 - f(x_{i},y_{i}) \\
+\Delta f &=& 0 - g(x_{i},y_{i}) \\
+h &=& x_{i+1} - x_{i} \\
+k &=& y_{i+1} - y_{i} \\
+H &=& \begin{pmatrix}
+f_{x} & f_{y} \\
+g_{x} & g_{y}
+\end{pmatrix}
+\end{eqnarray}
+$$
+
+を使って、書き直す。$H$はヤコビアンである。
+
+$$
+\begin{pmatrix}
+0 - f(x_{i},y_{i}) \\
+0 - g(x_{i},y_{i}) 
+\end{pmatrix}
+=
+H
+\begin{pmatrix}
+x_{i+1} - x_{i} \\
+y_{i+1} - y_{i}
+\end{pmatrix}
+$$
+
+あとは、これをヤコビアンの逆行列$H^{-1}$を使って変形すれば、2変数のニュートンラフソン方の更新式が得られる。
+
+$$
+\begin{pmatrix}
+x_{i+1} \\
+y_{i+1} 
+\end{pmatrix}
+=
+\begin{pmatrix}
+x_{i} \\
+y_{i}
+\end{pmatrix}
+-H^{-1}
+\begin{pmatrix}
+f(x_{i},y_{i}) \\
+g(x_{i},y_{i})
+\end{pmatrix}
+$$
+
+Rで実装していく。解を求める関数を可視化しておく。
+
+```{r}
+fxy <- function(x,y) x^2 + y^2 - 1
+x <- y <- seq(-10, 10, 0.1)
+z <- outer(x,y,fxy)
+
+library(plot3D)
+persp3D(
+  x = x,
+  y = y,
+  z = z,
+  color.palette = heat.colors,
+  phi = 45,
+  theta = 200,
+  main = "3D perspective")
+```
+
+
+```{r}
+gxy <- function(x,y) x^3 - y
+z <- outer(x, y, gxy)
+persp3D(
+  x = x,
+  y = y,
+  z = z,
+  color.palette = heat.colors,
+  phi = 45,
+  theta = 200,
+  main = "3D perspective")
+```
+
+2変数ニュートンラフソン法で$f(x,y)=0, g(x,y)=0$を満たす$x,y$を求める。
+
+```{r}
+# fxy <- function(x,y) x^2 + y^2 - 1
+# gxy <- function(x,y) x^3 - y
+
+iter <- 5
+h <- 0.01
+init <- 1
+I <- t(t(rep(init,2)))
+
+for (i in seq_along(1:iter)) {
+  # 初期化
+  df <- dg <- c()
+  
+  for (j in 1:length(I)) {
+    vec = I
+    vec[j] = vec[j] + h
+    df <- c(df, (fxy(vec[1], vec[2]) - fxy(I[1], I[2])) / h )
+    dg <- c(dg, (gxy(vec[1], vec[2]) - gxy(I[1], I[2])) / h )
+  }
+  H <- t(matrix(c(df, dg), ncol = length(I), nrow = length(I)))
+  cat('---- Jacobian ----\n')
+  print(H)
+  cat('------------------\n')
+  I <- I - solve(H) %*% c(fxy(I[1], I[2]), gxy(I[1], I[2]))
+  print(sprintf("%d times: (x=%2.3f, y=%2.3f)", i, I[1], I[2]))
+}
+```
+
+1回目の更新の計算イメージは下記の通り。このような感じで繰り返されて更新される。
+
+![更新イメージ](/Users/aki/Documents/statistical_note/note_NumericalAnalysis03/2val_updateimage.png)
+
+`nleqslv`パッケージのの`nleqslv()`の結果とほとんど同じ値が得られていることがわかる。
+
+```{r}
+# fxy <- function(x,y) x^2 + y^2 - 1
+# gxy <- function(x,y) x^3 - y
+library(nleqslv)
+f <- function(x){ 
+  r = c(
+    x[1]^2 + x[2]^2 - 1, 
+    x[1]^3 - x[2]
+    )
+  return(r)
+}
+nleqslv(c(1, 1), f)$x
+```
+
+### 正規分布のパラメタ推定
+2変数ニュートンラフソン法を使えば、正規分布から生成されたデータから、パラメタを推定できる。解析的に正規分布の最尤推定量は計算できるので、わざわざ数値的に計算する必要はないが、練習のために行っておく。正規分布は、
+
+$$
+f(x; \mu, \sigma^2)=\frac{1}{\sqrt{2 \pi \sigma^2}}exp \left[-\frac{(x-\mu)^2}{2 \sigma^2}\right]
+$$
+
+であり、対数尤度関数は、
+
+$$
+\begin{eqnarray}
+log L &=& - \frac{n}{2}log(2 \pi \sigma^2) - \frac{1}{2 \sigma^2} \sum (x_{i}-\mu)^2 \\
+\frac{ \partial L(\mu, \sigma^2) }{ \partial \mu } &=& - \frac{1}{\sigma^2} \sum (x_{i}-\mu) = 0 \\
+\frac{ \partial L(\mu, \sigma^2) }{ \partial \sigma^2 } &=& - \frac{n}{2\sigma^2} + \frac{1}{2\sigma^4}\sum (x_{i}-\mu)^2 = 0 \\
+\end{eqnarray}
+$$
+
+となる。これを変形すれば、パラメタの最尤推定量の式が出てくるので、この式に対してニュートンラフソン法でパラメタを計算する。
+
+$$
+\begin{eqnarray}
+f(\mu, \sigma^2) &=& \sum x_{i} - n\mu = 0 \\
+g(\mu, \sigma^2) &=& \sum (x_{i} - \mu)^2 - n \sigma^2 = 0
+\end{eqnarray}
+$$
+Rで実装していく。ここでは学習率`eta`を利用してみた。
+
+```{r}
+# mu = 5, sigma2 = 9
+set.seed(1989)
+x <- rnorm(100, mean = 5, sd = sqrt(9))
+
+fmu <- function(z) sum(x) - length(x)*z[1]
+gsig <- function(z) sum((x-z[1])^2) - length(x)*z[2]
+
+iter <- 1000
+h <- 0.01
+I <- t(t(c(1,1)))
+eta <- 0.01
+
+for (i in seq_along(1:iter)) {
+  # 初期化
+  df <- dg <- c()
+  
+  for (j in 1:length(I)) {
+    vec = I
+    vec[j] = vec[j] + h
+    df <- c(df, (fmu(vec) - fmu(I)) / h )
+    dg <- c(dg, (gsig(vec) - gsig(I)) / h )
+  }
+  H <- t(matrix(c(df, dg), ncol = length(I), nrow = length(I)))
+
+  I <- I - eta*solve(H) %*% c(fmu(I), gsig(I))
+  if(i %% 50 == 0) {
+    print(sprintf("%d times: (mu=%2.3f, sigma2=%2.3f)", i, I[1], I[2]))
+  }
+}
+```
+
+実際の値とほとんど一致していることがわかる。(この精度ではだめなのかもしれないが。)
+
+```{r}
+list(
+  mean = mean(x),
+  sigma2 = var(x)
+  )

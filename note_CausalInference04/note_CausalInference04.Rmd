@@ -1,0 +1,505 @@
+---
+title: "差分の差分法"
+pagetitle: "差分の差分法"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  #out.width = 800,
+  #out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではRを使って因果推論に関する基礎的な理論から分析を実行するための方法をまとめている。ここでは差分の差分法の部分について、下記の矢内先生の資料(資料のライセンスに基づく)をもとに、差分の差分法をまとめている。私の記事は分析の方法メインなので、矢内先生の資料を読む方が数理も学べて良いと思う。
+
+- [KUT 計量経済学応用 統計的因果推論入門](https://yukiyanai.github.io/econometrics2/difference-in-differences.html)
+
+上記の資料のライセンスは下記の通り。
+
+> The text of this work is licensed under the [Creative Commons Attribution 4.0 International License](http://creativecommons.org/licenses/by/4.0/). The R Code in this work is licensed under the [MIT License](https://yukiyanai.github.io/econometrics2/license.txt).
+
+## 差分の差分法の数理
+差分の差分法の数理については下記が詳しいので、ここでは扱わない。
+
+- [矢内勇生 統計的因果推論入門](http://yukiyanai.github.io/jp/classes/econometrics2/contents/slides/metrics2_topic06_slides_pub.pdf)のp12
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://raw.githubusercontent.com/JaehyunSong/kobe_ci/master/Slide/Slide_Day3.pdf)のp8
+
+- [浅野正彦 重回帰分析12(差の差分法:DID) ](http://www.ner.takushoku-u.ac.jp/masano/class_material/waseda/keiryo/R29_reg12_DID.html#3_DID_%E3%82%92%E7%94%A8%E3%81%84%E3%81%9F%E5%9B%9E%E5%B8%B0%E5%88%86%E6%9E%90)
+
+### 並行トレンド仮定
+
+- [矢内勇生 統計的因果推論入門](http://yukiyanai.github.io/jp/classes/econometrics2/contents/slides/metrics2_topic06_slides_pub.pdf)のp20
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://raw.githubusercontent.com/JaehyunSong/kobe_ci/master/Slide/Slide_Day3.pdf)のp20
+
+
+## 準備
+
+必要なライブラリを読み込んでおく。
+
+```{r}
+library(tidyverse)
+library(modelr)
+library(modelsummary)
+library(fastDummies)
+```
+
+
+## ダミー変数と回帰モデル
+### 01ダミー(2値ダミー)
+差分の差分法を発展させると、ダミー変数などを取り込んだ回帰モデルがでてくるので、ダミー変数と回帰モデルのおさらいを行う。サンプルデータを用意する。何らかの時系列データである。ダミー変数の説明は下記を参考にしている。
+
+- [44の例題で学ぶ計量経済学](https://www.ohmsha.co.jp/book/9784274069314/)
+
+```{r}
+d1 <- read_csv("~/Desktop/dummy1.csv")
+d1
+```
+
+変数の関係を可視化する。`time=1993`に何かがあって、値が少し外れている。
+
+```{r}
+ggplot(d1, aes(x, y, col = as.factor(d))) + 
+  geom_point() + 
+  ylim(c(5000, 12000)) + 
+  scale_color_brewer(palette = "Set1", name = "Dummy") +
+  theme_classic()
+```
+
+さまざまな回帰モデルを作成してから、ダミー変数の役割を考える。`fit1`と`fit3`では、ダミー変数がモデルに含まれているかどうかが異なり、ダミー変数が1であれば切片である高さの差が`−2750`下がるという対応関係になっている。また、`fit4`ではダミー変数に該当するレコードを除外しているが、そのときに求める回帰係数は、ダミー変数を含むモデル`fit3`と同じ`4.087`である。
+
+本来であれば、ダミー変数で処理をするのではなく、`fit5`のようにダミーが表している変数をモデルに含められる方がよい。ただ、このような変数が観察できないので、ダミー変数に影響を偽装させることになる。この例であれば、ダミー変数は1993年とその他の年を区別するものなので、`z`以外の影響もダミー変数は含んでいると考える。
+
+```{r}
+fit1 <- lm(y ~ x, data = d1)
+fit2 <- lm(y ~ d , data = d1)
+fit3 <- lm(y ~ x + d, data = d1)
+fit4 <- lm(y ~ x, data = d1 %>% filter(d != 1))
+fit5 <- lm(y ~ x + z, data = d1)
+
+regs <- list(fit1 = fit1, fit2 = fit2, fit3 = fit3, fit4 = fit4, fit5 = fit5)
+msummary(regs, statistic = NULL, gof_omit = "AIC|BIC|Log.Lik.|F|RMSE")
+```
+
+文字ではわかりにくいので可視化しておく。`fit1`では外れ値の影響を受けて、直線が下に引っ張られているが、`fit4`では外れ値を削除して計算しているので、ダミー変数を含む`fit3`と同じ傾きになっている。
+
+```{r}
+sim <- d1 %>% 
+  data_grid(x, d) %>%
+  gather_predictions(fit1, fit2, fit3, fit4)
+
+ggplot() +
+  geom_point(data = d1, aes(x = x, y = y   , col = as.factor(d))) +
+  geom_line(data = sim, aes(x = x, y = pred, col = as.factor(d))) +
+  facet_grid( ~ model) + 
+  ylim(c(5000, 12000)) + 
+  scale_color_brewer(palette = "Set1", name = "Dummy") +
+  theme_classic()
+```
+
+ここでは、2値ダミーを扱ったが、ダミー変数は多値(3種類以上のダミーはベースが必要)でもよいし、ダミー変数を組み合わせることも可能である。ただ、ダミー変数が行っていることは(係数ダミーを除く)、切片をコントロールして、ダミー変数の組み合わせ分の回帰直線を上下させているといえる。
+
+### 四半期ダミー
+
+時系列データの分析では四半期ダミーが使われることが多い。ここでは、四半期ダミーを含むデータを用意する。`x,y`は対数である。
+
+```{r}
+d2 <- read_csv("~/Desktop/dummy2.csv")
+d2
+```
+
+この四半期ダミーの役割は、季節による変動を処理するために利用される。四半期は4つのカテゴリーがあるので、ここではQ4を基準にダミー変数を作成する。また、季節ダミーのような短期的な変動ではなく長期的な変動を処理するためにトレンド変数が利用されることも多い。
+
+`x`が1%増加すると、`y`が2.6%増加する。四半期ファミーの解釈は、Q4に比べると、Q1は9%増える。ややこしいがダミー変数は対数化してないので、ダミー変数が1単位増えると、`y`が9%(=100*β=0.09)増える。Q4に比べると、Q2は3.5%減る。
+
+トレンド変数は１期間ごとの変化率に対応するので、毎四半期ごとに0.3%(=100*β=−0.003)減ることになる。
+
+```{r}
+fit6 <- lm(y ~ x + q1 + q2 + q3 + trend, data = d2)
+msummary(list(fit6 = fit6), statistic = NULL, gof_omit = "AIC|BIC|Log.Lik.|F|RMSE")
+```
+
+ダミー変数のベースを変更したいときはファクタのレベルを調整する。
+
+```{r}
+d2 %>%
+  mutate(quater = fct_relevel(quater, "q1", "q2", "q3", "q4")) %>%
+  lm(y ~ x + quater + trend, data = .) %>% 
+  msummary(., statistic = NULL, gof_omit = "AIC|BIC|Log.Lik.|F|RMSE")
+
+```
+
+### 時間ダミー
+
+次は時間ダミーについてまとめておく。9県×3期間の合計27レコードがある。時系列としては3地点、クロスセクションとしては9県のデータ。
+
+年次を見ると`1999, 2004, 2009`は3つのカテゴリーもっているので、これは時間ダミーとして利用できる。
+
+```{r}
+d3 <- read_csv("~/Desktop/dummy3.csv")
+d3
+```
+
+時間ダミーを加えると、年によって切片が異なる定数項ダミー、つまり時間ダミーを含む式になる。時間ダミーが有意なことからも、年が変わると、`x`以外の何らかの要因が変わることで、時間ダミーが`y`を増加させているとわかる。
+
+時間ダミーは、地域の固有の要因だけではなく、サンプル全体に生じている変化の要因を含んでいる。時間ダミーは年次に共通している複数の説明要因を偽装している。そのため、回帰係数にはさまざまな効果が含まれている。このような理由から、年次によって、切片が異なる定数項ダミーの係数を時間効果(time effect)という。
+
+```{r}
+fit7 <- lm(lny ~ lnx + d2004 + d2009, data = d3)
+msummary(list(fit7 = fit7), stars = TRUE, statistic = NULL, gof_omit = "AIC|BIC|Log.Lik.|F|RMSE")
+```
+
+可視化しておく。
+
+```{r}
+sim <- d3 %>% 
+  data_grid(lnx, d2004, d2009) %>%
+  gather_predictions(fit7)
+
+ggplot() +
+  geom_point(data = d3, aes(x = lnx, y = lny   , col = as.factor(time))) +
+  geom_line(data = sim %>% filter(d2004 == 0 & d2009 == 0), aes(x = lnx, y = pred), col = "tomato") +
+  geom_line(data = sim %>% filter(d2004 == 1 & d2009 == 0), aes(x = lnx, y = pred), col = "limegreen") +
+  geom_line(data = sim %>% filter(d2004 == 0 & d2009 == 1), aes(x = lnx, y = pred), col = "royalblue") +
+  labs(col = "時間ダミー") + 
+  theme_classic()
+```
+
+### クロスセクションとダミー変数
+
+さきほどは時間ダミーに着目していたが、都道府県ももちろんダミー変数として扱える。さきほどのモデルに、都道府県ダミーを利用すると、地域固有の個別効果(individuals effects)を追加して推定できる。ここでは都道府県ダミーは$E$、時間ダミーを$T$とする。
+
+$$
+ln y_{i} = \alpha + \beta lnx_{i} + \sum_{r=2}^{9}\delta_{r}Er_{i} + \sum_{t=2}^{3}\gamma_{t}Tt_{i}
+$$
+
+時間ダミーを含む場合と含まない場合のモデルを作成する。`fit8`では`lnx`や個別効果が有意とされているが、`fit9`では時間ダミーを追加することで、個別効果が有意ではなくなっている。地域個別の要因はあまり関係なく、どちらかというと、時間ダミーが偽装している何らかの要因の変化が`lny`と関係しているようである。
+
+```{r}
+d33 <- d3 %>% 
+  select(i, pref, time, lny, lnx) %>% 
+  mutate(pref = fct_relevel(pref, 
+                            "tottori", "shimane", "okayama", "hiroshima", "yamaguchi", "tokushima", "kagawa", "ehime", "kochi"),
+         time = fct_relevel(as.character(time), "1999", "2004", "2009")
+         )
+
+fit8 <- lm(lny ~ lnx + pref, data = d33)
+fit9 <- lm(lny ~ lnx + pref + time, data = d33)
+msummary(list(fit8 = fit8, fit9 = fit9)
+         , stars = TRUE, statistic = NULL, gof_omit = "AIC|BIC|Log.Lik.|F|RMSE")
+```
+
+ここで、地域$r$を1から9として、時間$t$を1から3とすると、地域$r$の時間$t$での$y$は、$y_{rt}$と表現できる。$x$についも$x_{rt}$と表現できる。観測できない要因をダミー変数をお用いて、小屋いごとに特有で時間を通じて変化しない効果、例えば、地域ごとの地理的条件や歴史的背景などを偽装する。この場合、ダミー変数の係数は固定効果(fixed effects)とよばれる。さきほどと同じような発想で、モデル全体の切片をなくして、傾きは同じで、地域ごとに切片が異なる回帰式を推定する。
+
+$$
+ln y_{rt} =  \beta lnx_{rt} + \alpha_{r} + u_{rt} \quad (r = 1...9, t = 1...3)
+$$
+
+ようするに、展開すると下記のようになる。
+
+$$
+ln y_{rt} =  \beta lnx_{rt} + \alpha_{1}E1_{r} + \alpha_{2}E2_{r} + ... + \alpha_{9}E9_{r} +  u_{rt}
+$$
+```{r}
+d333 <- d3 %>% 
+  dummy_cols(select_columns = c("pref"), remove_first_dummy = FALSE) %>% 
+  select(time, lny, lnx, starts_with("pref_")) %>% 
+  mutate(time = fct_relevel(as.character(time), "2009", "2004", "1999"))
+
+fit10 <- lm(lny ~ 
+              0 + 
+              lnx + 
+              pref_tottori + 
+              pref_shimane + 
+              pref_okayama + 
+              pref_hiroshima + 
+              pref_yamaguchi + 
+              pref_tokushima + 
+              pref_kagawa + 
+              pref_ehime + 
+              pref_kochi + 
+              time, 
+            data = d333)
+msummary(list(fit10 = fit10), stars = TRUE, statistic = NULL, gof_omit = "AIC|BIC|Log.Lik.|F|RMSE")
+```
+## 差分の差分法
+### 差分の差分法の基礎
+
+[Card and Krueger (1994)](https://pubs.aeaweb.org/doi/pdf/10.1257/aer.90.5.1362)の論文で示されている最低賃金の上昇が失業に与える影響の研究データを利用する。この研究は、最低賃金の引き上げと雇用の関係を調べたもの。1992年にアメリカのニュージャージー州(NJ)で最低時給が4.25ドルから5.05ドルに上昇したのに対し、隣のペンシルバニア州(PA)では最低時給の上昇がなかったという事実を対照群として利用することで分析している。
+
+```{r}
+# fulltime_before:最低時給上昇前のフルタイム労働者の数
+# parttime_before:最低時給上昇前のパートタイム労働者の数
+# wage_before    :最低時給上昇前の賃金
+# fulltime_after :最低時給上昇後のフルタイム労働者の数
+# parttime_after :最低時給上昇後のパートタイム労働者の数
+# wage_after     :最低時給上昇後の賃金
+# full_prop_before = fulltime_before / (fulltime_before + parttime_before),
+# full_prop_after  = fulltime_after  / (fulltime_after + parttime_after)
+df <- read_csv("~/Desktop/public_mini.csv")
+df
+```
+
+ニュージャージー州(NJ)とペンシルバニア州(PA)の地理的関係は下記の通り。
+
+![引用: 在ニューヨーク日本国領事館](/Users/aki/Documents/statistical_note/note_CausalInference04/nypa.png)
+
+基礎集計として、最低時給上昇前の賃金`wage_before`と最低時給上昇後の賃金`wage_after`が5.05ドル未満のお店の割合を計算する。ペンシルバニア州は最低賃金の引き上げがなされてないので、前後であまり差がないが、ニュージャージー州のほとんどの店は最低賃金を5.05ドル以上にあげていることがわかる。
+
+```{r}
+df %>% 
+  group_by(state) %>% 
+  summarize(before = mean(wage_before < 5.05),
+            after = mean(wage_after < 5.05),
+            .groups = "drop")
+```
+
+単純に法律施行後のニュージャージー州とペンシルバニア州のフルタイム労働者の割合の差を計算すると、ニュージャージー州の方がフルタイム労働者の割合が4ポイント程度高いが、これはニュージャージー州はそもそも前後で上昇トレンドがあったからかもしれない。つまり、法律は関係なく、勝手にフルタイム労働者の割合が上がっていた可能性もある。
+
+```{r}
+df %>% 
+  group_by(state) %>% 
+  summarize(fulltime = mean(full_prop_after),
+            .groups = "drop") %>% 
+  pivot_wider(names_from = state, values_from = fulltime) %>% 
+  set_names(c("NJ_after","PA_after")) %>% 
+  mutate(diff_after = NJ_after - PA_after)
+```
+
+次に法律施行前後のニュージャージー州のフルタイム労働者の割合の差を計算する。ニュージャージー州のフルタイム労働者の前後比較では、2.4ポイント増加している。これも、法律は関係なく、勝手にフルタイム労働者の割合が上がっていた可能性もある。
+
+```{r}
+df %>% 
+  filter(state == "NJ") %>% 
+  # summarize(across(.cols = starts_with("full_"), mean))でもOK
+  summarise(full_prop_before = mean(full_prop_before),
+            full_prop_after = mean(full_prop_after),
+            .groups = "drop") %>% 
+  mutate(diff_before_after = full_prop_after - full_prop_before)
+```
+
+つまり、法律は関係なく、勝手にフルタイム労働者が増加している問題を対処しないといけない。このためにペンシルバニア州のデータを利用して差分の差分法を行う。法律は関係なく、勝手に上がっているならば、ペンシルバニア州も勝手に上がってると考えられるので、ペンシルバニア州の上がった分を考慮した上で、ニュージャージー州のフルタイム労働者の増加を検討する。
+
+```{r}
+df2 <- df %>% 
+  group_by(state) %>%
+  summarize(across(.cols = starts_with("full_"), mean),
+            .groups = "drop") %>% 
+  mutate(diff_before_after = full_prop_after - full_prop_before)
+df2
+```
+
+2点間の可視化を行うとわかるが、個体間比較や前後比較の推定値より大きくなったは、ペンシルバニア州の前後で、後ろの方が割合が下がっているため、差分の差分法による推定値が、個体間比較や前後比較の推定値より大きくなる。
+
+```{r}
+df2 %>% 
+  select(- diff_before_after) %>% 
+  pivot_longer(cols = starts_with("full"),
+               names_to = "before_after",
+               names_prefix = "full_prop_",
+               values_to = "prop") %>% 
+  ggplot(aes(x = before_after, y = prop, group = state)) +
+  geom_line(aes(color = state)) +
+  geom_point(aes(shape = state)) +
+  geom_text(aes(x = before_after, y = prop+0.005, label = round(prop,3))) + 
+  ylim(0.25, 0.35) +
+  theme_bw()
+```
+
+ニュージャージー州とペンシルバニア州の前後差`diff_before_after`を使って更に、差を計算することで、差分の差分法による推定値が計算できる。最低賃金の引き上げは、フルタイム労働者の割合を6.2ポイント増加させる結果となった。
+
+```{r}
+df2 %>% 
+  select(state, diff_before_after) %>% 
+  pivot_wider(names_from = state, values_from = diff_before_after) %>% 
+  set_names(c("NJ_after","PA_after")) %>% 
+  mutate(did = NJ_after - PA_after)
+```
+
+これは回帰係数の交互作用の回帰係数と一致する。
+
+```{r}
+df %>% 
+  select(state, starts_with("full_")) %>% 
+  pivot_longer(cols = starts_with("full"),
+               names_to = "time",
+               names_prefix = "full_prop_",
+               values_to = "prop") %>% 
+  mutate(D = if_else(state == "NJ", 1, 0),
+         P = if_else(time == "after", 1, 0)) %>% 
+  lm(prop ~ D * P, data = .) %>% 
+  tidy() %>% 
+  select(term, estimate)
+```
+
+簡単に図解すると下記のようなイメージ。黄色が介入効果、赤色が時間効果、緑色が介入効果と時間効果の効果となるので、交互作用項の回帰係数がDID推定値と解釈できる。
+
+![図: DIDと回帰係数](/Users/aki/Documents/statistical_note/note_CausalInference04/did.png)
+
+以上より、1992年4月にアメリカのニュージャージー州で最低賃金が引き上げられたため、フルタイム労働者の割合は6.1%ポイント増えたと考えられる。
+
+### 差分の差分法の発展
+
+Mastering 'Metricsの[Angrist and Pischke(2009)の5.2節(pp.191-203)](https://www.masteringmetrics.com/)にある法定飲酒年齢 (minimum legal drinking age; MLDA)の変更が18歳から20歳までの若者の死亡率との関連を調べた研究のデータを利用する。このデータは州と年のパネルデータ。
+
+```{r}
+# すべての死	All deaths	dtype = 1
+# 自動車事故による死	Motor vehicle accidents	dtype = 2
+# 自殺	Suicide	dtype = 3
+# 内蔵疾患による死	All internal causes	dtype = 6
+
+df <- read_csv("~/Desktop/deaths.csv")
+df2 <- df %>% 
+  filter(year <= 1983,
+         agegr == 2,      # 18-21 years old
+         dtype == 1) %>%  # all deaths      
+  mutate(state = factor(state),
+         year_fct = factor(year))
+df2 %>% 
+  select(year, state, age, mrate, legal) %>% 
+  filter(state == 1)
+```
+
+死亡率の変化を可視化しておく。可視化した結果を見る限り死亡率は下がっているようにも見える。
+
+```{r}
+ggplot() +
+  geom_line(data = df2, aes(x = year, y = mrate, group = state)) +
+  geom_line(data = df2 %>% group_by(year) %>% summarise(mean_mrate = mean(mrate)), 
+            aes(x = year, y = mean_mrate), col = "tomato", size = 2) +
+  theme_classic()
+```
+
+このデータは単純に差分の差分法を利用できない。なぜならば、処置のパターンが1つではなく、処置のタイミングが州によって異なるためである。詳細は参照先の[こちら](https://yukiyanai.github.io/econometrics2/difference-in-differences.html)を確認のこと。回帰分析を利用してDID回帰を行うが、さきほどの回帰モデルには下記が必要だった。
+
+- 処置群と統制群の個体差の区別を`D`: `state`
+- 時間前後の区別を表す`P`: `year_fct`
+- 処置後の観測値を表す`D×P`: ？
+
+この分析では、処置後の観測値であるかどうかは、これら2つの交差項では表現できない。そのため、研究データでは、この問題を解決するために、18歳から20歳の人が飲酒できる割合を表す変数`legal`を作ることで対処している。
+
+この変数は、`t`年の`s`州で、18歳から20歳までの人口のうち何割が合法的に飲酒できるかを表している。MLDAが21歳だとすると、20歳以下で合法的に飲酒できる人はいないので、この変数の値は0になる。MLDAが18歳なら、18歳以上の全員が合法的に飲酒できるので、この変数の値は1になる。この値が大きいほど、18歳から20歳の人が飲酒しやすいことを意味する。MLDAを引き下げるという処置を実行すると、`legal`の値は大きくなる。
+
+なんとなくわかるようでわからない感じのわたしの理解力助けるためにメモを残しておく。正確かどうかはわからない。下記の州(`state=1`)では、1975年から飲酒年齢を引き下げている。おそらく19歳から飲酒可能にしていると思われる。1970年から1974年までは、「18歳から20歳までの人口」のうち何割が合法的に飲酒できるかを表す`legal`は0である、つまり、この期間に「19歳から20歳」も人はそもそも飲酒が法律的に認められない。
+
+1975年は何かあったのか、年の途中から飲酒年齢が引き下げられたのかわからないが、数値が他の年と比べて小さいため、年の途中でMLDAが変更されたために調整されていると思われる。その他の年では、だいたい67%なので、「19歳から20歳」の人口を「18歳から20歳」の人口で割っていると思われる。超絶簡単なイメージで説明すると、各年代100人いて、毎年100人が18歳(in)になり、100人が21歳(out)になるのであれば、18歳から20歳という範囲`term`には、常に一定inoutが発生することで、`legalは200(19-20)/300(18-20)=0.66`となる。
+
+```{r}
+#     year state mrate legal
+#    <dbl> <fct> <dbl> <dbl>
+#  1  1970 1      154. 0    
+#  2  1971 1      162. 0    
+#  3  1972 1      159. 0    
+#  4  1973 1      141. 0    
+#  5  1974 1      143. 0    
+#  6  1975 1      148. 0.29
+#  7  1976 1      133. 0.66
+#  8  1977 1      146. 0.66
+#  9  1978 1      139. 0.66
+# 10  1979 1      135. 0.66
+# 11  1980 1      120. 0.67
+# 12  1981 1      106. 0.67
+# 13  1982 1      118. 0.67
+# 14  1983 1      128. 0.68
+```
+
+飲酒引き上げをいつから行ったかを調べると、`legal`が14年に渡りすべて`0`の州が12州あるので、おそらくこれらの州は飲酒年齢を引き下げていない。
+
+```{r}
+df2 %>% 
+  group_by(state) %>% 
+  select(year, state, mrate, legal) %>% 
+  mutate(tmp = ifelse(legal > 0, 1, 0),
+         cond_start = if_else(tmp == 1, year, NA_real_),
+         is_raw = if_else(all(is.na(cond_start)), FALSE, TRUE),
+         start_year = if_else(is_raw == FALSE, min(year), min(cond_start, na.rm = TRUE))
+  ) %>%
+  ungroup() %>% 
+  distinct(start_year, state, is_raw) %>% 
+  group_by(start_year, is_raw) %>% 
+  summarise(cnt = n(),
+            state_group = paste0(state, collapse = ",")) %>% 
+  arrange(start_year)
+```
+
+
+データへの理解が深まったところで、DID回帰を行う。モデルは下記の通り。
+
+$$
+y_{st} = \alpha + \delta LEGAL_{st} + \sum_{k=1}^{50}\beta_{k}STATE_{ks} + \sum_{j=1971}^{1983}\gamma_{j}YEAR_{jt} + e_{st}
+$$
+
+|記号|内容|
+|:---|:---|
+|$s$=[1,2,3,...,51]|州($s$=51は D.C.)|
+|$t$=[1970,1972,...,1983]|年(1970年は参照カテゴリ)|
+|$Y_{st}$|$t$年の$s$州での18から20歳の死者数(10万人あたり)|
+|$LEGAL_{st}$|処置効果(18歳から20歳の飲酒可能な人の割合)|
+|$STATE_{ks}$|$k=s$の時に1(D.C.を除く50州のダミー)|
+|$YEAR_{jt}$|$j=t$の時に1(1970年を除く13個の年ダミー)|
+
+ダミー変数も明示して、どのようなモデルなのかわかりやすくしておく。
+
+```{r}
+lm(mrate ~ 0 + legal + state + year_fct, data = df2) %>% 
+  tidy() %>% 
+  select(term, estimate, std.error) %>% 
+  as.data.frame()
+```
+
+平均処置効果`legal`の効果は`10.8`と推定された。18歳から20歳の人が飲酒できるようになると、10万人あたりの死者数が約11人増えたことを意味する。つまり、MLDAを下げると、飲酒可能な人の中で死亡率があがることにあんる。
+
+このような時系列データで回帰モデルを計算する際は、同一州内の観測値が類似する(系列相関)という問題が発生し、標準誤差を過小に推定してしまう。このような州の類似性をクラスタとして調整して計算するクラスタ標準誤差(cluster-robust standard error)を利用するのが望ましい。`estimatr`パッケージの`lm_robust`関数で計算できる。`state56`などが出てきて変な感じもするが、これは`state`が連番ではなく欠番があるため。
+
+```{r}
+library(estimatr)
+lm_robust(mrate ~ 0 + legal + state + year_fct, data = df2, clusters = state, se_type = "CR2") %>% 
+  tidy() %>% 
+  select(term, estimate, std.error) %>% 
+  as.data.frame()
+```
+
+`lm_robust`関数で計算することで、標準誤差が大きくなっている。差分の差分法では、平行トレンドが仮定されるが、今回のように個体と期間の数が多い場合、個体ごとの時間トレンドの違いを説明する変数をモデルに加えることで、並行トレンド仮定を緩めて平均置効果を推定する。
+
+下記の分析では、各州の時間トレンドは線形、つまり、処置がないときの死亡率は、変化しない、単調増加、単調減少のどれかであることを仮定する。州ごとの時間トレンドは`state × year`で表している。`year_fct`ではないので注意。`state`は個体効果、`year_fct`は時間効果、`state:year`は州ごとのトレンド効果という感じ。
+
+```{r}
+lm_robust(mrate ~ 0 + legal + state + year_fct + state:year, data = df2, clusters = state, se_type = "CR2") %>% 
+  tidy() %>% 
+  select(term, estimate, std.error) %>% 
+  as.data.frame()
+```
+
+他にもDID回帰は下記のように発展版がある。画像は立教大学の安藤先生の下記のスライドより引用している。
+
+- [計量経済分析2 講義10差の差(DID)法](https://sites.google.com/site/michihito7ando/lectures)
+
+![DID回帰の発展版](/Users/aki/Documents/statistical_note/note_CausalInference04/did_advamced.png)
+
+## 参考文献および参考資料
+
+- [矢内勇生 統計的因果推論入門](https://yukiyanai.github.io/econometrics2/)
+- [Song Jaehyun 計量政治学方法論I (実証分析と方法)](https://github.com/JaehyunSong/kobe_ci)
+- [計量経済分析2 講義10差の差(DID)法](https://sites.google.com/site/michihito7ando/lectures)
+- [44の例題で学ぶ計量経済学](https://www.ohmsha.co.jp/book/9784274069314/)

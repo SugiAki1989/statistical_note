@@ -1,0 +1,202 @@
+---
+title: "重回帰分析と準ニュートン法"
+pagetitle: "重回帰分析と準ニュートン法"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートでは重回帰分析のパラメタを準ニュートン法で計算する方法についてまとめておく。
+
+## 準ニュートン法
+
+ニュートン法はテイラー展開で2次近似して使用することが多いらしく、2次近似するということは、2階の偏微分が必要になる。偏微分はパラメタが多くなると計算が大変になるため、その点を改善しているのが準ニュートン法(Quasi-Newton Method)とのこと。準ニュートン法はヤコビアンやヘッシアンの近似行列を利用することで、更新を行う。ここではQuasi-Newton method of Broydenの方法をまとめておく。準ニュートン法には他にも多くの近似行列を計算する手法がある。
+
+$$
+\begin{eqnarray}
+s_{t} &=& X_{t+1} - X_{t} \\
+y_{t} &=& F_{t+1}(X_{t+1}) - F_{t}(X_{t}) \\
+H_{t+1} &=& H_{t} + \left( \frac{s_{t} - H_{t} y_{t}}{s^{T}_{t}H_{t}y_{t}}\right)s^{T}_{t}H_{t} \\
+F(X) &=& \begin{pmatrix}
+f_{1}(x_{1}, \dots, x_{n}) \\
+f_{2}(x_{1}, \dots, x_{n}) \\
+\vdots \\
+f_{n}(x_{1}, \dots, x_{n}) \\
+\end{pmatrix}
+\end{eqnarray}
+$$
+
+## 重回帰分析
+
+細かい説明はしないが、重回帰分析は複数の説明変数から目的変数の値を計算する。説明変数を下記の行列で表し、
+
+$$
+\begin{eqnarray}
+\boldsymbol{ X } = \left(
+  \begin{array}{ccc}
+    1 & \cdots & x_{ 1k } \\
+    \vdots & \ddots & \vdots \\
+    1 & \ldots & x_{ nk }
+  \end{array}
+\right)
+\end{eqnarray}
+$$
+
+目的変数をベクトルとして定める。
+
+$$
+\begin{eqnarray}
+\boldsymbol{ Y } = \left(
+  \begin{array}{c}
+    y_{ 1 } \\
+    \vdots  \\
+    y_{ n }
+  \end{array}
+\right)
+\end{eqnarray}
+$$
+
+そして、パラメタベクトルを用いて、
+
+$$
+\begin{eqnarray}
+\boldsymbol{ \beta } = \left(
+  \begin{array}{c}
+    \beta_{ 1 } \\
+    \vdots  \\
+    \beta_{ k }
+  \end{array}
+\right)
+\end{eqnarray}
+$$
+
+下記の線形重回帰式を推定する。$\boldsymbol{ e }$は誤差であり、
+
+$$
+\boldsymbol{ Y } = \boldsymbol{ X } \boldsymbol{ \beta } + \boldsymbol{ e } \Leftrightarrow \boldsymbol{ e } = \boldsymbol{ Y }  - \boldsymbol{ X } \boldsymbol{ \beta } 
+$$
+
+これを最小にするパラメタを求める。この2乗誤差を最小にするために、各パラメタで偏微分する。
+
+$$
+\begin{eqnarray}
+\frac{ \partial \boldsymbol{ e^{\prime} }\boldsymbol{ e } }{ \partial \boldsymbol{ \beta } } &=& \boldsymbol{ 0 }
+\end{eqnarray}
+$$
+
+2乗誤差は下記の形に展開でき、
+
+$$
+\boldsymbol{ e^{\prime} }\boldsymbol{ e } = \boldsymbol{ y^{\prime} }\boldsymbol{ y } - 
+\boldsymbol{ y^{\prime} }\boldsymbol{ X }\boldsymbol{ \beta } - 
+\boldsymbol{ \beta^{\prime} }\boldsymbol{ X^{\prime} }\boldsymbol{ y } +
+\boldsymbol{ \beta^{\prime} }\boldsymbol{ X^{\prime} }\boldsymbol{ X }\boldsymbol{ \beta}
+$$
+
+偏微分すると、
+
+$$
+\begin{eqnarray}
+\frac{ \partial \boldsymbol{ e^{\prime} }\boldsymbol{ e } }{ \partial \boldsymbol{ \beta } } =
+-2\boldsymbol{ X^{\prime} }\boldsymbol{ y }+ 2\boldsymbol{ X^{\prime} }\boldsymbol{ X }\boldsymbol{ \beta } = \boldsymbol{ 0 }
+\end{eqnarray}
+$$
+
+最終的には下記の推定式が得られる。
+
+$$
+\begin{eqnarray}
+-2\boldsymbol{ X^{\prime} }\boldsymbol{ y }+ 2\boldsymbol{ X^{\prime} }\boldsymbol{ X }\boldsymbol{ \beta } = \boldsymbol{ 0 } \Leftrightarrow \boldsymbol{ \beta }=(\boldsymbol{ X^{\prime} }\boldsymbol{ X })^{-1}\boldsymbol{ X^{\prime} }\boldsymbol{ y}
+\end{eqnarray}
+$$
+
+## 重回帰分析と勾配降下法
+
+勾配法で計算したい回帰係数の値を予め確認しておく。
+
+```{r}
+library(palmerpenguins)
+library(tidyverse)
+
+penguins_dropna <- penguins %>% drop_na()
+Y <- penguins_dropna %>% pull(body_mass_g)
+X <- penguins_dropna %>% 
+  mutate(x0 = 1) %>% 
+  select(x0, x1 = bill_length_mm, x2 = bill_depth_mm) %>%
+  as.matrix()
+
+solve(t(X)%*%X)%*%t(X)%*%Y
+```
+
+勾配法では少し時間がかかるが、期待したパラメタが計算できている。
+
+```{r}
+B <- rep(50, ncol(X))
+eta <- 10^-6
+iter <- 1000000
+
+for(i in 1:iter){
+  B <- B - eta * (-2*t(X) %*% Y + 2*t(X) %*% X %*% B)
+  if (i %% 100000 == 0) cat(sprintf("%d times: (x0=%2.3f, x1=%2.3f, x2=%2.3f)\n",
+                                  i, B[1], B[2], B[3]))
+  # 2乗誤差
+  # Y_hat <- X %*% beta
+  # S <- sum((Y - Y_hat)^2)
+}
+```
+
+## 重回帰分析と準ニュートン法
+
+準ニュートン法は、勾配法よりも収束が早く、期待したパラメタも計算できている。
+
+```{r}
+# Quasi-Newton Algorithm of Broyden
+f <- function(b){ c(-2*t(X) %*% Y + 2*t(X) %*% X %*% b) }
+
+iter <- 100000
+eta <- 0.001
+B <- rep(10, ncol(X))
+H <- diag(f(B))
+
+for(i in seq_along(1:iter)){
+  # if(sum(abs(f(B))) > 10^(-4)){ # }
+    B_pre <- B
+    B <- B - eta * H %*% f(B)
+    s <- B - B_pre
+    y <- f(B) - f(B_pre)
+    H <- H + ((s - H %*% y) / as.numeric(t(s) %*% H %*% y)) %*% t(s) %*% H
+    if (i %% 10000 == 0) cat(sprintf("%d times: (x0=%2.3f, x1=%2.3f, x2=%2.3f)\n",
+                                        i, B[1], B[2], B[3]))
+    
+    if(sum(abs(f(B))) < 0.0001){
+      cat(sprintf("The algorithm converged.\n%d times: (x0=%2.3f, x1=%2.3f, x2=%2.3f)",
+                  i, B[1], B[2], B[3]))
+      break
+      }
+}
+```
+

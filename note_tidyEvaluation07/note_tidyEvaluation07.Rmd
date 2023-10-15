@@ -1,0 +1,276 @@
+---
+title: "RのTidy evaluation_07"
+pagetitle: "RのTidy evaluation_07"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+## はじめに
+この記事はTidy evaluationについて学習した内容を自分の備忘録としてまとめたものです。今回は、海外の方がTidy evaluationを使って作られた関数を参考にしながら、書き直したり、機能を追加したりしながら、Tidy evaluationを学びました。
+
+### `freq_tbl`
+[Once Upon Data](https://www.onceupondata.com/2017/08/12/my-first-steps-into-the-world-of-tidyeval/)で紹介されている関数は`freq_tbl`です。これは、名前の通り、頻度を集計してくれる関数で`table()`と似ています。リンク先の関数をそのまま転記します。
+
+```R:R
+freq_tbl <- function(df, ..., percent = TRUE){
+  group <- quos(...)
+  
+  out <- df %>% 
+    group_by(!!!group) %>% 
+    summarise(freq = n()) %>% 
+    arrange(desc(freq)) %>% 
+    ungroup()
+  
+  if(percent == TRUE){
+    out <- out %>% 
+      mutate(percentage = 100*freq/sum(freq))
+  }
+  return(out)
+}
+```
+
+この関数を参考にさせていただき、外部クオートに変更し、グループ変数に`NA`が入っていると、それをトップに表示させる処理を追加してみた。外部か内部かはそのときに適している方を選べばいいと思いますが`...`で渡すので、諸々注意。
+
+```R:R
+freq_tbl2 <- function(df, group_vars, na_top = FALSE, percent = FALSE){
+  stopifnot(
+    is.list(group_vars)
+  )
+  
+  out <- df %>% 
+    group_by(!!!group_vars) %>% 
+    summarise(freq = n()) %>%
+    arrange(desc(freq)) %>% 
+    ungroup()
+  
+  if(na_top == TRUE){
+    out <- out %>% 
+      arrange(!is.na(!!!group_vars[[1]]),
+              desc(freq))
+  }
+  
+  if(percent == TRUE){
+    out <- out %>% 
+      mutate(per = 100*freq/sum(freq))
+  }
+  return(out)
+}
+```
+
+`na_top = TRUE`にすると、並び順が**1つ目**のグループ化変数に`NA`があれば、`NA`から並ぶようになる。ここらへんは、柔軟に`NA`を調べたい変数を別に選択できるようにしたほうがいいかもしれない。
+
+```R:R
+freq_tbl2(starwars, 
+          group_vars = vars(hair_color, gender),
+          na_top = TRUE,
+          percent = TRUE)
+
+# A tibble: 20 x 4
+   hair_color    gender         freq   per
+   <chr>         <chr>         <int> <dbl>
+ 1 NA            NA                3  3.45
+ 2 NA            hermaphrodite     1  1.15
+ 3 NA            male              1  1.15
+ 4 none          male             29 33.3 
+ 5 brown         male             12 13.8 
+ 6 black         male             10 11.5 
+ 7 brown         female            6  6.90
+ 8 none          female            6  6.90
+ 9 black         female            3  3.45
+10 blond         male              3  3.45
+11 white         male              3  3.45
+12 none          none              2  2.30
+13 auburn        female            1  1.15
+14 auburn, grey  male              1  1.15
+15 auburn, white male              1  1.15
+16 blonde        female            1  1.15
+17 brown, grey   male              1  1.15
+18 grey          male              1  1.15
+19 unknown       female            1  1.15
+20 white         female            1  1.15
+```
+
+### `jetlag`
+RStudioのRomain Francoisさんのブログ[https://purrple.cat/](https://purrple.cat/blog/2018/03/02/multiple-lags-with-tidy-evaluation/)で紹介されている関数は`jetlag`です。これは、`dplyr::lag`をしてした回数分、一気にずらす関数です。リンク先の関数をそのまま転記します。
+
+```R:R
+d <- data_frame(x = seq_len(100))
+
+jetlag <- function(data, variable, n=10){
+  variable <- enquo(variable)
+  
+  indices <- seq_len(n)
+  quosures <- map( indices, ~quo(lag(!!variable, !!.x)) ) %>% 
+    set_names(sprintf("lag_%02d", indices))
+  
+  mutate( data, !!!quosures )
+
+}
+
+jetlag(d, x, 3)
+## # A tibble: 100 x 4
+##        x lag_01 lag_02 lag_03
+##    <int>  <int>  <int>  <int>
+##  1     1     NA     NA     NA
+##  2     2      1     NA     NA
+##  3     3      2      1     NA
+##  4     4      3      2      1
+##  5     5      4      3      2
+##  6     6      5      4      3
+##  7     7      6      5      4
+##  8     8      7      6      5
+##  9     9      8      7      6
+## 10    10      9      8      7
+## # ... with 90 more rows
+```
+
+とくに何も思いつかなっかたので、表現式の部分と`lag()`から`lead()`に変更してみた。
+
+```R:R
+library(rlang)
+df <- tibble(x = 1:10, dt = Sys.Date() + lubridate::days(1:10))
+
+jetlead <- function(data, val, n = 1) {
+  val <- enquo(val)
+  index <- seq_len(n)
+  
+  lag_funcs <-
+    purrr::map(index, function(var) {
+      expr(dplyr::lead(!!val,!!var))
+    }) %>%
+    purrr::set_names(sprintf("lead_%s_%02d",quo_text(val), index))
+  
+      data %>% mutate(!!!lag_funcs)
+}
+
+df %>% jetlead(val = x, n = 5)
+# A tibble: 10 x 7
+       x dt         lead_x_01 lead_x_02 lead_x_03 lead_x_04 lead_x_05
+   <int> <date>         <int>     <int>     <int>     <int>     <int>
+ 1     1 2019-08-11         2         3         4         5         6
+ 2     2 2019-08-12         3         4         5         6         7
+ 3     3 2019-08-13         4         5         6         7         8
+ 4     4 2019-08-14         5         6         7         8         9
+ 5     5 2019-08-15         6         7         8         9        10
+ 6     6 2019-08-16         7         8         9        10        NA
+ 7     7 2019-08-17         8         9        10        NA        NA
+ 8     8 2019-08-18         9        10        NA        NA        NA
+ 9     9 2019-08-19        10        NA        NA        NA        NA
+10    10 2019-08-20        NA        NA        NA        NA        NA
+```
+
+`mutate()`で使う場合は、関数を書き直して、`mutate()`内で`!!!(bang-bang-bang)`する。
+
+```R:R
+jetlead <- function(data, val, n = 1) {
+  val <- enquo(val)
+  index <- seq_len(n)
+  
+  lag_funcs <-
+    purrr::map(index, function(var) {
+      expr(dplyr::lead(!!val, !!var))
+    }) %>%
+    purrr::set_names(sprintf("lead_%s_%02d",quo_text(val), index))
+}
+
+df %>% 
+  mutate(!!!jetlead(val = x, n = 2),
+         !!!jetlead(val = dt, n = 2))
+
+       x dt         lead_x_01 lead_x_02 lead_dt_01 lead_dt_02
+   <int> <date>         <int>     <int> <date>     <date>    
+ 1     1 2019-08-11         2         3 2019-08-12 2019-08-13
+ 2     2 2019-08-12         3         4 2019-08-13 2019-08-14
+ 3     3 2019-08-13         4         5 2019-08-14 2019-08-15
+ 4     4 2019-08-14         5         6 2019-08-15 2019-08-16
+ 5     5 2019-08-15         6         7 2019-08-16 2019-08-17
+ 6     6 2019-08-16         7         8 2019-08-17 2019-08-18
+ 7     7 2019-08-17         8         9 2019-08-18 2019-08-19
+ 8     8 2019-08-18         9        10 2019-08-19 2019-08-20
+ 9     9 2019-08-19        10        NA 2019-08-20 NA        
+10    10 2019-08-20        NA        NA NA         NA     
+```
+
+### `plot_cat_relationship`
+[nonstandardard deviations](http://www.lreding.com/nonstandard_deviations/2017/09/21/explor_vis/)というブログで紹介されている関数は`plot_cat_relationship`です。これは、カテゴリと数値変数を一気に箱ひげで可視化する関数です。リンク先の関数をそのまま転記します。
+
+```R:R
+df <- read_csv("http://datadryad.org/bitstream/handle/10255/dryad.121150/Bolnick_data.csv?sequence=2")
+plot_cat_relationship <- function(data, categorical_variable) {
+  
+  numeric_cols <- names(data)[map_lgl(data, is.numeric)]
+  enquo_cat <- enquo(categorical_variable)
+  
+  data %>% 
+    select(!!enquo_cat, numeric_cols) %>%
+    gather(variable, value, -!!enquo_cat) %>%
+    ggplot(aes_string(x = quo_name(enquo_cat), y = "value", color = quo_name(enquo_cat))) +
+    geom_boxplot() +
+    facet_wrap(~variable) +
+    coord_flip() +
+    scale_color_brewer(type = "qual", palette = "Dark2", guide = F)
+}
+
+# note that `Model_color` is not in quotes
+plot_cat_relationship(df, Model_color)
+```
+[f:id:AZUMINO:20190810135908p:plain]
+
+主な変更点は、可視化する数値変数を選択した上で可視化するようにした点くらいです。
+
+```R:R
+multi_box <- function(data, cate_var, num_vars) {
+  cate_var <- enquo(cate_var)
+
+#  qq_show(
+  data %>% 
+    select(!!cate_var, !!!num_vars) %>%
+    gather(variable, value, -!!cate_var) %>%
+    ggplot(aes_string(x = quo_name(cate_var), 
+                      y = "value", 
+                      color = quo_name(cate_var))) +
+    geom_boxplot() +
+    facet_wrap(~ variable) +
+    coord_flip() +
+    scale_color_brewer(palette = "Set1") + 
+    theme_bw()
+#  )
+}
+
+multi_box(
+  iris,
+  cate_var = Species,
+  num_vars = vars(Sepal.Length,
+                  Sepal.Width,
+                  Petal.Length,
+                  Petal.Width)
+)
+```
+[f:id:AZUMINO:20190810140251p:plain]
+
+今回はここまで。変更していると、どう書くのが最適なのかがわからない…tidyevalの知識が不足しているため、動くが最適かどうかがわからない状態なので、次は自分の中でまとまっていない表現式の部分をおさらいすると思う。

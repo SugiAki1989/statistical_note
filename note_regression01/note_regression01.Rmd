@@ -1,0 +1,115 @@
+---
+title: "重回帰の偏回帰係数を分解する"
+pagetitle: "重回帰の偏回帰係数を分解する"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここでは重回帰分析の偏回帰係数を分解する。偏回帰係数は「他の変数の影響を除いた影響」という表現をよく見るが、これがどのような意味なのか、数値例をまとめておく。予め必要なデータをここで読み込んでおく。
+
+```{r}
+library(palmerpenguins)
+library(tidyverse)
+library(broom)
+
+d <- penguins %>% 
+  dplyr::filter(species == 'Adelie' & sex == 'male' & year == '2007') %>% 
+  tidyr::drop_na() %>% 
+  dplyr::select(x1 = bill_length_mm,
+         x2 = bill_depth_mm,
+         x3 = flipper_length_mm,
+         y = body_mass_g)
+```
+
+## 重回帰分析
+### 2変数の重回帰分析
+
+![](/Users/aki/Documents/statistical_note/note_regression01/v2.png)
+
+```{r echo=TRUE}
+broom::tidy(lm(y ~ x1, d))
+broom::tidy(lm(x2 ~ x1, d))
+broom::tidy(lm(y ~ x1 + x2, d))
+
+
+# x1の偏回帰係数の分解
+# 「y~x1のx1の回帰係数」は「下記1,2の和」
+# 1. 「y~x1+x2のx1の偏回帰係数」と
+# 2. 「(x2~x1のx1の回帰係数)と(y~x1+x2のx2の偏回帰係数)の積」
+
+y_to_x1_slope  <- lm(y ~ x1, d)$coef[[2]]
+y_to_x1_pslope <- lm(y ~ x1 + x2, d)$coef[[2]]
+x2_to_x1_slope <- lm(x2 ~ x1, d)$coef[[2]]
+y_to_x2_pslope <- lm(y ~ x1 + x2, d)$coef[[3]]
+
+all.equal(
+  y_to_x1_slope,
+  y_to_x1_pslope + (x2_to_x1_slope * y_to_x2_pslope)
+  )
+
+# x2の偏回帰係数の分解
+# 「y~x2のx2の回帰係数」は「下記1,2の和」
+# 1. 「y~x1+x2のx2の偏回帰係数」と
+# 2. 「(x1~x2のx2の回帰係数)と(y~x1+x2のx1の偏回帰係数)の積」
+y_to_x2_slope  <- lm(y ~ x2, d)$coef[[2]]
+y_to_x2_pslope <- lm(y ~ x1 + x2, d)$coef[[3]]
+x2_to_x1_slope <- lm(x1 ~ x2, d)$coef[[2]]
+y_to_x1_pslope <- lm(y ~ x1 + x2, d)$coef[[2]]
+all.equal(
+  y_to_x2_slope, 
+  y_to_x2_pslope + (x2_to_x1_slope * y_to_x1_pslope)
+  )
+
+```
+
+### 3変数の重回帰分析
+
+![](/Users/aki/Documents/statistical_note/note_regression01/v3.png)
+
+```{r echo=TRUE}
+broom::tidy(lm( y ~ x1, d))
+broom::tidy(lm(x2 ~ x1, d))
+broom::tidy(lm(x3 ~ x1, d))
+broom::tidy(lm( y ~ x1 + x2 + x3, d))
+
+# 「y~x1のx1の回帰係数」は「下記1,2,3の和」
+# 1. 「y~x1+x2+x3のx1の偏回帰係数」と
+# 2. 「(x2~x1のx1の回帰係数)と(y~x1+x2+x3のx2の偏回帰係数)の積」と
+# 3. 「(x3~x1のx1の回帰係数)と(y~x1+x2+x3のx3の偏回帰係数)の積」
+
+y_to_x1_slope <- lm(y ~ x1, d)$coef[[2]]
+y_to_x1_pslope <- lm(y ~ x1 + x2 + x3, d)$coef[[2]]
+x2_to_x1_slope <- lm(x2 ~ x1, d)$coef[[2]]
+y_to_x2_pslope <- lm(y ~ x1 + x2 + x3, d)$coef[[3]]
+x3_to_x1_slope <- lm(x3 ~ x1, d)$coef[[2]]
+y_to_x3_pslope <- lm(y ~ x1 + x2 + x3, d)$coef[[4]]
+
+all.equal(
+  y_to_x1_slope,
+  y_to_x1_pslope + (x2_to_x1_slope * y_to_x2_pslope) + (x3_to_x1_slope * y_to_x3_pslope)
+  )
+```

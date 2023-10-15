@@ -1,0 +1,145 @@
+---
+title: "時系列データの分析(見せかけの回帰)"
+pagetitle: "時系列データの分析(見せかけの回帰)"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+時系列データへの理解、分析方法について、まとめていく。時系列データは、これまでやらないといけないと思いつつも、基礎をすっとばして、Prophet(一般化加法モデルベース)や状態空間モデルをやっていたが、やはり基礎は大事だと思うことがたくさんあったので、基礎からARIMAくらいまでをおさらいする。多分何回にわかれる。
+
+## 見せかけの回帰
+「見せかけの回帰」問題をみていく。単位根過程のデータ同士を回帰モデルでフィッティングすると意味もなく有意な変数が得られてしまう問題(共和分は後で)のこと。ということで単位根過程のデータを2つ用意する。
+
+
+```{r}
+library(tidyverse)
+
+n <- 1000
+set.seed(1989)
+x_rw <- cumsum(rnorm(n = n))
+set.seed(1988)
+y_rw <- cumsum(rnorm(n = n))
+
+df <- tibble::tibble(id = 1:n,
+                     y_rw = y_rw,
+                     x_rw = x_rw)
+
+# 凡例がつかないので、このやり方はおすすめできない
+# それかちゃんと凡例つけるか・・・
+ggplot(df) + 
+  geom_line(aes(id, y_rw), col = "#e41749") + 
+  geom_line(aes(id, x_rw), col = "#8ac6d1") +
+  ggtitle("RandomWalk") +
+  theme_bw() 
+```
+
+
+とりあえず回帰モデルを実行してみる。想定通り、有意な変数として認められますが、これは全く意味が無い。もとのデータがランダムウォーク同士のデータなので、関係性が無い。なので、このような単位根過程を持つようなデータ通しで回帰を行うと、意味なく有意なる問題が「見せかけの回帰」問題。
+
+```{r}
+fit <- glm(formula = y_rw ~ x_rw,
+    data = df,
+    family = gaussian(link = identity))
+
+summary(fit)
+```
+
+Noを色に持ってきて、サンプルの関係性を可視化すると、右下→左下→左上→右上というような関係性が見える。回帰モデルの過程として、サンプルの独立性があるが、それが守られていない。
+
+```{r}
+ggplot(df, aes(x_rw, y_rw, col = id)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") + 
+  ggtitle("RandomWalk") +
+  scale_color_gradient2(midpoint=501, low="blue", mid="white",high="red", space ="Lab" ) + 
+  theme_bw() 
+```
+
+
+残差の関係性を可視化しておく。
+
+```{r}
+df2 <- 
+  df %>% 
+  dplyr::bind_cols(tibble(resid = summary(fit)$deviance.resid,
+                          pred = predict(fit, .)))
+
+p1 <- ggplot(df2, aes(pred, resid, col = id)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") + 
+  ggtitle("Fitted value vs Residuals") +
+  scale_color_gradient2(midpoint=501, low="blue", mid="white",high="red", space ="Lab" ) + 
+  theme_bw() 
+
+
+dens <- density(df2$resid)
+bw <- diff(range(df2$resid))/20
+p2 <- ggplot(df2, aes(x = resid)) +
+  geom_histogram(binwidth=bw, fill = "#01489D", col = "black", alpha = 1/2) +
+  geom_density(aes(y = ..count..*bw), fill = "#01489D", alpha = 1/2) + 
+  ggtitle("Residuals") + 
+  theme_bw()
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+```
+
+
+このように残差に相関があるようなデータの場合、回帰モデルから得られるのは誤った結論。最小二乗法を使えないのではなく、回帰係数の分散を過小推定(つまりR2もt検定、f検定も無意味)することで、誤った結論になる。
+
+## データを調べる
+このような単位根過程どうしの回帰モデルの場合、フィットさせた後で自己相関の強さをダービーワトソン検定で調べることが妥当。ダービーワトソン検定は、線形回帰の残差中の自己相関を検出するために使用される。帰無仮説は「自己相関は0」で、対立仮説は「自己相関は0より大きい」となる。結果をみると、p値は2.2e-16なので、帰無仮説を棄却し、対立仮説を採択する。つまり、自己相関がある。
+
+```{r}
+library(lmtest)
+dwtest(lm(y_rw ~ x_rw, data = df))
+
+```
+
+モデルを作る前に、ADF検定でもよい。検定の結果を見ると、`y_rw`、`x_rw`のいずれもp値は0.05よりも大きいので、帰無仮説は棄却されず、帰無仮説を採択。つまり、「このデータは単位根過程である」ということがわかる。
+
+```{r}
+# H0:単位根あり
+# H1:単位根なし
+tseries::adf.test(x = df$y_rw)
+
+```
+
+なので、このデータで回帰モデルを実行すると「見せかけの回帰」が起こりやすい。起こりやすいというのは「共和分(Cointegration)」という例外があるため。「共」に単位根のデータで、線形結合により「和分」がなくなる関係を「共和分」という。$x$を単独で見ると単位根、$y$を単独で見ると単位根、でもそれを足し合わせてみると打ち消し合うことになるので、単位根であったとしても、共和分であれば、意味のある関係と言えたりもする。
+
+共和分かどうかはEngle-Granger検定で確認できる。この検定は、回帰モデルを作り、残差をもとに単位根の検定を行い、単位根がなくなれば共和分ありと考える。帰無仮説は「共和分ではない」。結果をみると、統計量が 5.6112に対して、有意水準が5%だと棄却点が25.9711なので、帰無仮説は棄却できず、帰無仮説を採択するので、このデータは「共和分ではない」となる。
+
+```{r}
+df_mat <- df %>% 
+  dplyr::select(y_rw, x_rw) %>% 
+  as.matrix()
+summary(urca::ca.po(z = df_mat, demean = "none"))
+
+```
+
+共和分ではないデータなので差分系列で回帰モデルを実行すれば関係がみえる。共和分のデータだと、差分をとることで、関係性が見えなくなってしまう。
+

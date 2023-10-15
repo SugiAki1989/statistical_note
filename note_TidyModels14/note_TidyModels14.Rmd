@@ -1,0 +1,495 @@
+---
+title: "Modeltime -Feature Engineering with Recipes-"
+pagetitle: "Modeltime -Feature Engineering with Recipes-"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+`modeltime`パッケージを使いながら時系列データの予測を行なうノートをいくつかに分けてまとめている。`modeltime`パッケージの目的は、時系列モデルの構築を効率よく行うためのパッケージで、`tidymodels`パッケージと組み合わせて時系列モデルを作成する際に使用される。時系列予測のための体系的なワークフローを提供し、時系列ブーストモデルなど新しいアルゴリズムもカバーしている点が特徴的。モデルの数理的な側面や機械学習の用語などは、このノートでは扱わない。
+
+とりあえず、`modeltime`パッケージについて一通り使い方はまとめてたので、総括として、グローバルモデルを利用し、クロスバリデーション、ハイパーパラメータチューニングを行い、予測を複数の系列に対して行なう。
+
+## 使用データ
+
+必要なパッケージを読み込んでおく。
+
+```{r}
+library(tsibbledata)
+library(tsibble)
+
+library(timetk) 
+library(tidyverse)
+library(tidymodels)
+library(modeltime)
+```
+
+オーストラリアの小売の売上データセット(`tsibbledata::aus_retail`)を利用する。データの各時系列は下記のキーで一意に識別される。
+
+- `State`: オーストラリアの州
+- `Industry`: 業種
+
+ここでは`Australian Capital Territory`の州の2つの業種`restaurants and catering services`、`Clothing, footwear and personal accessory retailing`に注目する。
+
+```{r}
+monthly_retail_tbl <- aus_retail %>%
+  tk_tbl() %>% 
+  filter(State == "Australian Capital Territory") %>%
+  filter(Industry %in% unique(aus_retail$Industry)[c(1,4)]) %>% 
+  filter(Month >= as.Date("2013-01-01")) %>% 
+  mutate(Month = as.Date(Month),
+         Industry = if_else(Industry == "Cafes, restaurants and catering services",
+                            "catering", "clothing")
+         ) %>%
+  mutate(Industry = as_factor(Industry)) %>%
+  select(date = Month, id = Industry, value = Turnover) 
+ids <- unique(monthly_retail_tbl$id)
+DT::datatable(monthly_retail_tbl)
+```
+
+`2013-01-01`から`2018-12-01`の72ヶ月分のデータで、2つの業種はきれいなパネルデータになっているのでこのまま利用する。
+
+```{r}
+monthly_retail_tbl %>%
+  dplyr::group_by(id) %>%
+  dplyr::summarise(
+    n.obs = n(),
+    start_date = min(date),
+    end_date = max(date),
+    min_value = min(value),
+    mean_value = mean(value),
+    max_value = max(value)
+  )
+```
+
+このノートの全体像は下記のイメージである。イメージなので厳密ではない。
+
+![image](/Users/aki/Documents/statistical_note/note_TidyModels14/summary.png)
+
+## データの前処理
+
+`tidymodels`パッケージの`recipe`では(たぶん)グループごとに処理を行なうことが現状できないので、そのような処理はレシピを作成する前に行なう。ラグやウインドウ計算などは業種ごとにグループ化(フィルタリング)して処理しておく。ここで予測期間のデータにも一部の特徴量を混ぜることができる。
+
+```{r}
+df <- map_dfr(
+  .x = 1:length(ids),
+  .f = function(x){
+    monthly_retail_tbl %>%
+      dplyr::filter(id == ids[x]) %>%
+      arrange(date) %>%
+      future_frame(date, .length_out = "12 months", .bind_data = TRUE) %>%
+      mutate(id = ids[x]) %>%
+      tk_augment_fourier(.date_var = date, .periods = 12, .K = 1) %>%
+      tk_augment_lags(.value = value, .lags = 12) %>%
+      tk_augment_slidify(.value   = value_lag12,
+                         .f       = ~ mean(.x, na.rm = TRUE), 
+                         .period  = c(3, 6, 9, 12),
+                         .partial = TRUE,
+                         .align   = "center")
+  }
+)
+DT::datatable(df)
+```
+
+
+## データ分割
+
+予測期間は`2019-01-01`から`2019-12-01`までの1年とする。
+
+```{r}
+future_df <- df %>% 
+  filter(is.na(value))
+
+future_df %>%
+  dplyr::group_by(id) %>%
+  dplyr::summarise(
+    n.obs = n(),
+    start_date = min(date),
+    end_date = max(date)
+  )
+```
+
+学習データは、`2014-01-01`から`2018-12-01`の60ヶ月分のデータ。予測期間にラグやウインドウ計算の特徴量を入れた際に、`2013`年は欠損するので除外した。
+
+```{r}
+# training
+preped_df <- df %>%
+  filter(!is.na(value)) %>%
+  drop_na()
+
+preped_df %>%
+  dplyr::group_by(id) %>%
+  dplyr::summarise(
+    n.obs = n(),
+    start_date = min(date),
+    end_date = max(date),
+    min_value = min(value),
+    mean_value = mean(value),
+    max_value = max(value)
+  )
+```
+
+学習データを可視化しておく。`catering`は緩やかに上昇し、そこからは停滞しており、`takeaway`では特定期間に突発的なスパイクが存在している。
+
+```{r}
+plot_time_series(
+  .data = preped_df,
+  .date_var = date,
+  .value = value,
+  .color_var = id,
+  .smooth = TRUE,
+  .interactive = FALSE) + 
+  scale_x_date(limits = c(min(preped_df$date), max((preped_df$date))),
+               labels = date_format("%Y/%m"),
+               breaks = date_breaks("3 month")) + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.2, hjust=0.2))
+```
+
+学習データを分割する。ここでは`catering`を対象に学習データとテストデータを可視化しているが、`takeaway`でも同様である。
+
+```{r}
+splits <- time_series_split(
+  data = preped_df,
+  assess = 12,
+  cumulative = TRUE
+)
+
+splits %>%
+  tk_time_series_cv_plan() %>%
+  filter(id == "catering") %>% 
+  plot_time_series_cv_plan(date, value, .interactive = FALSE) + 
+  scale_x_date(limits = c(min(preped_df$date), max((preped_df$date))),
+               labels = date_format("%Y/%m"),
+               breaks = date_breaks("3 month")) + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.2, hjust=0.2))
+```
+
+モデルのパラメタを調整するために、学習データを学習データと評価データに分割する。ここでは4スライス分の時系列クロスバリデーションデータを作成する。
+
+```{r}
+resamples_kfold <- training(splits) %>%
+  time_series_cv(
+    date_var    = date, 
+    assess      = "12 months",
+    cumulative  = TRUE,
+    skip        = "3 months", 
+    slice_limit = 4
+  )
+
+resamples_kfold
+```
+
+時系列クロスバリデーションデータを可視化しておく。
+
+```{r}
+resamples_kfold %>%
+  tk_time_series_cv_plan() %>% 
+  filter(id == "catering") %>%
+  plot_time_series_cv_plan(date, value, .interactive = FALSE) + 
+  scale_x_date(limits = c(min(preped_df$date), max(assessment(resamples_kfold$splits[[1]])$date)),
+               labels = date_format("%Y/%m"),
+               breaks = date_breaks("3 month")) + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.2, hjust=0.2))
+
+```
+
+時系列クロスバリデーションデータは`2014-01-01`を起点に、学習データと評価データを調整している。
+
+```{r}
+resamples_kfold %>% 
+  mutate(
+    analysis = map(.x = splits, .f = function(x){analysis(x)}),
+    assessment = map(.x = splits, .f = function(x){assessment(x)}),
+    analysis_min_date = map(.x = analysis, .f = function(x){min(x$date)}),
+    analysis_max_date = map(.x = analysis, .f = function(x){max(x$date)}),
+    assessment_min_date = map(.x = assessment, .f = function(x){min(x$date)}),
+    assessment_max_date = map(.x = assessment, .f = function(x){max(x$date)}),
+  ) %>% 
+  unnest(c(analysis_min_date, analysis_max_date, assessment_min_date, assessment_max_date)) %>% 
+  select(id, analysis_min_date, analysis_max_date, assessment_min_date, assessment_max_date)
+```
+
+## レシピ・モデル・ワークフローの作成
+
+最初に行った特徴量作成に加え、その他のカレンダー系特徴量を追加する。また、目的変数は対数変換を行なう。
+
+```{r}
+recipe_prophet_boost <- recipe(value ~ ., data = training(splits)) %>%
+  step_timeseries_signature(date) %>%
+  step_rm(matches("(.iso$)|(.xts$)|(week)|(day)|(hour)|(minute)|(second)|(am.pm)|(.num$)|(.lbl.*$)")) %>%
+  step_mutate(date_month = factor(date_month, ordered = TRUE)) %>%
+  step_dummy(all_nominal(), one_hot = TRUE) %>% 
+  step_log(value)
+
+recipe_prophet_boost %>% prep() %>% bake(training(splits)) %>% DT::datatable()
+```
+
+次はモデルの設定。今回はBoost Prophetを利用する。`mtry`と`sample_size`は上限を決める必要があるので、ここはグリッド作成の際に対処する。おそらく、ここでの設定方法が誤っていたため、これまでのノートではBoost Prophetのフィッティングの際に、ワーニングが発生していたと思われる。
+
+```{r}
+model_prophet_boost <- prophet_boost(
+  # prophet
+  mode = "regression",
+  growth = "linear",
+  changepoint_num = tune(),
+  changepoint_range = tune(),
+  seasonality_yearly = TRUE,
+  seasonality_weekly = FALSE, # Monthlyデータなので機能しない
+  seasonality_daily  = FALSE, # Monthlyデータなので機能しない
+  season = "additive",
+  prior_scale_changepoints = tune(),
+  prior_scale_seasonality = tune(),
+  # prior_scale_holidays = NULL,
+  # xgboost
+  mtry = tune(),  
+  trees = 1000,
+  tree_depth = tune(),
+  learn_rate = tune(),
+  loss_reduction = tune(),
+  sample_size = tune(),
+  stop_iter = tune(),
+  min_n = tune()
+  ) %>%
+  set_engine("prophet_xgboost")
+
+model_prophet_boost
+```
+
+作成したモデルとレシピをワークフローに登録し、これを利用してハイパーパラメータのチューニングを行なう。
+
+```{r}
+workflow_prophet_boost <- workflow() %>%
+  add_model(model_prophet_boost) %>%
+  add_recipe(recipe_prophet_boost)
+
+workflow_prophet_boost
+```
+
+
+## ハイパーパラメータチューニング
+
+ここではラテンハイパーキューブを使って、グリッドを20個作成する。
+
+```{r}
+set.seed(1989)
+grid <- grid_latin_hypercube(
+  extract_parameter_set_dials(model_prophet_boost) %>%
+    update(mtry = mtry(range = c(1, 20)),
+           sample_size = sample_prop(c(0.4, 0.8))),
+  size = 20
+)
+
+grid %>% DT::datatable()
+```
+
+作成したグリッドを利用してチューニングを行なう。本当はここで並列化の設定をしたほうが良いかもしれないが、そこらへんは雰囲気でしか理解してないので、また後日、学習した際にノートにまとめる。
+
+```{r}
+tune_workflow_prophet_boost <- workflow_prophet_boost %>%
+  tune_grid(
+    resamples = resamples_kfold,
+    grid = grid,
+    control = control_grid(verbose = TRUE,
+                           save_pred = TRUE),
+    metrics = metric_set(rmse, mae)
+  )
+
+tune_workflow_prophet_boost
+```
+
+`mae`基準で最小のパラメタの組み合わせを10個取り出す。
+
+```{r}
+tune_workflow_prophet_boost %>% 
+  show_best("mae", n = 10) %>% 
+  DT::datatable()
+```
+
+パラメタと評価指標の関係を可視化する。この際に、評価指標が下がる傾向があれば、パラメタグリッドを再作成するなどして再度チューニングする。
+
+```{r}
+tune_workflow_prophet_boost %>%
+  autoplot() +
+  geom_smooth(se = FALSE) 
+```
+
+`mae`基準で最小のパラメタ組み合わせは下記の通り。
+
+```{r}
+tuned_best_params <- tune_workflow_prophet_boost %>%
+  select_best("mae")
+tuned_best_params %>% t() 
+```
+
+一旦、これをベストなパラメタとして、ワークフローのパラメタをファイナライズする。
+
+```{r}
+finalize_workflow_prophet_boost <- workflow_prophet_boost %>%
+  finalize_workflow(parameters = tuned_best_params)
+
+finalize_workflow_prophet_boost$fit$actions$model$spec
+```
+
+モデルテーブルに登録するために、とりあえずフィッティングしておく。
+
+```{r}
+# ここのデータはなんでもよい
+fit_finalize_workflow_prophet_boost <- finalize_workflow_prophet_boost %>%
+  fit(training(resamples_kfold$splits[[1]])) 
+
+fit_finalize_workflow_prophet_boost
+```
+
+## モデルキャリブレーション
+
+これをモデルテーブルに登録してキャリブレーションする。
+
+```{r}
+calibrattion_prophet_boost <- modeltime_table(fit_finalize_workflow_prophet_boost) %>%
+  modeltime_calibrate(testing(splits), id = "id") # confを計算するために必要
+
+calibrattion_prophet_boost %>% 
+  pluck(".calibration_data", 1) %>% 
+  DT::datatable()
+```
+
+これでテストデータの精度を確認できるので、テストデータでグローバルモデルの精度を確認する。
+
+```{r}
+# Global
+calibrattion_prophet_boost %>%
+  modeltime_accuracy(acc_by_id = FALSE) %>%
+  table_modeltime_accuracy()
+```
+
+
+こちらはローカルモデルの精度。
+
+```{r}
+# Local
+calibrattion_prophet_boost %>%
+  modeltime_accuracy(acc_by_id = TRUE) %>%
+  table_modeltime_accuracy()
+```
+
+テストデータでの予測値はこの通り。
+
+```{r}
+calibrattion_prophet_boost %>%
+  modeltime_forecast(
+    new_data = testing(splits),
+    actual_data = preped_df,
+    conf_by_id = TRUE,
+    keep_data = TRUE
+  ) %>% 
+  DT::datatable()
+```
+
+可視化すると、そこまで精度が良くないように思えるが、今回はパッケージの使い方のまとめなので、これで良いとする。
+
+```{r}
+calibrattion_prophet_boost %>%
+  modeltime_forecast(
+    new_data = testing(splits),
+    actual_data = preped_df,
+    conf_by_id = TRUE,
+    keep_data = TRUE
+  ) %>% 
+  group_by(id) %>% 
+  plot_modeltime_forecast(
+    .interactive = FALSE, 
+    .legend_show = FALSE,
+    .facet_ncol = 3
+  ) + 
+  scale_x_date(limits = c(min(preped_df$date), max(preped_df$date)),
+               labels = date_format("%Y/%m"),
+               breaks = date_breaks("3 month")) + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.2, hjust=0.2))
+```
+
+## 再学習・予測
+
+あとはモデルをフルデータで再学習して、予測期間の予測値を計算する。
+
+```{r}
+refit_prophet_boost <- calibrattion_prophet_boost %>%
+  modeltime_refit(data = preped_df)
+
+refit_prophet_boost
+```
+
+おさらいしておくと、予測期間は`2019-01-01`から`2019-12-01`までの1年間である。
+
+```{r}
+bind_rows(
+  training(splits) %>% group_by(id) %>% summarise(start_date = min(date), end_date = max(date), n.obs = n()) %>% mutate(label = "train"),
+  testing(splits) %>% group_by(id) %>% summarise(start_date = min(date), end_date = max(date), n.obs = n()) %>% mutate(label = "test"),
+  future_df  %>% group_by(id) %>% summarise(start_date = min(date), end_date = max(date), n.obs = n()) %>% mutate(label = "future")
+) %>% 
+  select(id, label, everything()) %>% 
+  arrange(id, start_date)
+```
+
+再学習したモデルで予測値を計算する。
+
+```{r}
+refit_prophet_boost %>%
+  modeltime_forecast(
+    new_data    = future_df,
+    actual_data = preped_df, 
+    conf_by_id  = TRUE
+  ) %>%
+  DT::datatable()
+```
+
+計算した予測値を使って、データ全体を可視化する。
+
+```{r}
+refit_prophet_boost %>%
+  modeltime_forecast(
+    new_data    = future_df,
+    actual_data = preped_df, 
+    conf_by_id  = TRUE
+  ) %>%
+  # recipeでlog変換したものを戻す
+  mutate(
+    .value   = exp(.value),
+    .conf_lo = exp(.conf_lo),
+    .conf_hi = exp(.conf_hi)
+  ) %>% 
+  group_by(id) %>%
+  plot_modeltime_forecast(
+    .title = "Turnover 1-year forecast", 
+    .interactive = FALSE,
+    .facet_ncol  = 2
+  )  + 
+  scale_x_date(limits = c(min(preped_df$date), max(future_df$date)),
+               labels = date_format("%Y/%m"),
+               breaks = date_breaks("3 month")) + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.2, hjust=0.2))
+```

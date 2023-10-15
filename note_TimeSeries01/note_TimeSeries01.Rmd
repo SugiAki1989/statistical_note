@@ -1,0 +1,416 @@
+---
+title: "時系列データの分析(ARモデル)"
+pagetitle: "時系列データの分析(ARモデル)"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここではARモデル、MAモデル、ARMAモデル、ARIMAモデルについて、Rで可視化しながら、簡単にまとめておく。数理的な部分は沖本先生の「[経済・ファイナンスデータの 計量時系列分析](https://www.asakura.co.jp/detail.php?book_code=12792)」や「[時系列分析と状態空間モデルの基礎: RとStanで学ぶ理論と実装](http://www.pleiades-publishing.co.jp/pdf/pdf08.html)」がわかりやすいので、そちらを参照。
+
+## 自己回帰モデル(Autoregressive Model)
+
+時点$t$に対して、1時点前までのデータ$y_{t-1}$を用いて回帰するARモデルを1次ARモデルと呼ぶ。AR(1)モデルと表記され、2時点前の値も利用するのであればAR(2)モデル、一般に$p$時点前の値を利用する場合、AR(p)モデルと表記される。$\phi$が定常性や自己相関の強さを表現することになる。また、ノイズの性質が面白く、1度大きな値をとったりすると、そのノイズは次の時点、さらにその次の時点と影響が残ることになる。
+
+$$
+y_{t} = c + \phi_{1} y_{t-1} + ... + \phi_{1}y_{t-p} + \varepsilon_{t} , \varepsilon_{t} \sim W.N.(\sigma^{2})
+$$
+
+$\phi$の値の影響を見るためにAR(1)モデルを可視化してみる。$|\phi| < 1$であればモデルは定常であるが、$|\phi| > 1$であると振動しながら発散するか、指数的に発散するとおり、定常ではない。自己相関が大きいほど、滑らかに推移し、自己相関が小さいと、激しく変化する。
+
+```{r}
+library(tidyverse)
+library(scales)
+library(forecast)
+
+set.seed(1989)
+ar1_sim <- function(init = 2, phi, n = 100){
+  y <- vector(mode = "numeric", length = n)
+  for (i in 2:length(y)) {
+    y[i] <- init + phi*y[i - 1] + rnorm(1, mean = 0, sd = 1) 
+  }
+  return(y)
+}
+
+t <- 1:100
+phis <- c(-1.1, -0.8, 0.3, 0.8, 1, 1.1)
+map_dfc(
+  .x = phis,
+  .f = function(x){ar1_sim(init = 1, phi = x, n = length(t))}
+  ) %>% 
+  set_names(paste0("phi = ", phis)) %>% 
+  bind_cols(time = t) %>% 
+  pivot_longer(
+    cols = -time,
+    values_to = "y",
+    names_to = "type"
+  ) %>% 
+  ggplot(.) + 
+  geom_line(aes(time, y, col = type)) + 
+  scale_x_continuous(breaks = seq(0, 100, 25)) + 
+  facet_wrap( ~ type, scales = "free_y") + 
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+上記の通り、$|\phi| < 1$であれば、定常性の仮定を利用しながら、AR(p)モデルの平均と分散を考えられる。導出は手書きのノートを参照。
+
+$$
+\begin{eqnarray}
+\mu = E[y_{t}] &=& \frac{c}{1 - \phi_{1} - ... - \phi_{p}} \\
+\gamma_{0} &=& Var[y_{t}] = \frac{\sigma^{2}}{1 - \phi_{1} \rho_{1} - ... - \phi_{p}\rho_{p}} \\
+\end{eqnarray}
+$$
+
+自己相関関数を利用して、モデルの自己相関を可視化すると、モデルへの理解が深まる。下記では、`arima.sim`関数でモデルの値をシュミレーションする。自己相関が大きいほど、時点が離れてもゆるやかに自己相関が減衰していくが、自己相関が小さいと、時点ごとの自己相関が小さいことがわかる。
+
+```{r}
+set.seed(1989)
+sim_len <- 1000
+m1 <- list(order = c(1, 0, 0), ar = 0.1, sd = 1)
+m2 <- list(order = c(1, 0, 0), ar = 0.9, sd = 1)
+ar1_sim1 <- arima.sim(n = sim_len, model = m1)
+ar1_sim2 <- arima.sim(n = sim_len, model = m2)
+list(acf(ar1_sim1), acf(ar1_sim2))
+```
+
+時系列データに対して、ARモデルを実行するには、`ar`関数を利用する。`ar`関数の`aic`は`order.max`と組み合わせると、どのラグまでパラメタを考慮するのが良いかを、AIC基準でモデル選択を行ってくれる。`method`でパラメタの推定法が指定できる。
+
+```{r}
+# ノッティンガム城の20年間の平均気温(華氏)
+df_nottem <- tibble(
+  dt = seq(as.Date("1920-01-01"), as.Date("1939-12-01"), "months"),
+  y = as.vector(nottem)
+) %>% 
+  mutate(rownum = row_number())
+
+ar(x = df_nottem$y, aic = FALSE, order.max = 1, method = "ols")
+```
+
+## 移動平均モデル(Moving Average Model)
+
+MA(q)過程は、現在と$q$機関の過去のホワイトノイズの線形和に定数を加えたモデルで、下記の通り表される。モデルから分かる通り、ARモデルとは異なりMAモデルは常に定常過程となる。
+
+$$
+y_{t} = \mu + \epsilon_{t}  + \theta_{1} \epsilon_{t-1}  + ... + \theta_{q} \epsilon_{t-q} , \varepsilon_{t} \sim W.N.(\sigma^{2})
+$$
+
+モデルの期待値と分散は下記の通り。
+
+$$
+\begin{eqnarray}
+E[y_{t}] &=& \mu\\
+\gamma_{0} &=& Var[y_{t}] = (1 + \theta^{2}_{1}+ ... + \theta^{2}_{q})\sigma^{2} \\
+\end{eqnarray}
+$$
+
+自己相関関数は面白い性質を持つ。$q+1$次の以降の自己相関は0になる。
+
+$$
+\begin{eqnarray}
+\rho_{k}
+ =
+  \begin{cases}
+    \frac{\theta_{k}+\theta_{1}\theta_{k+1} + ... + \theta_{q-k}\theta_{q}}{1 + \theta^{2}_{1}+ \theta^{2}_{2} + ... + + \theta^{2}_{q}} & ( 1 \le k \le q ) \\
+    0 & ( k \ge q+1 )
+  \end{cases}
+\end{eqnarray}
+$$
+
+実際にMA(1)モデルとMA(5)モデルでシュミレーションしてみると、たしかに2次と6次以降は自己相関が小さくなっている。
+
+```{r}
+set.seed(1989)
+sim_len <- 1000
+m1 <- list(order = c(0, 0, 1), ma = 0.1, sd = 1)
+m2 <- list(order = c(0, 0, 5), ma = c(0.9,0.8,0.7,0.6,0.5), sd = 1)
+ma1_sim1 <- arima.sim(n = sim_len, model = m1)
+ma1_sim2 <- arima.sim(n = sim_len, model = m2)
+list(acf(ma1_sim1), acf(ma1_sim2))
+```
+
+ARモデルは過去の値をモデルに組み込むことで、自己相関を表現し、MAモデルは過去の共通の値を利用することで自己相関を表現する。ARモデルはMAモデルで表現でき、MAモデルはARモデルで表現できる反転性を持っている。詳しくは下記の書籍を参考。差分方程式の解き方から、反転性、ARモデルの定常条件、特性方程式についても分かりやすく解説されている。
+
+- [実証のための計量時系列分析](http://www.yuhikaku.co.jp/books/detail/9784641165489)
+
+## ARIMA(Auto Regressive Integrated Moving Average)
+
+ARIMAモデルの前にARモデルとMAを組み合わせたARMAモデルをまとめるのが順的によろしいと思うが、ARMAモデルは飛ばしてARIMAモデルをまとめる。
+
+ARMAモデルは、ARモデルとMAモデルの組み合わせなので、非定常過程のデータにはあまり適していない。そこで、系列の差分を取ることで非定常な系列を定常な過程に変換し、モデルを適用することを考える。これがARIMAモデルで、ARIMA(p,d,q)として表現される。左から、ARモデルの次数、階差数、MAモデルの次数である。
+
+そして、ARIMAモデルをさらに拡張し、季節性階差を取り入れたモデルをSARIMAモデル(Seasonal Auto Regressive Integrated Moving Average)と呼ぶ。年収期であれば、去年の8月は暑いのであれば、今年の8月は暑いと考えられる、という形で季節性の自己相関をモデルに取り入れる。SARIMAモデルはSARIMA(p,d,q)(P,D,Q)[s]と表記し、左からARモデルの次数、階差数、MAモデルの次数、季節性のARモデルの次数、季節性の階差数、季節性のMAモデルの次数である。
+
+さらに説明変数を取り込んで拡張されたARIMAXモデル(AutoRegressive Integrated Moving Average with eXogenous variables)も存在する。
+
+$$
+\left( 1 - \displaystyle \sum_{i=1}^{p} \phi_{i}B^{i}\right)
+\left( 1 - \displaystyle \sum_{I=1}^{P} \Phi_{I}B^{sI}\right)
+\Delta^{d}\Delta^{D}_{s}y_{t} = 
+\left( 1 + \displaystyle \sum_{j=1}^{q} \theta_{j}B^{j}\right)
+\left( 1 + \displaystyle \sum_{J=1}^{Q} \Theta_{J}B^{sJ}\right)
+\epsilon_{t}
+$$
+
+ARIMAモデルの次数を組み合わせると非常に複雑なモデルになるので、見ただけではよくわからないので、SARIMA(2,1,1)(1,1,1)[12]を練習のために展開してみた結果がこちら。次数も少ないのでパラメタは通しで展開している。SARIMAモデルのところで、季節階差のsが抜けているので、正しくは上記を参照。
+
+![SARIMA(2,1,1)(1,1,1)12](/Users/aki/Documents/statistical_note/note_TimeSeries01/SARIMA(211)(111)12.jpg)
+
+ARIMAモデルでは次数を組み合わせることで様々な形で時系列に適合するモデルを作成できる一方で、次数の組み合わせが無限に発生する。そのため、BoxJenkins法を利用したモデルの同定が使われる。これは、次数を変えながら様々なモデルを作成し、AICなどを用いてモデル評価を行うことで、ベターなモデルを構築する。ただ、現在では、機械学習の世界で行われるように、次数をパラメタチューニングしながら、評価データ、テストデータで精度指標の良し悪しを検討し、モデルを決定する方法でよいと思われる。
+
+## 単位根検定(Unit Root Test)
+
+ARIMAモデルでは差分をとる回数を検討しなければならないが、そもそも定常過程なのか、非定常過程なのかを判断する必要がある。その検定として単位根検定がある。単位根とは、現系列が非定常過程で、差分を取ると定常過程になる系列のことを単位根過程と呼ぶ。和分過程とも呼ばれる。
+
+おそらく一般的な単位根検定としてKwiatkowski–Phillips–Schmidt–Shin検定(KPSS)とAugmented Dickey-Fuller検定(ADF)、Phillips-Perron検定(PP)がある。他にも単位根の検定はたくさんある。これらの検定を理解するために、ランダムウォークを理科する必要があるので、先にランダムウォークをまとめておく。
+
+ランダムウォークはiid系列の累積和からなる系列のことで、
+
+$$
+y_{t} = y_{t−1} + \epsilon_{t}, \epsilon_{t} \sim N(0, \sigma^{2})
+$$
+
+を考えた時、$y_{0}=0$とすると、$epsilon_{t}$が累計されていくことになる。これは正規分布に従うノイズの累積和であり、ランダムウォーク。この式に確定的な線形トレンドとして、ドリフト$\delta$を追加した系列を考える。$\delta=0$であれば、先程の式に戻り、$epsilon_{t}$がなければ、毎時点$\delta$の値だけ増加するトレンドが表現される。
+
+$$
+y_{t} = \delta + y_{t−1} + \epsilon_{t}, \epsilon_{t} \sim N(0, \sigma^{2})
+$$
+
+この観点から先程のランダムウォークの式の項目の並び方を変えると、$epsilon_{t}$が時点で値が変わる確率的なトレンドとして機能することがわかる。そのため、ランダムウォークは確率的トレンドとも呼ばれる。
+
+$$
+y_{t} = \epsilon_{t} + y_{t−1}
+$$
+
+可視化すると、このようなランダムに動く系列のイメージが湧きやすい。
+
+```{r}
+set.seed(1989)
+df_randomwalk <- tibble(
+  t = 1:1000,
+  y = cumsum(rnorm(1000,0,1))
+)
+
+ggplot(df_randomwalk) + 
+  geom_line(aes(t, y)) + 
+  scale_x_continuous(breaks = seq(0, 1000, 100)) + 
+  theme_bw()
+```
+
+KPSS検定の話に戻る。KPSS検定は下記の線形モデルを想定する。$\epsilon_{t}$は定常過程。このモデルは、定数項+トレンド+ランダムウォーク+定常過程で構成される。この系列からトレンドを除去したときに、ランダムウォークがある場合、$u_{i}$は確率的に振る舞い、累積和となってランダムウォークを生み出すことになるが、ランダムウォークがない場合、この部分は0と考えられる。つまり、トレンドを除去しても、ランダムウォークが残るのであれば、その系列は単位根過程であると判断できる。ランダムウォークがない場合、トレンド+定常過程となる。
+
+$$
+y_{t} = \alpha + \beta t + \sum^{t}_{i=1} u_{i} + \epsilon_{t}, u_{i} \sim iid(0, \sigma^{2}_{u})
+$$
+
+そこで、仮説として下記を用意する。$\sigma^{2}_{u}=0$であれば、トレンド+定常過程と考えられる。ランダムウォーク項の$\sum$は無視でき、帰無仮説が棄却されると、トレンドを除去しても単位根が残ると考える。
+
+$$
+\begin{eqnarray}
+  \begin{cases}
+    H_{0}: \sigma^{2}_{u} = 0 \\
+    H_{1}: \sigma^{2}_{u} \ne 0
+  \end{cases}
+\end{eqnarray}
+$$
+
+
+KPSS検定は`urca`パッケージの`ur.kpss`関数で実行できる。`type`は`mu`か`tau`を選択でき、定数($\beta=0$)か線形トレンドのどちらのモデルを利用するかを選択できる。
+
+有意水準を5%とすると、棄却点は0.146なので、棄却点を下回っている。つまり、帰無仮説は「系列はトレンドと定常過程(単位根ない)」で、対立仮説は「単位根あり」なので、帰無仮説は棄却されず、帰無仮説を採択する。結果として、この系列は単位根を持ってないと判断できる。
+
+```{r}
+library(urca)
+# H0:系列はトレンドと定常過程(単位根ない)
+# H1:単位根ある
+summary(ur.kpss(df_nottem$y, type = "tau", lags = "short"))
+```
+
+ADF検定は、DF検定の拡張版なので、DF検定をおさらいする。DF検定では、下記のARモデルを考える。$\rho=0$であれば、定常過程となり、$\rho=1$であればランダムウォークが含まれることになる。そこで、この検定では自己係数の$\rho$について検定を行なう。ただ、棄却値を計算する為に標準的なt分布を用いることは出来ず、ディッキー–フラー表を利用する。
+
+$$
+y_{t} = \rho y_{t-1} + \epsilon_{t}, \epsilon_{i} \sim N(0, \sigma^{2})
+$$
+
+帰無仮説は「ρ=1(単位根あり)」で、対立仮説は「|ρ|<1(単位根なし)」である。拡張DF検定(ADF)はAP(p)モデルまで次数を拡大して検定する。ADF検定は、`tseries`パッケージの`adf.test`関数で実行できる。実行結果は、$p=0.01$なので、帰無仮説は棄却され、対立仮説を採択。つまり、データは単位根過程ではない。
+
+```{r}
+library(tseries)
+# H0:ρ=1(単位根あり)
+# H1:|ρ|<1(単位根なし)
+# 0.01なので、帰無仮説は棄却され、対立仮説を採択。つまり、データは単位根過程ではない。
+adf.test(x = df_nottem$y, alternative = "stationary")
+```
+
+PP検定は調べてないので、使い方のみまとめておく。`tseries`パッケージの`pp.test`関数で実行できる。帰無仮説は「単位根あり」で、対立仮説は「単位根なし」である。$p-value = 0.01$なので、帰無仮説を棄却し、対立仮説を採択する。つまり、単位根はない。
+
+```{r}
+# H0:単位根あり
+# H1:単位根なし
+tseries::pp.test(df_nottem$y)
+```
+
+上記3つの検定で、いずれも単位根はないと判断された。検定で使用していたサンプルデータはこちら。
+
+```{r}
+ggplot(df_nottem) + 
+  geom_line(aes(rownum, y)) + 
+  theme_bw()
+```
+
+## SARIMAXモデルの実践(ドライバーの死傷者数データ)
+
+ここでは下記の書籍を参考にしている。非常にわかりやすい。
+
+- [時系列分析と状態空間モデルの基礎: RとStanで学ぶ理論と実装](http://www.pleiades-publishing.co.jp/pdf/pdf08.html)
+
+SARIMAXモデルを利用して、時系列データを分析してみる。よく使われる1969年1月〜1984年12月のイギリスにおけるドライバーの死傷者数データを利用する。このデータでは、基本的なトレンド、年周期を持ち、1983年1月31日にフロント席のシートベルトが義務化され、1991年に全ての席のシートベルト着用が義務化したことで、死傷者が外因的な要素で減少する特徴を持つ。
+
+```{r}
+df_seatbelts <- tibble(
+  dt = seq(as.Date("1969-01-01"), as.Date("1984-12-01"), "months"),
+  y = Seatbelts[,3] %>% as.vector(), # remove ts class
+  logy = log(Seatbelts[,3] %>% as.vector()),
+  x_petrolprice = Seatbelts[,6] %>% as.vector(),
+  x_law = Seatbelts[,8] %>% as.vector()
+) %>% 
+  mutate(rownum = row_number())
+
+# ggplot(df_seatbelts) + 
+#   geom_line(aes(dt, y)) + 
+#   scale_x_date(limits = c(min(df_seatbelts$dt), max(df_seatbelts$dt)),
+#                          labels = date_format("%Y/%m"),
+#                          breaks = "1 years") +
+#   theme_bw() + 
+#   theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
+
+df_seatbelts
+```
+
+まずは時系列データの特徴を可視化する。`forecast`パッケージの`ggtsdisplay`関数が便利。自己相関は12ヶ月周期(12,24,36,48,..)で、長期的な自己相関が存在している。偏自己相関でみると、13時点目の相関が高く、概ね12ヶ月周期のデータと考えられる。
+
+```{r}
+df_seatbelts %>% 
+  pull(logy) %>% 
+  ggtsdisplay(lag.max = 12*5, theme=theme_bw())
+```
+
+このままでは非定常過程なので、差分をとってトレンドを除去する。対数差分系列をみると、12ヶ月周期の相関が際立っている。また、単位根がなくなっていることもわかる。
+
+```{r}
+df_seatbelts %>% 
+  pull(logy) %>% 
+  diff() %>% 
+  ggtsdisplay(lag.max = 12*5, theme=theme_bw())
+```
+
+12ヶ月周期は持っていることがわかったので、次は、季節成分の影響を可視化する。月ごとに箱ひげで可視化すると、12月に向かって増加する傾向がある。
+
+```{r}
+df_seatbelts %>% 
+  mutate(month = lubridate::month(dt)) %>% 
+  ggplot(., aes(month, y, group = month)) + 
+  geom_boxplot() +
+  scale_x_continuous(breaks = 1:12) +
+  theme_bw()
+```
+
+周期を取り除くために、12ヶ月ずらして、季節階差をとってみる。季節階差をとることで、季節の影響を取り除ける場合もあるが、今回はそうでもない模様。
+
+```{r}
+df_seatbelts %>% 
+  pull(logy) %>% 
+  diff(lag = 12) %>% 
+  diff(lag = 1) %>% 
+  ggtsdisplay(lag.max = 12*5, theme=theme_bw())
+```
+
+本来であればモデリングを行う前に学習データ、評価データ、テストデータに分割してモデリングに移るが、`modeltime`パッケージや`tidymodels`パッケージが便利なので、ここでは簡単にデータ分割して、関数の使用例をまとめる程度にまとめる。組み込みで`arima`関数が用意されているが、ここでは、`forecast`パッケージの`Arima`関数を利用する。
+
+ARIMA(p,d,q)(P,D,Q)[s]において、orderは(p,d,q)の部分で、seasonalは(P,D,Q)[s]の部分、`xreg`は説明変数で`matrix`クラスを渡す。差分をとった系列を渡さなくても、差分を指定すれば内部で処理してくれる。また、`auto.arime`関数では次数の調整をモデル評価を行いながら自動で行ってくれる。
+
+```{r}
+df_train <- df_seatbelts %>% 
+  filter(dt <= (max(dt) - lubridate::years(1)))
+
+df_test <- df_seatbelts %>% 
+  filter(dt >  (max(dt) - lubridate::years(1)))
+
+df_train_reg <-
+  df_train %>% 
+    select(law = x_law, petrolprice = x_petrolprice) %>% 
+    as.matrix()
+
+fit_arima <-
+  Arima(
+    y = df_train %>% dplyr::pull(logy),
+    order = c(1, 1, 1),
+    seasonal = list(order = c(0, 1, 0), period = 12),
+    xreg = df_train_reg
+  )
+```
+
+推定されたパラメタの`law`と`petrolprice`はネガティブなので、これらは死傷者数を減らす効果があることがわかる。
+
+```{r}
+summary(fit_arima)
+```
+
+SARIMAモデルの理解を深めるために、少し次数を調整してパラメタを推定する。
+
+```{r}
+fit_arima2 <-
+  Arima(
+    y = df_train %>% dplyr::pull(logy),
+    order = c(2, 1, 2),
+    seasonal = list(order = c(1, 1, 1), period = 12)
+  )
+
+fit_arima2
+```
+
+推定結果をモデルに当てはめると、下記のようなモデルを推定したことを意味している。
+
+$$
+\begin{eqnarray}
+\left( 1 - \displaystyle \sum_{i=1}^{p} \phi_{i}B^{i}\right)
+\left( 1 - \displaystyle \sum_{I=1}^{P} \Phi_{I}B^{sI}\right)
+\Delta^{d}\Delta^{D}_{s}y_{t} &=& 
+\left( 1 + \displaystyle \sum_{j=1}^{q} \theta_{j}B^{j}\right)
+\left( 1 + \displaystyle \sum_{J=1}^{Q} \Theta_{J}B^{sJ}\right)
+\epsilon_{t} \\
+\left( 1 - \displaystyle \sum_{i=1}^{p} \phi_{i}B^{i}\right)    &=& (1 + 0.6191B - 0.0881B^{2}) \\
+\left( 1 - \displaystyle \sum_{I=1}^{P} \Phi_{I}B^{sI}\right)   &=& (1 + 0.1546B^{12}) \\
+\left( 1 + \displaystyle \sum_{j=1}^{q} \theta_{j}B^{j}\right)  &=& (1 + 0.0599B -0.5013B^{2}) \\
+\left( 1 + \displaystyle \sum_{J=1}^{Q} \Theta_{J}B^{sJ}\right) &=& (1 -0.9995B^{12}) \\
+\Delta^{d}\Delta^{D}_{s}y_{t} &=& (1 - B)(1 - B^{12})y_{t}\\
+\end{eqnarray}
+$$
+
+
+

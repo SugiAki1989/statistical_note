@@ -1,0 +1,474 @@
+---
+title: "Rで勾配降下法を可視化する"
+pagetitle: "Rで勾配降下法を可視化する"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    out.width = 800,
+    out.height = 600,
+    fig.align = "center",
+    dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではRを使ってRで勾配降下法を可視化する方法をまとめておく。下記を大いに参考にさせていただいた。
+
+- [2 Gradient Descent](https://egallic.fr/Enseignement/ML/ECB/book/gradient-descent.html)
+
+
+## 2次元の勾配降下法
+
+まずは必要なライブラリを読み込んでおく。
+
+```{r}
+library(tidyverse)
+library(numDeriv)
+library(gganimate)
+library(plot3D)
+```
+
+関数$f(x)= x^4 - 3x^3 + x^2 + 3x + 1$を使って、勾配法を可視化する。
+
+```{r}
+x <- seq(-1, 2, by = .01)
+f <- function(x) x^4 - 3*x^3 + x^2 + 3*x + 1
+y <- f(x)
+df <- tibble(x = x, y = y)
+df
+```
+
+関数を可視化するスクリプト。
+
+```{r}
+ggplot(df, aes(x, y)) +
+  geom_line() +
+  geom_segment(
+    data = tibble(x = -0.443, xend = -0.443,y = -Inf, yend = f(-0.443)),
+    aes(x = x, y=y, xend=xend, yend = yend), col = "red"
+    ) + 
+  theme_classic()
+```
+
+`x_0 = 0.5`を初期値として勾配法を可視化する。
+
+```{r}
+x_0 <- 0.5
+f(x_0)
+```
+
+グラフに初期値をプロットする。
+
+```{r}
+ggplot(df, aes(x, y)) +
+  geom_line() +
+  geom_point(x = x_0, y = f(x_0), colour = "red") + 
+  theme_classic()
+```
+$x^{4}-3x^{3}+x^{2}+3x+1$を$x$について微分して導関数を使って$x = 0.5$の値を計算する
+
+$$
+\begin{eqnarray}
+\displaystyle \frac{d}{dx}(x^{4} - 3x^{3} + x^{2} + 3x + 1) = 4 x^3 - 9 x^2 + 2 x + 3 \\
+\end{eqnarray}
+$$
+
+傾きは`numDeriv`パッケージの`grad`関数で計算できる。
+
+```{r}
+# 上記の導関数にx=0.5の値を代入した結果
+grad <- grad(func = f, x = c(x_0))
+grad
+```
+
+直線の方程式を式変形すれば、切片を計算できるので、切片を計算する。
+
+```{r}
+# f(x) = intercept + grad * x_0を変形する
+intercept <- -grad*x_0 + f(x_0)
+intercept
+```
+
+$x = 0.5$における傾きを可視化する。この点での傾きが正なので、左側にすすめる。
+
+```{r}
+ggplot(df, aes(x, y)) +
+  geom_line() +
+  geom_point(x = x_0, y = f(x_0), colour = "red") +
+  geom_abline(slope = grad, intercept = intercept, colour = "blue") + 
+  theme_classic()
+```
+
+更新した値を使って、傾きと切片を求めると、傾きがまだ正なので、左に進めていく。
+
+```{r}
+learning_rate <- 0.2
+x_1 <- x_0 - learning_rate * grad
+grad_x_1 <- grad(func = f, x = c(x_1))
+intercept_x_1 <- -grad_x_1*x_1 + f(x_1)
+
+ggplot(df, aes(x, y)) +
+  geom_line() +
+  geom_point(x = x_0, y = f(x_0), colour = "gray") + 
+  geom_point(x = x_1, y = f(x_1), colour = "red") +
+  geom_abline(slope = grad_x_1, intercept = intercept_x_1, colour = "blue") + 
+  theme_classic()
+```
+
+これを繰り返す。傾きが負になったので、次は右にすすめる。
+
+```{r}
+x_2 <- x_1 - learning_rate * grad_x_1
+grad_x_2 <- grad(func = f, x = c(x_2))
+intercept_x_2 <- -grad_x_2*x_2 + f(x_2)
+
+ggplot(df, aes(x, y)) +
+  geom_line() +
+  geom_point(x = x_0, y = f(x_0), colour = "gray") + 
+  geom_point(x = x_1, y = f(x_1), colour = "gray") +
+  geom_point(x = x_2, y = f(x_2), colour = "red") +
+  geom_abline(slope = grad_x_2, intercept = intercept_x_2, colour = "blue") + 
+  theme_classic()
+```
+
+これを繰り返すことで、関数の最小値を計算するアルゴリズムが勾配法。
+
+
+```{r}
+x_3 <- x_2 - learning_rate * grad_x_2
+grad_x_3 <- grad(func = f, x = c(x_3))
+intercept_x_3 <- -grad_x_3*x_3 + f(x_3)
+
+ggplot(df, aes(x, y)) +
+  geom_line() +
+  geom_point(x = x_0, y = f(x_0), colour = "gray") + 
+  geom_point(x = x_1, y = f(x_1), colour = "gray") +
+  geom_point(x = x_2, y = f(x_2), colour = "gray") +
+  geom_point(x = x_3, y = f(x_3), colour = "red") +
+  geom_abline(slope = grad_x_3, intercept = intercept_x_3, colour = "blue") + 
+  theme_classic()
+```
+
+これをアニメーションで可視化する。まずは可視化用のデータを作るために勾配の繰り返し処理を行う。
+
+```{r}
+iter <- 200
+# tolerance <- 10^-6
+eta <- 0.01
+
+x_1 <- 0.5
+# To keep track of the values through the iterations
+x_1_values <- x_1
+y_1_values <- f(x_1)
+gradient_values <- NULL
+intercept_values <- NULL
+
+for(i in 1:iter){
+  # Steepest ascent:
+  grad <- grad(func = f, x = c(x_1))
+  
+  intercept_value <- -grad*x_1 + f(x_1)
+  # Keeping track
+  gradient_values <- c(gradient_values, grad)
+  intercept_values <- c(intercept_values, intercept_value)
+  
+  # Updating the value
+  x_1 <- x_1 - eta * grad
+  y_1 <- f(x_1)
+  
+  # Keeping track
+  x_1_values <- c(x_1_values, x_1)
+  y_1_values <- c(y_1_values, y_1)
+  
+  # Stopping if no improvement (decrease of the cost function too small)
+  # if(abs(y_1_values[i] - y_1 < tolerance)) break
+  
+}
+```
+
+可視化用のデータフレームを作成する。
+
+```{r}
+df_plot <- tibble(
+  iter = 1:iter,
+  xx = seq(-1, 2, length.out = iter),
+  x_1 = x_1_values[-length(x_1_values)],
+  y = f(x_1),
+  gradient = gradient_values,
+  intercept = intercept_values
+) 
+head(df_plot)
+```
+
+勾配降下法をアニメーションで可視化する。
+
+```{r}
+ggplot(df_plot %>% filter(iter < 100)) +
+  stat_function(fun = f, aes(xx)) + 
+  geom_point(aes(x = x_1, y = y), colour = "red") +
+  geom_abline(aes(slope = gradient, intercept = intercept), colour = "blue") + 
+  geom_text(aes(x = x_1, y = y + 0.2, label = gradient)) + 
+  theme_bw() + 
+  transition_time(iter) +
+  labs(title = "Iteration: {frame_time}", x = 'x') + 
+  ease_aes('elastic-in')
+```
+
+## 3次元の勾配降下法
+
+次は3次元の勾配降下法を可視化する。関数$f(x)=x^2_{1} + x^2_{2}$を可視化する。
+
+```{r}
+x_1 <- x_2 <- seq(-2, 2, by = 0.3)
+z_f <- function(x_1,x_2) x_1^2+x_2^2
+z <- outer(x_1, x_2, z_f)
+
+par(mar = c(1, 1, 1, 1))
+flip <- 1 # 1 or 2
+th = c(-300, 120)[flip]
+pmat <- persp3D(x = x_1, y = x_2, z = z, 
+                colkey = FALSE, # 凡例
+                contour=TRUE, # 等高線
+                ticktype = "detailed", # 目盛り
+                asp = 1, phi = 30, theta = th, 
+                border = "gray10", alpha = 0.4,
+                expand = .6, # 横広げる
+                axes = TRUE, box = TRUE
+                )
+```
+
+初期値を$X=(1.5, 1.5)$とする。赤色の点をプロットする。
+
+```{r}
+theta <- c(x_1 = 1.5, x_2 = 1.5)
+
+zz <- z_f(theta[["x_1"]], theta[["x_2"]])
+new_point <- trans3d(theta[["x_1"]], theta[["x_2"]], zz, pmat = pmat)
+
+pmat <- persp3D(
+  x = x_1, y = x_2, z = z,
+  colkey = FALSE, # 凡例
+  contour = TRUE, # 等高線
+  ticktype = "detailed", # 目盛り
+  asp = 1,
+  phi = 30,
+  theta = th,
+  border = "gray10",
+  alpha = 0.4,
+  expand = 0.6, # 横広げる
+  axes = TRUE,
+  box = TRUE
+)
+points(new_point,　pch = 20, col = "red", cex = 2)
+```
+
+更新式は下記の通りなので、
+
+$$
+\begin{eqnarray}
+\begin{bmatrix}
+x^{(t+1)}_{1} \\
+x^{(t+1)}_{2}
+\end{bmatrix}
+=
+\begin{bmatrix}
+x^{(t)}_{1} \\
+x^{(t)}_{2}
+\end{bmatrix}
+-
+\eta
+\begin{bmatrix}
+\frac{ \partial f }{ \partial x_{1} }(x^{(t)}_{1}, x^{(t)}_{2}) \\
+\frac{ \partial f }{ \partial x_{2} }(x^{(t)}_{1}, x^{(t)}_{2}) 
+\end{bmatrix}
+\end{eqnarray}
+$$
+
+初期値を更新するために勾配を計算する。
+
+```{r}
+learning_rate <- 0.1
+z_f_to_optim <- function(theta){
+  x_1 <- theta[["x_1"]]
+  x_2 <- theta[["x_2"]]
+  x_1^2 + x_2^2
+}
+grad <- grad(func = z_f_to_optim, x = theta)
+grad
+```
+
+初期値を更新する。
+
+```{r}
+updated_x_1 <- theta[["x_1"]] - learning_rate * grad[1]
+updated_x_2  <- theta[["x_2"]] - learning_rate * grad[2]
+updated_theta <- c(x_1 = updated_x_1, x_2 = updated_x_2)
+updated_theta
+```
+
+新しい`z`を計算する。
+
+```{r}
+updated_zz <- z_f(updated_theta[["x_1"]], updated_theta[["x_2"]])
+new_point_2 <- trans3d(updated_theta[["x_1"]],
+                       updated_theta[["x_2"]],
+                       updated_zz,
+                       pmat = pmat)
+new_point_2
+```
+
+これを使って、更新した点をプロットする。
+
+```{r}
+pmat <- persp3D(
+  x = x_1, y = x_2, z = z,
+  colkey = FALSE,  # 凡例
+  contour = TRUE,  # 等高線
+  ticktype = "detailed",  # 目盛り
+  asp = 1,
+  phi = 30,
+  theta = th,
+  border = "gray10",
+  alpha = 0.4,
+  expand = 0.6,  # 横広げる
+  axes = TRUE,
+  box = TRUE
+)
+points(new_point,pch = 20,col = "black", cex=2)
+points(new_point_2,pch = 20,col = "red", cex=2)
+```
+
+これを2次元のときと同じ用に、繰り返して勾配法を実行する。
+
+```{r}
+eta <- 0.1
+iter <- 50
+#tolerance <- 10^-5
+
+# Starting values
+theta <- c(x_1 = 1.5, x_2 = 1.5)
+
+# To keep track of what happens at each iteration
+theta_values <- list(theta)
+y_values <- z_f_to_optim(theta)
+
+for(i in 1:iter){
+  # Steepest ascent
+  grad <- grad(func = z_f_to_optim, x = theta)
+  
+  # Updating the parameters
+  updated_x_1 <- theta[["x_1"]] - eta * grad[1]
+  updated_x_2  <- theta[["x_2"]] - eta * grad[2]
+  theta <- c(x_1 = updated_x_1, x_2 = updated_x_2)
+  
+  # Keeping track
+  theta_values <- c(theta_values, list(theta))
+  
+  # Checking for improvement
+  y_updated <- z_f_to_optim(theta)
+  y_values <- c(y_values, y_updated)
+  
+  # if(abs(y_values[i] - y_updated) < tolerance) break
+}
+```
+
+勾配法の実行過程を可視化する。
+
+```{r}
+par(mar = c(1, 1, 1, 1))
+flip <- 1 # 1 or 2
+th = c(-300,120)[flip]
+pmat <- persp3D(
+  x = x_1, y = x_2, z = z,
+  colkey = FALSE, # 凡例
+  contour = TRUE, # 等高線
+  ticktype = "detailed", # 目盛り
+  asp = 1,
+  phi = 30,
+  theta = th,
+  border = "gray10",
+  alpha = 0.2,
+  expand = 0.6, # 横広げる
+  axes = TRUE,
+  box = TRUE
+)
+
+xx <- map_dbl(theta_values, "x_1")
+yy <- map_dbl(theta_values, "x_2")
+zz <- y_values
+new_point <- trans3d(xx, yy, zz, pmat = pmat)
+lines(new_point, pch = 20, col = "red", cex = 1, lwd = 2)
+points(new_point, pch = 20, col = "red", cex = 1)
+```
+
+アニメーションさせる場合は下記を利用する。
+
+![descent_2D_sphere](https://user-images.githubusercontent.com/65038325/187624164-f7a4c182-d390-4bce-bbba-374226a9a57d.gif)
+
+```{r}
+# library(animation)
+# saveGIF({
+#   for (j in c(rep(1, 5), 2:(i - 1), rep(i, 10))) {
+#     par(mar = c(1, 1, 1, 1))
+#     flip <- 1 # 1 or 2
+#     th = c(-300, 120)[flip]
+#     pmat <- persp3D(
+#       x = x_1, y = x_2, z = z,
+#       colkey = FALSE, # 凡例
+#       contour = TRUE, # 等高線
+#       ticktype = "detailed", # 目盛り
+#       asp = 1,
+#       phi = 30,
+#       theta = th,
+#       border = "gray10",
+#       alpha = 0.2,
+#       expand = 0.6, # 横広げる
+#       axes = TRUE,
+#       box = TRUE
+#     )
+#     
+#     xx <- map_dbl(theta_values, "x_1")[1:j]
+#     yy <- map_dbl(theta_values, "x_2")[1:j]
+#     zz <- y_values[1:j]
+#     new_point <- trans3d(xx, yy, zz, pmat = pmat)
+#     lines(
+#       new_point,
+#       pch = 20,
+#       col = "red",
+#       cex = 2,
+#       lwd = 2
+#     )
+#     points(new_point,
+#            pch = 20,
+#            col = "red",
+#            cex = 2)
+#   }
+#   
+# },
+# movie.name = "~/Desktop/descent_2D_sphere.gif",
+# interval = 0.01,
+# ani.width = 720,
+# ani.height = 480)
+```
+
+

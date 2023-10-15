@@ -1,0 +1,438 @@
+---
+title: "RのTidy evaluation_14"
+pagetitle: "RのTidy evaluation_14"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+ブログからの引っ越し記事。
+
+## はじめに
+この記事はTidy evaluationについて学習した内容を自分の備忘録としてまとめたものです。もはやTidy evaluationに関する記事でもないですが…。
+
+追記   
+2019.11.20 `{furrr}`で並列化  
+2019.12.05 既存のリバースジオパッケージを追加
+2020.01.05 緯度経度の集合から住所を返すみたいな方が速いかもというアイデアを思いついた。未実装。  
+
+### リバースジオコーディング
+2点のポイントの緯度と経度の情報を持っている場合に、住所を求めたいときがある。例えばこんなデータがあったとして、この一番右側の`address`を取得したい。
+
+```R:R
+airbnb <- read_csv("airbnb.csv")
+
+airbnb %>% 
+  sample_n(10) %>% 
+  mutate(address = get_address(data = .,
+                               latitude = latitude,
+                               longitude = longitude)) %>% 
+  #緯度経度が丸まるのでブログの表示のための対応
+  as.data.frame()
+
+         id         city latitude longitude                            address
+1  35655122         羽田 35.55354  139.7410     東京都大田区東糀谷３丁目４－１
+2  37143771 Shibuya City 35.66351  139.7015           東京都渋谷区神宮前６丁目
+3  33208009 Toshima City 35.73246  139.7200   東京都豊島区東池袋２丁目４５－８
+4  27414846  Shinjuku-ku 35.68812  139.6860       東京都新宿区西新宿４丁目２３
+5  29367527     Shinjuku 35.70464  139.7007         東京都新宿区百人町３丁目１
+6  22397913    Nakano-ku 35.70118  139.6681         東京都中野区中央４丁目２６
+7  15905026  Suginami-ku 35.69878  139.6581 東京都杉並区高円寺南１丁目７－２０
+8  36077194  Sumida City 35.71061  139.8151     東京都墨田区押上１丁目２２－７
+9  31005512       新宿区 35.70751  139.7288                 東京都新宿区山吹町
+10 26564707 Shinagawa-ku 35.63182  139.7147   東京都品川区上大崎４丁目５－１０
+```
+
+そこで、`{RCurl}`、`{rjson}`を組みあわせて、緯度経度から住所を取得する関数を書いてみる。また、住所を返すために[Yahoo!リバースジオコーダAPI](https://developer.yahoo.co.jp/webapi/map/openlocalplatform/v1/reversegeocoder.html)を利用している。プロキシ関係でハマったら、こちらを参照。
+
+- [RからYahoo!のジオコーディングを利用する方法](http://tips-r.blogspot.com/2014/07/ryahoo.html)
+
+
+## 注意点
+下記の関数は、Yahoo!リバースジオコーダAPIがSSL対応しているため、リクエストURLが変更されると動かない…。現状(2019.11.20)のURLは、関数内にある`https://map.yahooapis.jp/geoapi/V1/reverseGeoCoder`です。は[リクエストパラメタ](https://developer.yahoo.co.jp/webapi/map/openlocalplatform/v1/reversegeocoder.html)はこちらから。
+
+また、アプリケーションIDを発行してAPIのキーがいります。デベロッパーネットワークのマイページから、`デベロッパーネットワークトップ>アプリケーションの管理>アプリケーションの詳細`とたどれば、発行したあとであれば確認できる。デベロッパーネットワークの[リンク](https://developer.yahoo.co.jp/webapi/map/)はこちら。
+
+## 関数
+下記が関数である。私のエンジニアリング能力の低さが露呈しており、15000とか取得すると、60分くらいかかる。
+
+```R:R
+library(tidyverse)
+library(RCurl)
+library(rjson)
+
+get_address <- function(data, latitude, longitude, apikey = NULL) {
+  
+  stopifnot(!is.null(apikey))
+  
+  lat_enq <- rlang::enquo(latitude)
+  lon_enq <- rlang::enquo(longitude)
+  
+  lat <- data %>% dplyr::select(!!lat_enq) %>% dplyr::pull()
+  lon <- data %>% dplyr::select(!!lon_enq) %>% dplyr::pull()
+  
+  # リクエストURL
+  url_root <- "https://map.yahooapis.jp/geoapi/V1/reverseGeoCoder?"
+  
+  address <- purrr::map2(.x = lat,
+                         .y = lon, 
+                         .f = function(x, y) {
+                           paste0(url_root, "&lat=", x, "&lon=", y, "&appid=", apikey, "&output=json")}) %>% 
+    purrr::map(.x = .,
+               .f = function(x){URLencode(iconv(x, "", "UTF-8"))}) %>% 
+    purrr::map(.x = .,
+               .f = function(x){
+                 Sys.sleep(0.1)
+                 RCurl::getURL(x)}) %>% 
+    purrr::map(.x = .,
+               .f = function(x){rjson::fromJSON(x, simplify = FALSE)}) %>% 
+    purrr::map_chr(.x = .,
+                   .f = function(x) {x$Feature[[1]]$Property$Address})
+  
+}
+
+airbnb %>% 
+  mutate(address = get_address(data = .,
+                               latitude = latitude,
+                               longitude = longitude,
+                               apikey = "<your API Key>"))
+
+# A tibble: 10 x 5
+         id level_name   latitude longitude address                           
+      <dbl> <chr>           <dbl>     <dbl> <chr>                             
+ 1 32533360 東京都豊島区     35.7      140. 東京都豊島区雑司が谷１丁目４２－７
+ 2 28038521 東京都新宿区     35.7      140. 東京都新宿区大久保１丁目１２      
+ 3 30297695 東京都台東区     35.7      140. 東京都台東区入谷２丁目１８        
+ 4 28620700 東京都大田区     35.6      140. 東京都大田区東蒲田１丁目１１      
+ 5 16968151 東京都渋谷区     35.7      140. 東京都渋谷区円山町２０            
+ 6 29205619 東京都港区       35.7      140. 東京都港区赤坂５丁目２            
+ 7 38162822 東京都新宿区     35.7      140. 東京都新宿区下落合１丁目１０－７  
+ 8 17142818 東京都墨田区     35.7      140. 東京都墨田区業平４丁目５－１４    
+ 9 24996260 東京都足立区     35.8      140. 東京都足立区梅島３丁目３２－６    
+10 34033430 東京都新宿区     35.7      140. 東京都新宿区百人町１丁目２３－１  
+
+```
+
+## 並列化
+これではあまりも遅いので、並列化してみた。`{furrr}`パッケージを使った。15000件でおよそ35分(`plan(sequential)`)だった。しかし、並列化のことを詳しくしらないので、これで本当に良い並列化になっているのかしりたい。そこは次回まとめたい。
+
+```R:R
+library(furrr)
+library(RCurl)
+library(rjson)
+library(tidyverse)
+
+df <- read_csv("airbnb_list.csv") 
+
+df <- df %>% 
+  dplyr::rename(LALA = latitude,
+         LOLO = longitude)
+
+get_address <- function(data, latitude, longitude, apikey = NULL) {
+  
+  stopifnot(!is.null(apikey))
+  
+  lat_enq <- enquo(latitude)
+  lon_enq <- enquo(longitude)
+  
+  lat_nm_enq <- rlang::quo_text(lat_enq)
+  lon_nm_enq <- rlang::quo_text(lon_enq)
+  
+  lat <- data %>% dplyr::select(!!lat_enq) %>% dplyr::pull()
+  lon <- data %>% dplyr::select(!!lon_enq) %>% dplyr::pull()
+  
+  url_root <- "https://map.yahooapis.jp/geoapi/V1/reverseGeoCoder?"
+
+  tmp <- furrr::future_map2(.x = lat, .y = lon,
+                            .f = function(x, y) {paste0(url_root, "&lat=", x, "&lon=", y, "&appid=", apikey, "&output=json")},
+                            .progress = TRUE) %>% 
+    furrr::future_map(.x = .,
+                      .f = function(x){URLencode(iconv(x, "", "UTF-8"))},
+                      .progress = TRUE) %>% 
+    furrr::future_map(.x = .,
+                      .f = function(x){
+                        Sys.sleep(0.1)
+                        RCurl::getURL(x)},
+                      .progress = TRUE) %>% 
+    furrr::future_map(.x = .,
+                      .f = function(x){rjson::fromJSON(x, simplify = FALSE)},
+                      .progress = TRUE) %>% 
+    furrr::future_map_dfr(.x = .,
+                          .f = function(x) {list(address  = x$Feature[[1]]$Property$Address,
+                                                 geo_info = x$Feature[[1]]$Geometry$Coordinates)},
+                          .progress = TRUE) %>% 
+    tidyr::separate(data = .,
+                    col = geo_info,
+                    into = c("longitude","latitude"),
+                    sep = ",",
+                    convert = TRUE) %>%
+    dplyr::group_by_all() %>% 
+    dplyr::distinct() %>% 
+    dplyr::ungroup()
+  
+  res <- data %>% 
+    dplyr::left_join(x = .,
+              y = tmp,
+              by = setNames(nm     = c(lat_nm_enq, lon_nm_enq),
+                            object = c("latitude", "longitude")))
+  return(res)
+}
+
+plan(sequential)
+system.time(
+df %>% 
+  get_address(.,
+              latitude = LALA,
+              longitude = LOLO,
+              apikey = "<your API Key>")
+)
+ ユーザ   システム       経過  
+159.352     16.142   2047.208 
+```
+
+`plan(multiprocess)`で実行すると、およそ10分くらいまで短縮できた。
+
+```R:R
+plan(multiprocess)
+system.time(
+df %>% 
+  get_address(.,
+              latitude = LALA,
+              longitude = LOLO,
+              apikey = "<your API Key>")
+)
+
+   ユーザ   システム       経過  
+    13.702      1.358    559.617 
+```
+
+### ベクトル化
+Rの関数はベクトル化されていることが多いので、何も気にせずベクトルを入れれば、ベクトルを返すと思ってしまうが、そこはちゃんと意識しないと行けない。これらの関数を書く前に、最初はこんな関数を書いていたが、見ての通り`adreess`が1つしか返ってない。
+
+```R:R
+get_address <- function(x) {
+  res <- URLencode(iconv(x, "", "UTF-8")) 
+  res <- RCurl::getURL(res)
+  res <- rjson::fromJSON(res, simplify = FALSE)
+  res <- res$Feature[[1]]$Property$Address
+  return(res)
+}
+
+url_root <- "https://map.yahooapis.jp/geoapi/V1/reverseGeoCoder?"
+apikey <- "<your api key>"
+
+df2 <- df %>%
+  slice(1:10) %>% 
+  mutate(input = paste0(url_root, "&lat=", latitude, "&lon=", longitude, "&appid=", apikey, "&output=json"),
+         no = row_number())
+
+df2 %>% 
+  mutate(address = get_address(input),
+         id2 = id/10000) %>% 
+  select(-input)
+
+# A tibble: 10 x 7
+        id city     latitude longitude    no address                         id2
+     <dbl> <chr>       <dbl>     <dbl> <int> <chr>                         <dbl>
+ 1   35303 渋谷区       35.7      140.     1 東京都渋谷区神宮前３丁目３６   3.53
+ 2  197677 墨田区       35.7      140.     2 東京都渋谷区神宮前３丁目３６  19.8 
+ 3  289597 練馬区       35.7      140.     3 東京都渋谷区神宮前３丁目３６  29.0 
+ 4  370759 世田谷区     35.7      140.     4 東京都渋谷区神宮前３丁目３６  37.1 
+ 5  700253 練馬区       35.7      140.     5 東京都渋谷区神宮前３丁目３６  70.0 
+ 6  776070 北区         35.7      140.     6 東京都渋谷区神宮前３丁目３６  77.6 
+ 7  872235 世田谷区     35.7      140.     7 東京都渋谷区神宮前３丁目３６  87.2 
+ 8  899003 新宿区       35.7      140.     8 東京都渋谷区神宮前３丁目３６  89.9 
+ 9  905944 渋谷区       35.7      140.     9 東京都渋谷区神宮前３丁目３６  90.6 
+10 1007534 三鷹市       35.7      140.    10 東京都渋谷区神宮前３丁目３６ 101.  
+```
+
+なので、関数をこうすのであれば、使う時に`map()`などを噛ますか、ベクトル化するように関数を書き換える。
+
+```R:R
+df2 %>% 
+  mutate(address = map_chr(.x = input, .f = function(x){get_address(x)})) %>% 
+  select(-input)
+
+# A tibble: 10 x 6
+        id city     latitude longitude    no address                     
+     <dbl> <chr>       <dbl>     <dbl> <int> <chr>                       
+ 1   35303 渋谷区       35.7      140.     1 東京都渋谷区神宮前３丁目３６
+ 2  197677 墨田区       35.7      140.     2 東京都墨田区八広２丁目２７  
+ 3  289597 練馬区       35.7      140.     3 東京都練馬区桜台５丁目２４  
+ 4  370759 世田谷区     35.7      140.     4 東京都世田谷区松原５丁目５８
+ 5  700253 練馬区       35.7      140.     5 東京都練馬区桜台５丁目２４  
+ 6  776070 北区         35.7      140.     6 東京都北区田端新町１丁目２８
+ 7  872235 世田谷区     35.7      140.     7 東京都世田谷区松原１丁目３２
+ 8  899003 新宿区       35.7      140.     8 東京都新宿区百人町４丁目６  
+ 9  905944 渋谷区       35.7      140.     9 東京都渋谷区本町１丁目２５  
+10 1007534 三鷹市       35.7      140.    10 東京都三鷹市井の頭４丁目１  
+```
+
+`get_address2()`はベクトル化に対応させた関数。
+
+```R:R
+get_address2 <- function(x) {
+  n <- length(x)
+  out <- vector("list", n)
+  for(i in 1:n){
+    res <- URLencode(iconv(x[[i]], "", "UTF-8")) 
+    res <- RCurl::getURL(res)
+    res <- rjson::fromJSON(res, simplify = FALSE)
+    out[[i]] <- res$Feature[[1]]$Property$Address
+  }
+  unlist(out)
+}
+
+df2 %>% 
+  mutate(address = get_address2(input)) %>% 
+  select(-input)
+
+# A tibble: 10 x 6
+        id city     latitude longitude    no address                     
+     <dbl> <chr>       <dbl>     <dbl> <int> <chr>                       
+ 1   35303 渋谷区       35.7      140.     1 東京都渋谷区神宮前３丁目３６
+ 2  197677 墨田区       35.7      140.     2 東京都墨田区八広２丁目２７  
+ 3  289597 練馬区       35.7      140.     3 東京都練馬区桜台５丁目２４  
+ 4  370759 世田谷区     35.7      140.     4 東京都世田谷区松原５丁目５８
+ 5  700253 練馬区       35.7      140.     5 東京都練馬区桜台５丁目２４  
+ 6  776070 北区         35.7      140.     6 東京都北区田端新町１丁目２８
+ 7  872235 世田谷区     35.7      140.     7 東京都世田谷区松原１丁目３２
+ 8  899003 新宿区       35.7      140.     8 東京都新宿区百人町４丁目６  
+ 9  905944 渋谷区       35.7      140.     9 東京都渋谷区本町１丁目２５  
+10 1007534 三鷹市       35.7      140.    10 東京都三鷹市井の頭４丁目１   
+```
+
+### `{revgeo}`を使ってみる
+他にも[`{revgeo}`](https://github.com/mhudecheck/revgeo/)というパッケージもある。これは、GoogleとかBingのAPIを関数を書く時にAPI Keyを入力すれば、そこのAPIを利用できる便利な関数。デフォルトはphotonみたいなので、photonが提供しているAPIを利用する。ちなみに[`{photon}`](https://github.com/rCarto/photon)のAPIパッケージもある。
+
+photonのAPIを選ぶ理由としては、無料で基本的なリクエストの制限がないから。モラルの範囲で使用しましょう！でないと使えなくなるかもしれません。APIの制限は[こちら](http://photon.komoot.de/)。
+
+
+```R:R
+airbnb <- read_csv("airbnb.csv") %>% sample_n(10)
+
+get_address <- function(data, latitude, longitude) {
+  lat_enq <- rlang::enquo(latitude)
+  lon_enq <- rlang::enquo(longitude)
+  
+  lat <- data %>% dplyr::select(!!lat_enq) %>% dplyr::pull()
+  lon <- data %>% dplyr::select(!!lon_enq) %>% dplyr::pull()
+  
+  tmp_frame <- revgeo::revgeo(
+    longitude = lon,
+    latitude = lat,
+    provider =  "photon",
+    output = "frame",
+    item = "city"
+  ) %>%
+    select(country, city, state)
+  
+  res <- data %>% bind_cols(tmp_frame)
+  
+  return(res)
+}
+
+res <- airbnb %>% 
+  get_address(latitude, longitude) %>% 
+  as.data.frame()
+
+[1] "Getting geocode data from Photon: http://photon.komoot.de/reverse?lon=139.71098&lat=35.64129"
+[1] "Getting geocode data from Photon: http://photon.komoot.de/reverse?lon=139.69977&lat=35.72829"
+[1] "Getting geocode data from Photon: http://photon.komoot.de/reverse?lon=139.8393&lat=35.74849"
+[1] "Getting geocode data from Photon: http://photon.komoot.de/reverse?lon=139.65383&lat=35.70371"
+[1] "Getting geocode data from Photon: http://photon.komoot.de/reverse?lon=139.71234&lat=35.73721"
+[1] "Getting geocode data from Photon: http://photon.komoot.de/reverse?lon=139.78814&lat=35.71636"
+[1] "Getting geocode data from Photon: http://photon.komoot.de/reverse?lon=139.69087&lat=35.69651"
+[1] "Getting geocode data from Photon: http://photon.komoot.de/reverse?lon=139.80002&lat=35.71871"
+[1] "Getting geocode data from Photon: http://photon.komoot.de/reverse?lon=139.88014&lat=35.74536"
+[1] "Getting geocode data from Photon: http://photon.komoot.de/reverse?lon=139.80809&lat=35.71515"
+
+res
+         id   level_name latitude longitude country       city state
+1  21256253 東京都目黒区 35.64129  139.7110   Japan     Minato Tokyo
+2  29147350 東京都豊島区 35.72829  139.6998   Japan    Toshima Tokyo
+3  31918296 東京都葛飾区 35.74849  139.8393   Japan Katsushika Tokyo
+4  13718522 東京都杉並区 35.70371  139.6538   Japan   Suginami Tokyo
+5  29580551 東京都豊島区 35.73721  139.7123   Japan    Toshima Tokyo
+6  30280733 東京都台東区 35.71636  139.7881   Japan      Taito Tokyo
+7  24420216 東京都新宿区 35.69651  139.6909   Japan   Shinjuku Tokyo
+8  37301037 東京都台東区 35.71871  139.8000   Japan      Taito Tokyo
+9  37197406 東京都葛飾区 35.74536  139.8801   Japan    Edogawa Tokyo
+10 32527161 東京都墨田区 35.71515  139.8081   Japan      Taito Tokyo
+
+```
+
+1、9、10行目とかみるとわかるが、取得した住所がちょととずれている…。1行目はMinatoではなく、東京都目黒区三田２丁目２−１０だし、9行目はEdogawaではなく、東京都葛飾区鎌倉３丁目５５だし、10行目はTaitoではなく東京都墨田区向島２丁目１７らしい。
+
+## 日本の市区町村
+[`{zipangu}`](https://github.com/uribo/zipangu)という、日本の住所を処理してくれる関数や全角英数字や元号の変換、祝日の判定などを効率よく処理してくれるパッケージを使って、リバースジオコーディングしたあとの住所データを加工するラッパー関数を書いたのでまとめておく。`separate_address()`という関数は、東京都渋谷区神宮前3丁目36という住所を、`prefecture`、`city`、`street` に分割してくれる関数。`{purrr}`の`map_dfr()`で複数の住所をまとめてデータフレームで返すようにした。
+
+```R:R
+# separate_address_wrapper
+separate_address_wrapper <- function(data, address) {
+  
+  address_enq <- rlang::enquo(address)
+
+  address_vec <- data %>% 
+    dplyr::select(!!address_enq) %>% 
+    dplyr::pull()
+
+  tmp_frame <- purrr::map_dfr(.x = address_vec,
+                              .f = function(x){
+                                zipangu::separate_address(x)
+                              })
+  
+  res <- data %>% 
+    dplr::bind_cols(tmp_frame)
+  
+  return(res)
+}
+
+
+airbnb %>% 
+  separate_address_wrapper(data = ., address = address)
+
+# A tibble: 10 x 5
+        id address                   prefecture city     street         
+     <dbl> <chr>                     <chr>      <chr>    <chr>          
+ 1   35303 東京都渋谷区神宮前3丁目36 東京都     渋谷区   神宮前3丁目36  
+ 2  197677 東京都墨田区八広2丁目27   東京都     墨田区   八広2丁目27    
+ 3  289597 東京都練馬区桜台5丁目24   東京都     練馬区   桜台5丁目24    
+ 4  370759 東京都世田谷区松原5丁目58 東京都     世田谷区 松原5丁目58    
+ 5  700253 東京都練馬区桜台5丁目24   東京都     練馬区   桜台5丁目24    
+ 6  776070 東京都北区田端新町1丁目28 東京都     北区     田端新町1丁目28
+ 7  872235 東京都世田谷区松原1丁目32 東京都     世田谷区 松原1丁目32    
+ 8  899003 東京都新宿区百人町4丁目6  東京都     新宿区   百人町4丁目6   
+ 9  905944 東京都渋谷区本町1丁目25   東京都     渋谷区   本町1丁目25    
+10 1007534 東京都三鷹市井の頭4丁目1  東京都     三鷹市   井の頭4丁目1  
+```
+
+## 参照サイト
+
+- [furrr パッケージで R で簡単並列処理](https://blog.atusy.net/2018/12/06/furrr/)
+- [Rで(逆)ジオコーディング](http://jundoll.hatenablog.com/entry/2014/11/30/222942)
+- [RからYahoo!のジオコーディングを利用する方法](http://tips-r.blogspot.com/2014/07/ryahoo.html)
+- [dplyr join data frame in side a function using function arguments as by.x and by.y](https://stackoverflow.com/questions/51465129/dplyr-join-data-frame-in-side-a-function-using-function-arguments-as-by-x-and-by)
+- [Can dplyr join on multiple columns or composite key?](https://stackoverflow.com/questions/26611717/can-dplyr-join-on-multiple-columns-or-composite-key)

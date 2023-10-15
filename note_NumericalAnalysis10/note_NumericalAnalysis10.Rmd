@@ -1,0 +1,369 @@
+---
+title: "ポアソン回帰分析"
+pagetitle: "ポアソン回帰分析"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここではポアソン回帰分析の理解を深めるために、ポアソン分布から初めてポアソン回帰分析のパラメタ推定、分析結果の解釈などをまとめていく。主に下記を参照にしている。この書籍はポアソン回帰について非常に詳しく書かれ、EXCELで計算過程まで細かくまとめられており、非常に勉強になる。ここではこの書籍を参照しながら、Rでポアソン回帰分析への理解を深める。
+
+- [最尤法によるポアソン回帰分析入門(2021) 高橋行雄 カクワークス社](https://www.amazon.co.jp/%E6%9C%80%E5%B0%A4%E6%B3%95%E3%81%AB%E3%82%88%E3%82%8B%E3%83%9D%E3%82%A2%E3%82%BD%E3%83%B3%E5%9B%9E%E5%B8%B0%E5%88%86%E6%9E%90%E5%85%A5%E9%96%80-%E9%AB%98%E6%A9%8B%E8%A1%8C%E9%9B%84/dp/4907424337)
+
+## ポアソン分布と最尤法
+
+ポアソン分布は下記の通り定義される離散型確率分布である。
+
+$$
+f(Y=y) = \frac{e^{-\lambda} \lambda^{y}}{y!}, \lambda>0,x=0,1,2, \dots
+$$
+
+ここでも書籍のp13のデータを利用して、最尤法でパラメタ$\lambda$を推定する。
+
+```{r}
+## data: 
+## スネデカー・コクラン著，畑村・奥野・津村訳(1972) 「統計的方法第6版」の第8.14節
+## Phleum praetense(イチゴツナギ)の98標本に含まれる有害雑草の種子数
+library(tidyverse)
+library(numDeriv)
+library(gganimate)
+
+d <- tibble(
+  x = rep(0:11, times = c(3, 17, 26, 16, 18, 9, 3, 5, 0, 1, 0, 0))
+)
+
+df <- d %>% count(y = x)
+df
+```
+
+このサンプルデータのカウント数を可視化するとこのような分布になる。
+
+```{r}
+ggplot(data = df) + 
+  geom_bar(aes(y, n), stat = 'identity', fill = '#E86670', col = 'black') + 
+  geom_text(aes(y, n + 1, label = n)) + 
+  scale_x_continuous(breaks = seq(0, 11, 1)) + 
+  theme_classic()
+```
+
+少し手間を加えて、ポアソン分布の確率を重ねて表示する。天下り的だが、この後に推定する最尤推定値をパラメタとして利用する。可視化した分布をみると、ポアソン分布がある程度フィットしている事がわかる。
+
+```{r}
+LAM <- 3.020402
+df_ratio <- df %>% 
+  mutate(ratio = n/sum(n))
+
+df_pois <- tibble(x = 0:9) %>% 
+  mutate(prob = dpois(x, lambda = LAM))
+
+ggplot() + 
+  geom_bar(data = df_ratio, aes(y, ratio), stat = 'identity', fill = '#E86670', col = 'black') + 
+  geom_text(data = df_ratio, aes(y, ratio + 0.01, label = round(ratio,3))) + 
+  geom_line(data = df_pois, aes(x = x, y = prob), alpha = 0.5) +
+  scale_x_continuous(breaks = seq(0, 11, 1)) + 
+  theme_classic()
+```
+
+ここからはこのサンプルデータが、ポアソン分布から生成されたと仮定して最尤法でパラメタを推定していく。
+
+対数尤度の合計を地道に計算してみる。尤度は各$y_{i}$がポアソン分布で起こる確率を$n$個分掛け合わせた値である。つまり、$\prod L$である。$y=0$のとき、ポアソン分布は確率$\frac{e^{-3.02}3.02^{0}}{0!}=0.048781604$を返すので。$y=0$のとき、$n=3$より、$0.048781604^3=0.0001160829$となり$log(0.0001160829)=-9.061206$となる。これをその他の$y$で繰り返して足し合わせると対数尤度が計算できる。
+
+```{r}
+df2 <- tibble(i = 0:9) %>% 
+  left_join(df, by = c('i' = 'y')) %>% 
+  rename(y = i) %>% 
+  mutate(
+    probability = dpois(y, lambda = LAM),
+    likelihood = probability^n,
+    log_likelihood = log(likelihood)
+    )
+df2
+```
+
+$\lambda=3.02$のとき、対数尤度は下記の通りとなる。
+
+```{r}
+df2 %>% 
+  summarise(sum_log_likelihood = sum(log_likelihood, na.rm = TRUE))
+```
+
+最尤法は、このような形でポアソン分布のパラメタ$\lambda$をずらしていき、対数尤度が最大となる点を求める方法である。$n$個のサンプルデータがある場合、対数尤度関数$logL$は下記のように書ける。
+
+$$
+log L(\lambda | \boldsymbol{y}) = \left( \sum y_{i} \right) log \lambda - \sum log(y_{i} !) - n\lambda
+$$
+
+$\lambda$を少しづつずらしていき、対数尤度関数が最大となるイメージを可視化する。
+
+```{r}
+# 対数尤度関数 
+# 下記の個別のyをsumしても対数尤度の合計は計算可能
+# sum(dpois(y, lambda = λ,log=TRUE))でもよい
+# log(exp(-λ)*λ^x/factorial(x))
+# x*log(λ) - λ - log(factorial(x))
+# lfactorial(y) = log(factorial(y))
+loglikelihood <- function(lam, y) sum(y)*log(lam) - sum(lfactorial(y)) - length(y)*lam
+
+lam <- seq(0.01, 10, 0.01)
+lam_n <- length(lam)
+ll <- vector(mode = 'numeric', length = lam_n)
+for (i in seq_along(1:lam_n)) {
+  ll[[i]] <- loglikelihood(lam[[i]], d$x)
+}
+
+loglikelihood_df <- 
+  tibble(
+    lambda = lam,
+    loglikelihood = ll
+  )
+
+xx <- loglikelihood_df[which.max(loglikelihood_df$loglikelihood), 'lambda'][[1]]
+yy <- max(loglikelihood_df$loglikelihood)
+
+ggplot() + 
+  geom_line(data = loglikelihood_df, aes(lambda, loglikelihood)) + 
+  geom_point(aes(x = xx, y = yy), col = 'red', size = 2) +
+  geom_text(aes(x = xx, y = yy + 50, label = xx)) + 
+  scale_x_continuous(breaks = seq(0, 10, 0.5)) + 
+  theme_classic()
+```
+
+`optimize`関数を使えば、最大となる点を簡単に計算できる。
+
+```{r}
+opt_res <- optimize(loglikelihood, interval = c(0, 5), y = d$x, maximum = TRUE)
+opt_res
+```
+
+対数尤度関数が最大となる点、つまり微分して傾きが0になる点が、対数尤度が最大となる点なので、イメージを掴むために、勾配上昇法で探索してみる。実際、ポアソン分布の最尤推定量は平均になるため、ここまでしてきたように、$\lambda$をずらして、最大となる点を探すことや勾配法を使う必要はなく、平均を計算すれば良い。
+
+```{r}
+mean(d$x)
+```
+
+勾配上昇法で探索するにあたり、スクリプトが簡潔にするために、対数尤度関数に手を加えておく。探索したい$\lambda$を$x$に変更し、予め$y$を`d$x`で固定しておく。
+
+```{r}
+# 対数尤度関数
+f <- function(x, y = d$x) sum(y)*log(x) - sum(lfactorial(y)) - length(y)*x
+
+#f(opt_res$maximum)と同じ
+f(mean(d$x))
+```
+
+勾配上昇法で計算し、可視化用のデータフレームを作成する。
+
+```{r}
+iter <- 40
+eta <- 0.01
+x_1 <- 10
+
+x_1_values <- x_1
+y_1_values <- f(x_1)
+gradient_values <- NULL
+intercept_values <- NULL
+
+for(i in 1:iter){
+  # Steepest ascent:
+  grad <- grad(func = f, x = c(x_1))
+  
+  intercept_value <- -grad*x_1 + f(x_1)
+  # Keeping track
+  gradient_values <- c(gradient_values, grad)
+  intercept_values <- c(intercept_values, intercept_value)
+  
+  # Updating the value
+  x_1 <- x_1 + eta * grad
+  y_1 <- f(x_1)
+  
+  # Keeping track
+  x_1_values <- c(x_1_values, x_1)
+  y_1_values <- c(y_1_values, y_1)
+}
+
+df_plot <- tibble(
+  iter = 1:iter,
+  xx = seq(0, 10, length.out = iter),
+  x_1 = x_1_values[-length(x_1_values)],
+  y = f(x_1),
+  gradient = gradient_values,
+  intercept = intercept_values
+) 
+head(df_plot)
+```
+
+アニメーションさせると、傾きが0になる点で収束していることがわかる。
+
+```{r}
+ggplot(df_plot) +
+  stat_function(fun = f, aes(xx)) + 
+  geom_point(aes(x = x_1, y = y), colour = "red") +
+  geom_abline(aes(slope = gradient, intercept = intercept), colour = "blue") + 
+  geom_text(aes(x = x_1, y = y + 10, label = gradient)) + 
+  scale_x_continuous(breaks = seq(0, 10, 0.5)) + 
+  theme_bw() +
+  transition_time(iter) +
+  labs(title = "Iteration: {frame_time}", x = 'x') + 
+  ease_aes('elastic-in')
+```
+
+## ポアソン回帰分析とニュートンラフソン法
+
+ここまでポアソン分布のパラメタ$\lambda$を最尤法を使って地道に計算したり、勾配上昇法を使って探索したりしたが、ここでは、ニュートンラフソン法で対数尤度を最大化し、ポアソン回帰分析のパラメタを計算する。ニュートンラフソン法は分散共分散行列を計算過程で利用するため、各種の推定値に関する検定統計量の計算などにも利用できるため、効率が良い。
+
+対数リンクのポアソン回帰分析は、$y_{i}$が指数関数的に増加するのであれば、、$\lambda_{i}$も指数関数的に増加することを仮定している。ポアソン分布のパラメタ$\lambda$を回帰式に置き換えてモデル化を行う。
+
+$$
+\begin{eqnarray}
+\lambda_{i} &=& exp(\beta_{0} + \beta_{1} x_{i}) + \epsilon_{i} \\
+p_{i} &=& \frac{ \lambda_{i}^{y_{i}} e^{-\lambda_{i}} } {y_{i}!} \\
+      &=& \frac{ exp(\beta_{0} + \beta_{1} x_{i})^{y_{i}} e^{-exp(\beta_{0} + \beta_{1} x_{i})} } {y_{i}!}
+\end{eqnarray}
+$$
+
+各$i$について、対数尤度$logL_{i}$は下記の通りとなる。
+
+$$
+\begin{eqnarray}
+log L_{i} &=& log \left[ \frac{ exp(\beta_{0} + \beta_{1} x_{i})^{y_{i}} e^{-exp(\beta_{0} + \beta_{1} x_{i})} } {y_{i}!} \right] \\
+          &=& y_{i} (\beta_{0} + \beta_{1} x_{i}) - exp(\beta_{0} + \beta_{1} x_{i}) - logy_{i}!
+\end{eqnarray}
+$$
+
+対数尤度$logL_{i}$をパラメタ$\beta_{0}, \beta_{1}$で偏微分してスコアベクトルとヘッセ行列を求める。
+
+$$
+\begin{eqnarray}
+U_{1i} &=& \frac{\partial log L_{i}}{\partial \beta_{0}} =  y_{i} - exp (\beta_{0} + \beta_{1} x_{i}) = y_{i} -  \lambda_{i} \\
+U_{2i} &=& \frac{\partial log L_{i}}{\partial \beta_{0}} =  y_{i} x_{i} - exp (\beta_{0} + \beta_{1} x_{i}) x_{i}= (y_{i} - \lambda_{i}) x_{i}
+\end{eqnarray}
+$$
+
+ヘッセ行列は、2階微分の行列となる。対数尤度関数の負の2階の偏微分行列$\boldsymbol{ -H }$をフィッシャー情報行列$\boldsymbol{ I }$と呼ぶが書籍に倣い、ヘシアンと表記しておく。
+
+$$
+\begin{eqnarray}
+H_{1,1,i} &=& \frac{\partial^{2} log L_{i}}{\partial \beta_{0} \partial \beta_{0}} = -exp(\beta_{0} + \beta_{1} x_{i}) = - \lambda_{i}\\
+H_{1,2,i} &=& \frac{\partial^{2} log L_{i}}{\partial \beta_{0} \partial \beta_{1}} = -exp(\beta_{0} + \beta_{1} x_{i}) x_{i} = - \lambda_{i}x_{i}\\ 
+H_{2,1,i} &=& \frac{\partial^{2} log L_{i}}{\partial \beta_{1} \partial \beta_{0}} = -exp(\beta_{0} + \beta_{1} x_{i}) x_{i} = - \lambda_{i}x_{i} \\
+H_{2,2,i} &=& \frac{\partial^{2} log L_{i}}{\partial \beta_{1} \partial \beta_{1}} = -exp(\beta_{0} + \beta_{1} x_{i}) x_{i}^2 = - \lambda_{i}x_{i}^{2} \\
+\end{eqnarray}
+$$
+
+これらをまとめて表記する。
+
+$$
+\boldsymbol{ U } = \begin{bmatrix}
+\sum U_{1i} \\
+\sum U_{2i}
+\end{bmatrix}
+= \begin{bmatrix}
+\sum y_{i} -  \lambda_{i} \\
+\sum (y_{i} -  \lambda_{i}) x_{i}
+\end{bmatrix} \\
+\boldsymbol{ H } = \begin{bmatrix}
+\sum H_{1,1,i} & \sum H_{1,2,i} \\
+\sum H_{2,1,i} & \sum H_{2,2,i} 
+\end{bmatrix} = \begin{bmatrix}
+\sum - \lambda_{i} & \sum - \lambda_{i} x_{i} \\
+\sum - \lambda_{i} x_{i}  & - \lambda_{i} x_{i}^{2}
+\end{bmatrix}
+$$
+
+あとはパラメタ$\boldsymbol{ \beta }$の初期値に対して、下記のニュートンラフソンの更新式を用いて、繰り返し計算することで対数尤度を最大化する。
+
+$$
+\boldsymbol{ \hat \beta }^{(1)}= \boldsymbol{ \hat \beta }^{(0)} + (- \boldsymbol{ H }^{(0)})^{-1} \boldsymbol{ U }^{(0)}
+$$
+
+[データ解析のための統計モデリング入門 第3章](https://kuboweb.github.io/-kubo/ce/IwanamiBook.html)の種子データに対するポアソン回帰分析を実行する。`glm`関数では4回の更新で収束している。
+
+```{r}
+d <- read.csv("https://kuboweb.github.io/-kubo/stat/iwanamibook/fig/poisson/data3a.csv")
+Y <- d %>% filter(f == 'C') %>% pull(y)
+X <- d %>% filter(f == 'C') %>% pull(x)
+X <- cbind(1, X)
+
+summary(glm(Y ~ X - 1, family = poisson(link = 'log')))
+```
+
+さきほどの更新式を書き下して、各時点の値を出力しながら更新していく。
+
+```{r}
+iter <- 10
+tolerance <- 10^-5
+B <- c(0.7, 0.1)
+
+for(i in 1:iter){
+  print(paste0('iteration: ', i))
+  print('---------start---------')
+  ## 更新前パラメタを保存
+  pre_B <- B
+  print('更新前のパラメタβ')
+  print(pre_B)
+  print('--------------------')
+  
+  # 偏回帰係数と説明変数の積で計算されるλハット
+  # 対数リンク: exp(X %*% B)
+  lam <- exp(X %*% B)
+  print('パラメタλ')
+  print(round(lam[1:10],2))
+  print('(snip)--------------------')
+  # スコアベクトル
+  U <- t(X) %*% (Y - lam)
+  print('スコアU')
+  print(U)
+  print('--------------------')
+  # ヘシアン行列
+  W <- diag(nrow(X))
+  diag(W) <- (-1*lam)
+  H <- (t(X) %*% W %*% X) 
+  print('ヘシアンH')
+  print(H)
+  print('--------------------')
+  
+  ## パラメタの更新
+  B <- pre_B + solve(-1 * H) %*% U
+  print('更新後のパラメタβ')
+  print(B)
+  print('更新後のパラメタβの標準誤差')
+  print(sqrt(diag(solve(-1 * H))))
+  print('----------end----------')
+  
+  if(sum(B - pre_B) < tolerance) break
+}
+```
+
+こちらも5回で収束し、パラメタ、パラメタの標準誤差も`glm`関数と同じ値が得られている。
+
+## 参考文献
+
+- [最尤法によるポアソン回帰分析入門(2021) 高橋行雄 カクワークス社](https://www.amazon.co.jp/%E6%9C%80%E5%B0%A4%E6%B3%95%E3%81%AB%E3%82%88%E3%82%8B%E3%83%9D%E3%82%A2%E3%82%BD%E3%83%B3%E5%9B%9E%E5%B8%B0%E5%88%86%E6%9E%90%E5%85%A5%E9%96%80-%E9%AB%98%E6%A9%8B%E8%A1%8C%E9%9B%84/dp/4907424337)
+- [一般化線形モデル入門 原著第2版](https://www.kyoritsu-pub.co.jp/book/b10010684.html)
+- [一般化線形モデルと生存分析](https://www.asakura.co.jp/detail.php?book_code=12195)
+- [データ解析のための統計モデリング入門](https://kuboweb.github.io/-kubo/ce/IwanamiBook.html)
+- [もしも最尤推定をフルスクラッチで書いたら](https://rstudio-pubs-static.s3.amazonaws.com/683068_c7e8ca57403e4674b0c4f8f4447a6257.html)

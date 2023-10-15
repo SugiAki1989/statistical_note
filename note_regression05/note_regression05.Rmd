@@ -1,0 +1,236 @@
+---
+title: "ロジスティック回帰の平均限界効果について"
+pagetitle: "ロジスティック回帰の平均限界効果について"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ロジスティック回帰の平均限界効果について、よくわからない点があったので、その勉強メモ。勉強会用のロジスティック回帰の簡単なおさらいとまとめて、平均限界効果についてもまとめおく。
+
+## ロジスティック回帰とは
+ロジスティック回帰とは、母集団の確率分布に「二項分布(=誤差構造をそう考える)」を仮定し、リンク関数に「ロジット関数」を指定した一般化線形モデルのこと。結果が0/1になるようなデータは二項分布で近似できる。二項分布のパラメタは試行回数$n$と成功確率$p$であり、ロジスティック回帰では一般的に$n$がわかっている状態で$p$を推定することになる。
+
+ここからが少しややこしいが、「ロジスティック関数」と「ロジット関数」というのを考える。まず、確率$p$を推定するために、0から1しか取らない確率をどのように表現するのかを考える必要がある。`y ~ a + bx`みたいな正規線形モデルだと、$y$が0から1に収まらず、`-∞ から +∞`になるので、これでは難しい。そこで、0から1しかとらない「ロジスティック関数」を利用する。ここでは、面倒なので、線形予測子$\alpha + \beta \cdot x$を$t$とする。
+
+$$
+p = \frac{e^{ t }}{1 + e^{ t }} = \frac{ 1 }{1 + e^{ -t }}
+$$
+
+このロジスティック関数を使用するので、ロジスティック回帰と呼ばれる。そして、「ロジット関数」は、ロジスティック関数の逆関数で下記の通り。ここでも面倒なので、線形予測子$\alpha + \beta \cdot x$を$t$とする。なので、ロジスティック回帰のリンク関数は「ロジット関数」となる。
+
+$$
+\ln (\frac{p}{1 - p})  = t
+$$
+
+なんでこのようなややこしいことをするのか簡単にまとめる。ちゃんと理解したい場合は、ちゃんとした人の本を参照。まず、成功確率$p$と失敗確率$1-p$の比率のことを「オッズ」と呼ぶ。オッズの比率である「オッズ比」ではない、オッズである。オッズは失敗する確率に対する成功確率なので、オッズが2であれば、失敗するよりも2倍成功しやすい、$p = 1/2 = 0.5$の場合、どちらの確率も等しいので、オッズは1になる。つまり、失敗するよりも1倍成功しやすいので、失敗も成功も確率は変わらんとなる。
+
+$$
+\frac{p}{1 - p}
+$$
+
+このオッズに自然対数を取ったものが、対数オッズ、またの名をロジットと呼ぶ。これはロジット関数そのもので、ロジスティック回帰の回帰係数の解釈が困難になる一つの理由でもある。1単位上がったら、対数オッズが○ポイント変化するということ。直感的に意味分かんないので、通常、`exp()`でオッズに変換してからオッズとして解釈することが多い。
+
+$$
+\ln (\frac{p}{1 - p}) 
+$$
+
+確率をオッズに、さらには対数オッズ(ロジット)に変換する理由は、ロジットが扱いやすいということが背景にある。成功確率$p$と失敗確率$1-p$、オッズ、ロジットの変換を表にまとめると、下記のようになる。確率をオッズに変換すると、値の変域は`0から+∞`となり、そのオッズをロジットに変換すると、`-∞から+∞`となる。こうしておけば、ロジットを推定するロジスティック回帰の結果がどんな値をとろうとも、確率に変換した際には、`0から1`に収まることになる。
+
+```{r}
+library(tidyverse)
+library(patchwork)
+
+p <- seq(from = 0, to = 1, by = 0.05)
+`1-p` <- 1 - seq(from = 0, to = 1, by = 0.05)
+odds <- p/`1-p`
+logit <- log(odds)
+tibble(p, `1-p`, odds, logit) %>% print(n = 21)
+```
+
+なので、`0から1`の確率として解釈するために、確率をロジットに変換し、そのロジットに対して直線をあてはめるロジスティック回帰で計算した値は、もとの変換前の状態に戻せば、いわば確率を計算していることと変わらんよね、予測確率のロジットを目的変数としたロジスティック回帰モデルなので、ロジットで推定すれば、確率に戻せるので、都合がよい性質があるので、それを利用したという感じ(あっているはず)。雑ですいませんがメモを残しておく。
+
+![](/Users/aki/Documents/statistical_note/note_regression05/logistic1.jpg){width=50%}
+
+問題は、ロジスティック回帰の回帰係数の解釈が困難な点。
+
+## ロジスティック回帰の実践
+
+```{r}
+# 確率変換
+logistic <- function(x){
+ 	prob <- exp(x)/(1 + exp(x))
+ 	return(prob)
+}
+
+# 対数オッズ(ロジット)
+# logit <- function(p){
+#   odds <- p/(1 - p)
+#  	res  <- log(odds)
+#  	return(res)
+#  }
+  
+set.seed(1989)
+n <- 5000
+x1 <- rnorm(n)
+x2 <- rnorm(n)
+# x1が大きいと、y=1になりやすいように調整
+p <- logistic(2*x1 + 0.2*x2)
+y <- rbinom(n, 1, p)
+df <- tibble(y, x1, x2)
+fit <- glm(y ~ x1 + x2, data = df, family = binomial(link = "logit"))
+summary(fit)
+```
+
+結果は生成したデータの意図通りの結果が返される。回帰係数はロジット(`ln(p/1-p)`)の変化量。
+
+こうなるように二項分布の確率$p$を調整したので、確率の差は殆ど0。ざっくり説明になるが、つまり、0か1を取る何らの生成メカニズムをモデル化したい。0か1をモデル化するにあたり二項分布を使えそうだけど、二項分布のパラメタ$p$を推定する必要がある。このまま$p$を推定することになると、予測子の値のとり方によっては、0~1に収まらないので、収まるようにオッズに対数を取ったロジットを使えば、予測子がどんな値をとろうとも、確率は0~1に収まるようになるので、ロジットを通じて$p$を推定する。その$p$をコントロールして、二項分布から0と1を生成したので、ロジスティック回帰の結果は、そのようなロジットを生成する確率$p$なので、もとの生成メカニズムを再現できる。
+
+```{r}
+# predict()を使わなくても、fit$fitted.valuesでもよい
+fitted_p <- predict(object = fit, type = "response", newdata = df)
+
+# サイズが大きくなるとほとんど0
+# set.seed(1989)
+# n <- 500000
+# 略
+# mean(logistic(predict(object = fit, type = "link", newdata = df)) - p) でも同じ
+# mean(fit$fitted.values - p)
+# [1] 0.0007170423
+mean(fitted_p - p)
+```
+
+興味のある変数以外を平均で固定し、興味のある変数と確率の関係を可視化。
+
+```{r}
+pred_x1 <- tibble::tibble(x1 = seq(min(df$x1), max(df$x1), length.out = 100),
+                          x2 = mean(df$x2)
+                          ) %>% 
+  # "response"は確率を返し、"link"はlogitを返す
+  dplyr::mutate(fit = predict(object = fit, type = "response", newdata = .))
+         
+g1 <- ggplot2::ggplot(df, aes(x1, y)) +
+  geom_jitter(width = 0.05, height = 0.05, alpha = 1/3, col = "#595959") + 
+  geom_line(data = pred_x1, aes(y = fit), col = "royalblue") + 
+  theme_bw()
+
+pred_x2 <- tibble::tibble(x1 = mean(df$x1),
+                          # 定義域の調整し、値域を見やすくする
+                          x2 = seq(-10, 10, length.out = 100)) %>% 
+  # "response"は確率を返し、"link"はlogitを返す
+  dplyr::mutate(fit = predict(object = fit, type = "response", newdata = .))
+
+
+g2 <- ggplot(df, aes(x2, y)) +
+  geom_jitter(width = 0.05, height = 0.05, alpha = 1/3, col = "#595959") + 
+  geom_line(data = pred_x2, aes(y = fit), col = "darkred") + 
+  xlim(-10, 10) +
+  theme_bw()
+
+patchwork::wrap_plots(list(g1, g2))
+```
+
+
+# 下記検証中
+## 平均限界効果(Average Marginal Effects)
+ロジスティック回帰の回帰係数の解釈が困難になるので、その解釈を頑張るのが「平均限界効果」という考え方。下記を参考にしている。
+
+- [Leeper, T.J. (2018) Interpreting Regression Results using Average Marginal Effects with R’s margins.](https://cran.r-project.org/web/packages/margins/vignettes/TechnicalDetails.pdf)
+- [An Introduction to ‘margins’](http://cran.uni-muenster.de/web/packages/margins/vignettes/Introduction.html)
+- [読了：Leeper (2018) Rのmarginsパッケージで回帰モデルの平均限界効果を求める](https://elsur.jpn.org/diary/?p=1425)
+- [RECS Case Study: Methods for GLMs](https://jbhender.github.io/Stats506/F18/GLM_Methods.html#the-margins-package)
+- [ロジスティック回帰分析](http://www.ner.takushoku-u.ac.jp/masano/class_material/waseda/keiryo/16_logit.html#%E3%83%87%E3%83%BC%E3%82%BF%E8%A7%A3%E6%9E%90%E3%81%AB%E3%81%8A%E3%81%84%E3%81%A6%E9%87%8D%E8%A6%81%E3%81%AA%E3%81%93%E3%81%A8:)
+
+
+ロジスティック回帰分析の係数は、可視化した図を見てもわかるが、単純に解釈できない。つまり、「説明変数の値によって、説明変数1単位の増減が目的変数に与える影響(＝限界効果)が異なる。先程の可視化した図の`x1`を参考にすると、`x1 = -2,-1,0,1,2`では、確率に与える影響(=傾き)が変わることがわかる。「`x1`の値の限界効果」と「`x1+Δ`の値の限界効果」を計算し、その傾きが平均限界効果。言い換えると、限界効果は「とある時点の値」、平均限界効果は「とある時点、と少し動かしたとある時点の傾き(f(x+Δx)-f(x)/Δx)」のこと。
+
+marginsパッケージの[実装](https://github.com/leeper/margins/blob/9426bf796b6a1d5407964ed67e5a5ac95b8dadd8/R/dydx.R#L129)をみると、より詳しくわかると思われる。ということで、手でやってみる。`setstep()`は、marginsパッケージのステップの間隔を計算する関数をそのままお借りして、`margin()`は傾きを計算する関数。
+
+```{r}
+setstep <- function(x, eps = 1e-7) {
+  x + (max(abs(x), 1, na.rm = TRUE) * sqrt(eps)) - x
+} 
+
+margin <- function(x, step){
+  p2 <- predict(object = fit, type = "response", newdata = tibble::tibble(x1 = x       , x2 = mean(df$x2)))
+  p1 <- predict(object = fit, type = "response", newdata = tibble::tibble(x1 = x - step, x2 = mean(df$x2)))
+  res <- (p2-p1)/step
+  return(res)
+}
+```
+
+準備ができたので、実行してみる。
+
+```{r}
+unique(round(setstep(df$x1, eps = 1e-7), 15))
+```
+
+```{r}
+points <- seq(-2,2,1)
+res <- vector(mode = "numeric", length = length(points))
+for (i in seq_along(points)) {
+  res[[i]] <- margin(x = points[[i]], step = 0.001116521)
+}
+
+names(res) <- points
+res
+```
+
+このような平均限界効果が計算されたが、一致しているのかmarginsパッケージの`margins()`でも動かしてみる。結果を見るとちょっとずれているが、まぁまぁ一致している。実はパッケージの`setstep()`はベクトルを本来返し、そのベクトルの値が位置によって、すごく小さいが異なる。それが、おそらくちょっとズレる原因かと思われる。
+
+```{r}
+ame <- margins::margins(fit, variables = "x1", at = list(x1 = seq(-2,2,1), x2 = mean(df$x2)))
+ame
+```
+
+この平均限界効果の数表だけだとわかりづらいの平均限界効果を可視化する`cplot()`があるが、エラーがでる・・・Orz。
+
+```{r}
+# cplot(fit,
+#       x = "x1",
+#       dx = "x1",
+#       what = "effect")
+#  Error in data[, c(varslist$nnames, varslist$fnames), drop = FALSE] : 
+#   object of type 'closure' is not subsettable
+#  data[, c(varslist$nnames, varslist$fnames), drop = FALSE] でエラー: 
+#    'closure' 型のオブジェクトは部分代入可能ではありません 
+```
+
+なので、自分でやってみる。
+
+```{r}
+points <- seq(-2,2,0.01)
+ame <- vector(mode = "numeric", length = length(points))
+for (i in seq_along(points)) {
+  ame[[i]] <- margin(x = points[[i]], step = 0.001116521)
+}
+
+tibble::tibble(points, ame) %>% 
+  ggplot(data = ., aes(points, ame)) + 
+  geom_line(col = "royalblue") + 
+  theme_bw()
+```

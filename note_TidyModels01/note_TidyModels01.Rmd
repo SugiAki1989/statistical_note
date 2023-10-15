@@ -1,0 +1,174 @@
+---
+title: "TidyModels: resampleパッケージ"
+pagetitle: "TidyModels: resampleパッケージ"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+`tidymodels`パッケージの使い方をいくつかのノートに分けてまとめている。`tidymodels`パッケージは、統計モデルや機械学習モデルを構築するために必要なパッケージをコレクションしているパッケージで、非常に色んなパッケージがある。ここでは、今回は`rsample`というパッケージの使い方をまとめていく。モデルの数理的な側面や機械学習の用語などは、このノートでは扱わない。
+
+下記の公式ドキュメントや`tidymodels`パッケージに関する書籍を参考にしている。
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+## `rsample`パッケージの目的
+
+`rsample`パッケージは、分析に必要なに様々はタイプのリサンプリングデータを作成する関数を提供しているパッケージ。例えば、ブートストラップ法でリサンプリングされたデータセットからサンプリング分布を推定する際に利用したり、機械学習のモデルパフォーマンスの評価のためのデータセットを作成できる。
+
+## `rsample`パッケージの実行例
+
+まずは必要なパッケージとデータを読み込む。利用するデータは`modeldata`パッケージに含まれる`credit_data`。ここで読み込んでいるデータは、のちのちの予測の際に使用するテストデータとモデル学習用に分割されたもののうち、モデル学習用の方を読み込んでいる。
+
+```{r}
+library(tidymodels)
+library(tidyverse)
+
+df_past <- read_csv("https://raw.githubusercontent.com/SugiAki1989/statistical_note/main/note_TidyModels00/df_past.csv")
+dim(df_past)
+```
+
+データを分割する基本的な関数は`initial_split`関数。この関数で初期分割を行い、訓練データ`df_train`と評価データ`df_test`に分割する。
+
+```{r}
+set.seed(1989)
+df_initial <- df_past %>% 
+  initial_split(prop = 0.8, strata = "Status")
+
+df_initial
+```
+
+訓練データ`df_train`と評価データ`df_test`に分割する際は、`training`関数で訓練データを抽出でき、`testing`関数で評価データを抽出できる。
+
+```{r}
+df_train <- df_initial %>% training()
+df_test <- df_initial %>% testing()
+
+list(dim(df_train), dim(df_test))
+```
+
+K分割クロスバリデーションを行うことが一般的なので、さきほどの訓練データ`df_train`をK分割する。K分割する関数は`vfold_cv`関数。
+
+ここでは5分割しており、1つ目は`[2564/642]`となっているが`tidymodels`パッケージの世界では、左の`[2564/`が`analysis`と呼ばれ、右側の`/642]`が`assessment`と呼ばれる。
+
+```{r}
+set.seed(1989)
+df_train_kfoldspilit <- df_train %>% vfold_cv(v = 5, strata = "Status")
+df_train_kfoldspilit
+```
+
+1つ目のフォールドデータの分析用データ(`Analysis`)を取り出すには、`pluck`関数と`analysis`関数を利用することで抽出できる。
+
+```{r}
+df_train_kfoldspilit %>% 
+  pluck("splits", 1) %>% 
+  analysis()
+```
+
+同じく、1つ目のフォールドデータの評価用データ(`Assess`)を取り出すには、`pluck`関数と`assessment`関数を利用することで抽出できる。
+
+```{r}
+df_train_kfoldspilit %>% 
+  pluck("splits", 1) %>% 
+  assessment()
+```
+
+毎回、`pluck`関数と`analysis`関数、`assessment`関数を使ってデータを取り出すのは面倒なので、これをデータフレームに取り出して格納しておく。
+
+```{r}
+set.seed(1989)
+df_train_stratified_kfoldspilits <- df_train %>% 
+  vfold_cv(v = 5, strata = "Status") %>% 
+  mutate(
+    analysis = map(.x = splits, .f = function(x){analysis(x)}),
+    assessment = map(.x = splits, .f = function(x){assessment(x)})
+    )
+df_train_stratified_kfoldspilits
+```
+
+ホールドアウト法でデータを分割する際は、`validation_split(prop = 0.8)`関数を利用すればデータを分割できる。
+
+`rsample`パッケージは時系列のデータ分割にも対応している。時系列のダミーデータを作成する。
+
+```{r}
+set.seed(1989)
+dt <- seq(as.Date("2022-01-01"), as.Date("2022-12-31"), by = "day")
+x <- rnorm(length(dt), 0, 1)
+df_timeseries <- tibble(id = 1:length(dt), dt, x)
+df_timeseries
+```
+
+使う関数は`rolling_origin`関数を使用する。`initial = 290`としているので、1から290番目のレコードまでが1つ目のフォールドの分析用データ(`Analysis`)となっている。`assess = 30`としているので、291から320番目のレコードまでが1つ目のフォールドの評価用データ(`Assess`)となっている。また、`skip = 9`としているので、各フォールドの間隔は10日ごとになっている。なぜ9なのかは疑問に思うところだが、ドキュメントによると0始まりなので、その影響。
+
+> When skip = 0, the resampling data sets will increment by one position.
+
+```{r}
+df_timeseries %>% 
+  rolling_origin(
+    initial = 290,      # anaysisデータのレコード数
+    assess = 30, 　     # assessmentデータのレコード数
+    skip = 9,          # 各フォールドのanaysisデータの間隔 10 − 1 = 9
+    cumulative = FALSE  # anaysisデータを累積するかどうか
+  ) %>% 
+  mutate(
+    analysis = map(.x = splits, .f = function(x){analysis(x)}),
+    assessment = map(.x = splits, .f = function(x){assessment(x)}),
+    analysis_min    = map_int(.x = analysis,    .f = function(x){x %>% summarise(min(id)) %>% pull()}),
+    analysis_max    = map_int(.x = analysis,    .f = function(x){x %>% summarise(max(id)) %>% pull()}),
+    assessment_min  = map_int(.x = assessment,  .f = function(x){x %>% summarise(min(id)) %>% pull()}),
+    assessment_max  = map_int(.x = assessment,  .f = function(x){x %>% summarise(max(id)) %>% pull()})
+  ) 
+```
+
+`cumulative = TRUE`とすれば開始位置から累積されていくので、各フォールドの`analysis_min`は`1`となる。
+
+```{r}
+df_timeseries %>% 
+  rolling_origin(
+    initial = 290,      # anaysisデータのレコード数
+    assess = 30, 　     # assessmentデータのレコード数
+    skip = 9,           # 各フォールドのanaysisデータの間隔 10 − 1 = 9
+    cumulative = TRUE   # anaysisデータを累積するかどうか
+  ) %>% 
+  mutate(
+    analysis = map(.x = splits, .f = function(x){analysis(x)}),
+    assessment = map(.x = splits, .f = function(x){assessment(x)}),
+    analysis_min    = map_int(.x = analysis,    .f = function(x){x %>% summarise(min(id)) %>% pull()}),
+    analysis_max    = map_int(.x = analysis,    .f = function(x){x %>% summarise(max(id)) %>% pull()}),
+    assessment_min  = map_int(.x = assessment,  .f = function(x){x %>% summarise(min(id)) %>% pull()}),
+    assessment_max  = map_int(.x = assessment,  .f = function(x){x %>% summarise(max(id)) %>% pull()})
+  )
+```
+
+## 参考文献
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+

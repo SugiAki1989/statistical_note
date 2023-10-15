@@ -1,0 +1,43 @@
+---
+title: "NAをカラム名で埋めたいそんなときの小技"
+pagetitle: "NAをカラム名で埋めたいそんなときの小技"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# NAをカラム名で埋めたいそんなときの小技
+
+文字型のカラムの`NA`に対して、カラム名で穴埋めしたいときのデータの前処理の小技。
+
+```{r}
+library(tidyverse)
+library(rlang)
+
+tibble(
+  hoge = c(NA, 'a', 'b', NA, 'c')
+) %>% 
+  mutate(hoge_imp = if_else(is.na(hoge), quo_text(quo(hoge)), hoge))
+```

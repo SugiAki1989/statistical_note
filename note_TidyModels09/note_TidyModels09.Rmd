@@ -1,0 +1,248 @@
+---
+title: "TidyModels: modeltime + cross-validation"
+pagetitle: "TidyModels: modeltime + cross-validation"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+`tidymodels`パッケージの使い方をいくつかのノートに分けてまとめている。`tidymodels`パッケージは、統計モデルや機械学習モデルを構築するために必要なパッケージをコレクションしているパッケージで、非常に色んなパッケージがある。ここでは、今回は`modeltime`パッケージ + `cross-validation`についてまとめていく。モデルの数理的な側面や機械学習の用語などは、このノートでは扱わない。
+
+下記の公式ドキュメントや`tidymodels`パッケージに関する書籍を参考にしている。
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+## `modeltime`パッケージの目的
+
+`modeltime`パッケージは、時系列モデルの構築を効率よく行うためのパッケージで、`tidymodels`パッケージと組み合わせて時系列モデルを作成する際に使用される。時系列予測のための体系的なワークフローを提供し、時系列ブーストモデルなど新しいアルゴリズムもカバーしている点が特徴的。
+
+前回は基本的な使い方をまとめており、時系列モデルのクロスバリデーションを扱う。
+
+- [Getting Started with Modeltime Resample](https://cran.r-project.org/web/packages/modeltime.resample/vignettes/getting-started.html)
+
+上記のサイトをなぞりながら、不明点を追記しながらまとめていく。
+
+## モデルの作成
+
+まずは必要なパッケージを読み込んでおく。
+
+```{r}
+library(tidymodels)
+library(modeltime)
+library(tidyverse)
+library(lubridate)
+library(timetk)
+
+# クロスバリデーションには下記のパッケージが追加で必要
+library(modeltime.resample)
+``` 
+
+前回同様、ここでも`timetk`パッケージ内の`m4_monthly`データセットの`id`が`M750`の部分を使用する。データは、1990-01-01から始まり、2015-06-01まである。レコード数は306レコードで、間隔は月単位のデータになっている。
+
+```{r}
+m750 <- m4_monthly %>% filter(id == "M750")
+m750 %>% 
+  summarise(start_date = min(date), end_date = max(date), records = n())
+```
+
+このようなデータをここでは扱う。
+
+```{r}
+m750 %>%
+  plot_time_series(.data = ., .date_var = date, .value = value, .interactive = FALSE)
+```
+
+クロスバリデーション用のフォールドは`time_series_cv`関数で作成できる。今回は回の設定でクロスバリデーションのフォールドを作成する。
+
+- `assess`: 評価ウィンドウは2年
+- `initial`: 学習ウィンドウは5年
+- `skip`:  リサンプルセット間のシフトは2年
+- `slice_limit`: 生成するリサンプル数は3コ
+
+```{r}
+resamples_tscv <- time_series_cv(
+    data        = m750,
+    assess      = "2 years",
+    initial     = "5 years",
+    skip        = "1 years",
+    slice_limit = 3
+)
+
+resamples_tscv %>% 
+  mutate(
+    analysis = map(.x = splits, .f = function(x){analysis(x)}),
+    assessment = map(.x = splits, .f = function(x){assessment(x)}),
+    analysis_min_date = map(.x = analysis, .f = function(x){min(x$date)}),
+    analysis_max_date = map(.x = analysis, .f = function(x){max(x$date)}),
+    assessment_min_date = map(.x = assessment, .f = function(x){min(x$date)}),
+    assessment_max_date = map(.x = assessment, .f = function(x){max(x$date)}),
+  ) %>% 
+  unnest(analysis_min_date,
+         analysis_max_date,
+         assessment_min_date,
+         assessment_max_date
+         )
+```
+
+そのまま`plot_time_series_cv_plan`関数に渡すことで、クロスバリデーションの状態を可視化できる。
+
+```{r}
+resamples_tscv %>%
+  tk_time_series_cv_plan() %>%
+  plot_time_series_cv_plan(date, value, .interactive = FALSE)
+```
+データの準備が整ったので、モデルを設定する。前回同様のモデルを利用するので、実行結果を乗せておく。
+
+```{r}
+# Model1 ARIMA
+model_fit_arima <- arima_reg() %>%
+    set_engine(engine = "auto_arima") %>% 
+    fit(value ~ date, data = m750)
+
+# Model2 Prophet
+model_fit_prophet <- prophet_reg(seasonality_yearly = TRUE) %>%
+    set_engine(engine = "prophet") %>% 
+    fit(value ~ date, data = m750)
+
+# Recipe For RandomForest & Prophet Boost
+recipe <- recipe(value ~ date, m750) %>%
+  step_timeseries_signature(date) %>%
+  step_rm(
+    contains("am.pm"),
+    contains("hour"),
+    contains("minute"),
+    contains("second"),
+    contains("xts")
+  ) %>%
+  step_fourier(date, period = 365, K = 5) %>%
+  step_dummy(all_nominal())
+
+# Model Spec For RandomForest
+model_randomforest <- rand_forest(trees = 1000, min_n = 50, mtry = 15) %>%
+  set_engine("ranger") %>% 
+  set_mode("regression")
+
+# Model Fitting For RandomForest
+model_fit_randomforest <- workflow() %>%
+  add_model(model_randomforest) %>%
+  add_recipe(recipe %>% step_rm(date)) %>%
+  fit(m750)
+
+# Model Spec For Prophet Boost
+model_prophet_boost <- prophet_boost(seasonality_yearly = TRUE) %>%
+  set_engine("prophet_xgboost") 
+
+# Model Fitting For Prophet Boost
+model_fit_prophet_boost <- workflow() %>%
+  add_model(model_prophet_boost) %>%
+  add_recipe(recipe) %>%
+  fit(m750)
+``` 
+
+モデルのフィッティングが完了したらモデルテーブルに追加する(`modeltime_table`関数)。これは、クロスバリデーションするのに、訓練データでフィッティングする理由は、モデルテーブルには、フィッティングしてあるモデルしか登録できないため(`All objects must be fitted workflow or parsnip models`)。この後にクロスバリデーションを行なうことになるので形式的な作業である。
+
+```{r}
+models_tbl <- modeltime_table(
+    model_fit_arima,
+    model_fit_prophet,
+    model_fit_prophet_boost,
+    model_fit_randomforest
+)
+models_tbl
+```
+
+リサンプル予測の生成は`modeltime_fit_resamples`関数で行なう。この時、内部的には、各モデルはリサンプルの各トレーニングセットで再学習される。モデルテーブルにリサンプル予測(`.resample_results`)の列が追加される。
+
+```{r}
+resamples_fitted <- models_tbl %>%
+    modeltime_fit_resamples(
+        resamples = resamples_tscv,
+        control   = control_resamples(verbose = FALSE)
+    )
+
+resamples_fitted
+```
+
+返されるデータフレームは入れ子の入れ子構造になっている。`.resample_results`の中を除くと、データフレームが返されるものの、予測値はまだ見えないので、もう1階層潜る必要がある。
+
+```{r}
+resamples_fitted %>% 
+  # ARIMA
+  pluck(".resample_results", 1)
+```
+
+ということで、もう1階層潜って予測値を確認する。`.metrics`には評価指標が記録されている。
+
+```{r}
+resamples_fitted %>% 
+  # ARIMA
+  pluck(".resample_results", 1) %>% 
+  # 1つ目のフォールドの予測値
+  pluck(".predictions", 1)
+```
+
+`plot_modeltime_resamples`関数を使用することで、モデルのクロスバリデーションの精度を可視化して確認できる。評価指標ごとにファセットが区切られており、Y軸に各クロスバリデーションのフォールド、横軸が指標の精度である。
+
+例えば、モデル4のランダムフォレストは薄い金色の点を見ればよく、どの指標でも精度がよろしくない。
+
+```{r}
+resamples_fitted %>%
+    plot_modeltime_resamples(
+      .point_size  = 2, 
+      .point_alpha = 0.5,
+      .interactive = FALSE
+    )
+```
+
+グラフではなく、数表が欲しい場合は、`modeltime_resample_accuracy`関数を利用する。これを見る限り、Prophet Boostが良い事がわかる。
+
+```{r}
+resamples_fitted %>%
+    modeltime_resample_accuracy(summary_fns = mean) %>%
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+
+この結果から、`modeltime_refit`関数を使って、Prophet Boostモデルで、フルデータセットを再学習させて、将来の予測を行なう。ここでは1年先を予測する。
+
+```{r}
+refit_tbl <- resamples_fitted %>%
+    filter(.model_id == 3) %>% 
+    modeltime_refit(data = m750)
+
+refit_tbl %>%
+    modeltime_forecast(h = "1 years", actual_data = m750) %>%
+    plot_modeltime_forecast(.interactive = FALSE)
+```
+
+## 参考文献
+
+- [Tidymodels](https://www.tidymodels.org/)
+- [Tidy Modeling with R](https://www.tmwr.org/software-modeling.html)
+
+

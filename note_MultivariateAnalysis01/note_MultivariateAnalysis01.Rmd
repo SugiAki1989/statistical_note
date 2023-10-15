@@ -1,0 +1,207 @@
+---
+title: "Memo〜多次元尺度構成法 MDS:Multi-Dimensional Scaling〜"
+pagetitle: "Memo〜多次元尺度構成法 MDS:Multi-Dimensional Scaling〜"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+## 関連性データの分析
+ここでは「多次元尺度構成法」をおさらいすることを目的にしています。多次元尺度構成法は、MDS:Multi-Dimensional Scalingなどと呼ばれます。「計量」か「非計量」に分けることができ、「データに潜んでいる空間構造」を抽出し、対象の位置関係を表す地図を作る分析手法です。つまり、個体間の距離関係は保ちつつ、多次元を2次元に落とし込むことができます。多次元尺度構成法では、距離と結びつけることで多くの分析を可能にしています。距離＝類似度と考えるわけですね。
+距離を計算する方法はいくつかありまして、よく使われる馴染みのある「ユークリッド距離」、市街地距離と呼ばれる「マンハッタン距離」、その他にも「バイナリ距離」「ミンコフスキー距離」など様々な方法があります。「ユークリッド距離」を試しに計算してみると下記のようになります。
+
+```R:R
+df
+  x1 x2 x3
+A  3  8  1
+B  2  3  7
+C  5  6  2
+
+dist(df, method = "euclidean", diag = TRUE, upper = TRUE)
+         A        B        C
+A 0.000000 7.874008 3.000000
+B 7.874008 0.000000 6.557439
+C 3.000000 6.557439 0.000000
+```
+
+書く必要もないかもしれないですが、ユークリッド距離の場合、下記のような計算をしています。
+・A-Bの距離
+`sqrt(|3-2|^2+|8-3|^2+|1-7|^2)=sqrt(62)=7.874`
+
+・A-Cの距離
+`sqrt(|3-5|^2+|8-6|^2+|1-2|^2)=sqrt(9)=3`
+
+・B-Cの距離
+`sqrt(|2-5|^2+|3-6|^2+|7-2|^2)=sqrt(43)=6.557`
+
+なので、これがirisとかのように行が増えると下記のような大変な計算になります。結果、省略
+
+```
+round(dist(iris[1:50, 1:4], method = "euclidean", diag = TRUE, upper = TRUE),1)
+
+1   2   3   4   5   6   7   8   9  10  11  12  13  14  15  16  17  18  19  20  21  22  23  24  25  26  27  28  29  30  31  32  33  34
+1  0.0 0.5 0.5 0.6 0.1 0.6 0.5 0.2 0.9 0.5 0.4 0.4 0.6 1.0 0.9 1.1 0.5 0.1 0.7 0.3 0.4 0.3 0.6 0.5 0.6 0.5 0.3 0.1 0.1 0.5 0.5 0.4 0.6 0.8
+2  0.5 0.0 0.3 0.3 0.6 1.1 0.5 0.4 0.5 0.2 0.9 0.5 0.1 0.7 1.4 1.6 1.1 0.5 1.2 0.8 0.7 0.8 0.8 0.6 0.6 0.2 0.5 0.6 0.5 0.3 0.2 0.7 1.1 1.3
+```
+
+## 多次元尺度法：MDS
+多次元尺度構成法の基本的な計算方法は、距離を表現しているインプットデータ（距離行列）の中から、潜在的なパターンや構造を発見し、次元縮小を行って幾何的に表現する、という点は多次元尺度法の基本的なところではあります。なので、距離を求めて、座標値を求める。そして、2次元で個体を配置する、という感じです。
+そもそも何のために多次元尺度法を使うのかというと、個人的には次元縮約して幾何表現をすることで、変数間の位置関係を捉えることを目的しています。マーケティングや広告では、どの顧客と顧客が似ているのかどうか、なんかを調べるためです。
+実際には下記のような流れで多次元尺度法を行います。irisの例でどこのページにも載っている事例かと思いますが。Rの組み込みパッケージstatsに、多次元尺度構成法の関数cmdscale(Classical Metric Multidimensional Scaling)が入っていますので、ここではそのまま使用します。eig=TRUEを指定しておくと座標値が$pointの中に格納されます。
+
+```
+#距離を計算
+iris.dist <-dist(iris[,-5])
+
+#多次元尺度法のパッケージcmd
+iris.cmd <- cmdscale(iris.dist, eig=TRUE)
+
+par(mfrow = c(1,2))
+plot(iris.cmd, type = "n")
+iris.lab <- factor(c(rep("S",50),rep("C",50),rep("V",50)))　#iris[,-5]の長い記号列を略する
+text(iris.cmd,labels = iris.lab, col = unclass(iris.lab))
+
+plot(iris.cmd, type = "n")
+iris.lab <- rownames(iris)　#iris[,-5]の長い記号列を略する
+text(iris.cmd, labels = iris.lab)
+```
+
+![](/Users/aki/Documents/statistical_note/note_MultivariateAnalysis01/p1.png)
+
+## 計算方法
+ここでは、多次元尺度構成法の計算方法をおさらいします。上記で扱っている古典的な多次元尺度構成法は以下の手順で計算します。
+1. 距離の2乗と見なせる非類似度行列を用意する
+2. 非類似度行列にヤング・ハウスホルダー変換を施す
+3. 変換後の行列をスペクトル分解する（固有値・固有ベクトルを計算）
+4. 固有値の大きい順に2or3個選び、対応する固有ベクトルを取り出してプロット
+なのですが、下記の多次元尺度構成法が紹介された論文で著者のLundは距離行列に14.4を非対角要素に加え、半正定値行列に修正していますこの「14.4」の詳細な理由はいまいち理解出来ませんでした・・・ここでもそれに従います。
+
+<blokquote>
+    Lund, T. (1974): Multidimensional scaling of political parties:a methodological study, Scandinavian Journal of Psychology, Vol. 15, pp. 108-118
+</blokquote>
+
+今回使用するデータは記事の最後においています。アメリカの空港間距離データです。
+
+```
+library(tidyverse)
+library(stats)
+
+D_mat <- as.matrix(read.table(pipe("pbpaste")))
+lab <- c("atl","chi","den","hou","la","mi","ny","sf","sea","dc")
+colnames(D_mat) <- lab
+rownames(D_mat) <- lab
+D_mat
+
+# 行列のサイズを制御
+n <- dim(D_mat)[1]
+
+# Lund(1974)の修正法
+E_mat <- matrix(14.4, nrow = n, ncol = n) - diag(n) * 14.4
+
+# 距離行列の2乗
+D_mat_mod <- D_mat + E_mat
+A_mat <- -0.5 * D_mat_mod^2
+
+# 中心化行列
+H_mat <- diag(n) - (rep(1, n) %*% t(rep(1, n)))/n
+H_mat
+
+# ヤング・ハウスホルダー変換
+B_mat <- H_mat %*% A_mat %*% H_mat
+B_mat
+
+# スペクトル分解
+w <- eigen(B_mat)$value
+v <- eigen(B_mat)$vector
+
+# 固有値が大きい順に軸をとる
+x1 <- order(w, decreasing = TRUE)[1]
+x2 <- order(w, decreasing = TRUE)[2]
+
+# 中心化していたので、固有値の標準偏差で戻す
+mds <- data_frame(x1 = sqrt(w[x1]) * v[,x1], 
+                  x2 = sqrt(w[x2]) * v[,x2],
+                  name = lab)
+par(mfrow = c(1,2))
+plot(mds$x1, mds$x2, type = "n")
+text(mds$x1, mds$x2, labels = mds$name)
+title(main = "Myfunc")
+
+dm_cmd <- cmdscale(D_mat_mod, k = 2, eig = TRUE)
+plot(dm_cmd$points, type = "n")
+text(dm_cmd$points, rownames(dm_cmd$points))
+title(main = "packages{cmdscale}")
+```
+![](/Users/aki/Documents/statistical_note/note_MultivariateAnalysis01/p2.png)
+
+
+座標の計算結果も一致していますね。
+
+```
+mds
+# A tibble: 10 x 3
+       x1     x2 name 
+    <dbl>  <dbl> <chr>
+ 1  -723.  145.  atl  
+ 2  -385. -343.  chi  
+ 3   485.  -24.8 den  
+ 4  -162.  578.  hou  
+ 5  1211.  392.  la   
+ 6 -1138.  587.  mi   
+ 7 -1078. -523.  ny   
+ 8  1428.  113.  sf   
+ 9  1348. -584.  sea  
+10  -985. -339.  dc
+
+dm_cmd$points
+          [,1]       [,2]
+atl  -723.3320  144.75334
+chi  -385.0213 -343.38470
+den   484.8239  -24.80074
+hou  -162.4644  578.12657
+la   1210.5349  391.82922
+mi  -1137.9306  586.91772
+ny  -1077.5231 -523.33989
+sf   1428.0167  112.56187
+sea  1348.0402 -583.58677
+dc   -985.1442 -339.07661
+
+0	587	1212	701	1936	604	748	2139	2182	543
+587	0	920	940	1745	1188	713	1858	1737	597
+1212	920	0	879	831	1726	1631	949	1021	1494
+701	940	879	0	1374	968	1420	1645	1891	1220
+1936	1745	831	1374	0	2339	2451	347	959	2300
+604	1188	1726	968	2339	0	1092	2594	2734	923
+748	713	1631	1420	2451	1092	0	2571	2408	205
+2139	1858	949	1645	347	2594	2571	0	678	2442
+2182	1737	1021	1891	959	2734	2408	678	0	2329
+543	597	1494	1220	2300	923	205	2442	2329	0
+```
+
+## 参考文献
+- <a href = "http://www.future-fisheries.jp/wp-content/uploads/2015/09/46c7e7140e36b52bbaf7ef8683bf673a.pdf">II-9. 多次元尺度構成法（multi-dimensional scaling ; MDS）</a>
+- <a href = "http://www.is.ouj.ac.jp/lec/data/C07/C07.pdf">多次元尺度法</a>

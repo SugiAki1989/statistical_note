@@ -1,0 +1,219 @@
+---
+title: "比例ハザードモデルと最尤推定"
+pagetitle: "比例ハザードモデルと最尤推"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートでは比例ハザードモデルのパラメタを最尤法で計算する方法についてまとめておく。
+
+## 比例ハザードモデル
+
+ここでの比例ハザードモデルにはワイブル分布を仮定した話をまとめる。まず確率変数$T$が$t$よりも大きい値を取る確率を生存関数$S(t)$という。$F(t)$は$T$のCDFである。
+
+$$
+S(t) = P(T > t) = 1-F(t)
+$$
+
+$T$を生存している時間とすれば、$t$までは生存しているという事象=その時点でまだ生きている確率を返す関数が生存関数。
+
+ワイブル分布の生存関数は下記の通り定義される。
+
+$$
+S(t) = exp \left[ -\frac{t}{\phi}^{\gamma} \right], t>0, \phi>0,\gamma>0
+$$
+
+次に危険度関数をまとめておく。危険率(Hazard rate)は、
+
+$$
+h(t) = \lim_{\Delta t → 0} \frac{P(t < T \le t + \Delta t| T > t)}{\Delta t}
+$$
+であり、時点$t$まで生存した$T > t$という条件のもとで与えられた個体が$T = t$で死亡する確率。$T$を生存している時間とすれば、$t$時間まで死ななかった人が$t$を少し超えたときに寿命が来て死亡したということ。危険度関数$h(t)$は、$T$のpdfを$f(t)$とすれば、
+
+$$
+h(t) = \frac{f(t)}{S(t)}
+$$
+と定義される。ワイブル分布の危険度関数は、
+
+$$
+h(t) = \frac{\gamma}{\phi}(\frac{t}{\phi})^{\gamma-1}
+$$
+
+であり、危険率は$\gamma=1$のとき一定、$\gamma \gt 1$のとき$t$の増加関数、$0 \lt \gamma \lt 1$のとき$t$の減少関数となる。
+
+ここで、ワイブル分布の危険度関数において、
+
+$$
+\theta = \phi^{-\gamma} = \frac{1}{\phi^{\gamma}},\quad log \theta = \boldsymbol{ x^{T} \beta }\Leftrightarrow \theta = exp \left[\boldsymbol{ x^{T} \beta } \right] 
+$$
+
+と定式化すると、
+
+$$
+h(t) = \gamma t^{\gamma-1} exp \left[\boldsymbol{ x^{T} \beta } \right] 
+$$
+
+と表すことができる。ここで$\boldsymbol{ x = 0} $とすると$h_{0}(t) = \gamma t^{\gamma-1}$より、
+
+$$
+h(t) = h_{0}(t) exp \left[\boldsymbol{ x^{T} \beta } \right] 
+$$
+
+ワイブル分布の比例危険度モデルとなる。ワイブル分布の生存関数は、
+
+$$
+S(t) = exp[-\theta t^{\gamma}] = exp[-exp \left[\boldsymbol{ x^{T} \beta } \right] t^{\gamma}]
+$$
+となるため、下記の関係が得られる。
+
+$$
+logS(t) = -exp \left[\boldsymbol{ x^{T} \beta } \right] t^{\gamma} \\ 
+log[-logS(t)] = \gamma log t + \boldsymbol{ x^{T} \beta}
+$$
+
+基本的な情報をまとめたので、ここからワイブル分布の比例危険度モデルの尤度関数は導出する。生存時間$t$、打ち切り$\delta$を下記の通りとする。打ち切りではない場合は$1$、打ち切りの場合$0$とする。
+
+$$
+t_{i}, i>0,\quad \delta_{i} =0,1
+$$
+
+また、これまでの情報をまとめると、
+
+$$
+\begin{eqnarray}
+f(t) &=& \theta \gamma t^{\gamma - 1} exp[-\theta t^{\gamma}]\\
+S(t) &=& \int_{t}^{\inf}f(s)ds = exp[-\theta t^{\gamma}] \\
+h(t) &=& \theta \gamma t^{\gamma - 1} \\ 
+\theta &=& exp[\boldsymbol{ x^{T} \beta}]
+\end{eqnarray}
+$$
+
+であり、$n$個のデータについて、$i$番目のサンプルの生存時間を$t_{i}$とするとき、サンプル$i$がが非打ち切りデータならば、その尤度は確率密度関数$f(t_{i}$と等しくなるため、尤度を下記のように考えられる。
+
+$$
+L = \prod \left\{ f(t_{i})^{\delta_{i}} S(t_{i})^{1-\delta_{i}}\right\}
+$$
+
+対数尤度関数は、
+
+$$
+\begin{eqnarray}
+logL &=& \sum \left\{ \delta_{i}log(f(t_{i})) + (1-\delta_{i}) log S(t_{i}) \right\} \\ 
+&=& \sum \left\{ \delta_{i}[ log \gamma + (\gamma - 1)log t_{i} +\boldsymbol{ x_{i} \beta} ] -exp[\boldsymbol{ x_{i}^{T} \beta} ] t_{i}^{\gamma} \right\}
+\end{eqnarray}
+$$
+となる。
+
+$$
+\begin{eqnarray}
+\frac{ \partial log L(\boldsymbol{\beta, \gamma}) }{ \partial \beta_{j}} &=& \sum \delta_{i}x_{ij} - x_{ij}exp[\boldsymbol{ x_{i}^{T} \beta}]t_{i}^{\gamma} = 0 \\
+\frac{ \partial log L(\boldsymbol{\beta, \gamma}) }{ \partial \gamma} &=& \sum \delta_{i} \left( \frac{1}{\gamma} + logt_{i} \right) - exp[\boldsymbol{ x_{i}^{T} \beta}] t_{i}^{\gamma} logt_{i}= 0
+\end{eqnarray}
+$$
+
+ここからはRで実装していく。サンプルデータは下記を参照した。
+
+- [R で連続時間イベントヒストリー分析](http://tarohmaru.web.fc2.com/R/EventHistory/ContinuousTimeModel_recid.html#parametric-models)
+
+```{r}
+library(tidyverse)
+library(eha)
+
+# From: https://statisticalhorizons.com/resources/data-sets
+# library(foreign) 
+# recid.wide <- foreign:: read.dta("recid.dta")
+# work1~work52は削除したrecid_small.csvを利用する。
+df <- read_csv("~/Desktop/recid_small.csv")
+head(df)
+```
+
+まずは、`eha`パッケージの`weibreg`関数でワイブル分布の比例危険度モデルを実行し、計算したいパラメタの値を確認しておく。`survival`パッケージの`survreg`関数はAccelarated Failure Time Modelsなので、ここで想定しているモデルとは異なるので注意。
+
+```{r}
+# phreg() is same
+wfit <- weibreg(Surv(week, arrest) ~ age + educ + fin, data = df)
+wfit
+```
+
+まずは、変数をベクトルと行列に格納する。
+
+```{r}
+t <- df %>% pull(week)
+delta <- df %>% pull(arrest)
+X <- df %>% 
+  mutate(x0 = 1) %>% 
+  select(x0, x1 = age, x2 = educ, x3 = fin) %>% 
+  as.matrix()
+```
+
+ここでは準ニュートン法でワイブル分布の比例危険度モデルのパラメタを計算する。 
+
+```{r}
+f <- function(x){
+  gamma <- x[1]
+  b <- x[-1]
+  f1 <- sum(delta * (1 / gamma + log(t)) - exp(X %*% c(b)) * log(t) * t^gamma)
+  f2 <- apply(X * c(delta), 2, sum) - apply(X * c(exp(X %*% b) * t^gamma), 2, sum)
+  return(c(f1, f2))
+}
+
+iter <- 10^6       # パラメータの初期値
+eta <- 10^(-10)   # 学習率
+B <- rep(0.01, 5) # パラメタの初期値(γ, intercept, age, educ, fin)
+H <- diag(f(B))   # ヤコビアンの初期値
+
+for(i in 1:iter){
+  eta <- eta + 10^(-11) # 学習率を更新数に応じて増加修正
+  B_pre <- B
+  B <- B - eta * H %*% f(B)
+  s <- B - B_pre
+  y <- f(B) - f(B_pre)
+  # ヤコビアン近似行列を更新
+  H <- H + ((s - H %*% y) / as.numeric(t(s) %*% H %*% y)) %*% t(s) %*% H
+  # alpha <- B[1]
+  # beta  <- B[-1]
+  # loglik <- sum(delta * (X %*% c(beta) + log(rep(alpha,length(t))) + (rep(alpha, length(t)) - 1) * log(t))) - sum(exp(X %*% c(beta)) * t^alpha)
+  # print(sprintf("%d times: (γ=%2.5f, x0=%2.5f, x1=%2.5f, x2=%2.5f, x3=%2.5f)", i, B[1,1], B[2,1], B[3,1], B[4,1], B[5,1]))
+  if(i %% 50000 == 0) {
+    print(sprintf("%d times: (γ=%2.5f, x0=%2.5f, x1=%2.5f, x2=%2.5f, x3=%2.5f)",
+                  i, B[1,1], B[2,1], B[3,1], B[4,1], B[5,1]))
+  }
+}
+# print(B)
+#             [,1]
+# [1,]  1.05767039 -- γ
+# [2,] -2.80992807 -- intercept
+# [3,] -0.06696622 -- x1(age)
+# [4,] -0.24623321 -- x2(educ)
+# [5,] -0.29928444 -- x3(fin)
+```
+
+## 参考文献
+
+- [一般化線形モデル入門 原著第2版](https://www.kyoritsu-pub.co.jp/book/b10010684.html)
+- [一般化線形モデルと生存分析](https://www.asakura.co.jp/detail.php?book_code=12195)

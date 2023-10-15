@@ -1,0 +1,148 @@
+---
+title: "累積分布関数と確率密度関数の台のはなし"
+pagetitle: "累積分布関数と確率密度関数の台のはなし"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、累積分布関数と確率密度関数の台のはなしをまとめている。確率分布のことを調べていたら、確率分布は分布関数から始めるほうがわかりやすいみたいな話を聞いたので、そのまとめ。分布関数のほうが根本的で、その分布関数を微分したものが確率密度と考えるほうがわかりやすい。確率密度関数から始めると、分布関数の役割がよくわからないものになってしまいやすい、という話。あと、確率分布の台の話も初めて知ったので、それのまとめでもある。
+
+## 分布関数と確率
+$X$を確率変数とするとき、観測値$x$に対して、$X \leq x$となる割合を$F_{X}(x)$と書き、この関数を$X$の分布関数と呼ぶ。
+
+関数$F$が確率変数の分布関数である場合、以下の性質を持つ。
+
+- 単調増加(単調非減少)($-\inf < x < y < \inf$について$F(x) \leq F(y)$)
+- 右連続
+- $F(-\inf) = \lim\_{ x \to -\inf } F(x) = 0, F(\inf) = \lim\_{x \to \inf} F(x) = 1$
+
+確率変数$X$が分布関数$F$によって表される確率分布に従うとき、$X$に関する確率と呼ばれる割合が定まる。例えば、$X$の値が$a$である確率や、$X$の値が$b$以上、$c$以下である確率など、これらは分布関数$F$によって計算できる。
+
+$X$の値が$a$である確率は、
+
+$$
+P(X = a) = F(a) - \lim_{ \epsilon \to 0} F(a - \epsilon)
+$$
+
+で表現され、$X$の値が$b$以上、$c$以下である確率は、
+
+$$
+P(b < X \leq c) = F(c) - F(b)
+$$
+
+である。一般的には、確率変数$X$が分布関数$F$で表される確率分布に従うとき、実数を要素とする集合$S$について、$X$の値が$S$に属する割合を分布関数$F$で確定するとき、確率($P(X )\in S$)と呼ぶ。
+
+## 離散分布の確率関数
+関数$f$が、実数$x$について、$f(x) \geq 0$であり、実数$x \in S = \{x\_{1}, x\_{2},...\}$の場合のみ$f(x) >0$であり、
+
+$$
+\sum_{x \in S} f(x) = f(x\_{1}) + f(x\_{2}) + ... = 1
+$$
+
+を満たす関数を「確率関数」と呼ぶ。離散分布の確率関数$f$に対して、$f(x) > 0$となる$x$の集合を確率変数$f$の「台」と呼ぶ。例えば、サイコロを1回ふるときのサイコロの値$X$の従う確率分布の確率変数の台は、$\{1,2,3,4,5,6\}$である。
+
+$$
+f(x) = \frac{1}{6}, x = 1,2,3,4,5,6
+$$
+
+確率分布$D$の確率関数$f$の台が0以上の整数すべての集合の部分集合である場合、確率分布$D$の分布関数$F$は
+
+$$
+F(x) = \sum_{i=0}^{\lfloor x \rfloor}f(i)
+$$
+
+である。$\lfloor x \rfloor$は床関数であり、$x$以下の最大の整数値を表す。反対に$\lceil x \rceil$は天井関数であり、$x$以上の整数値を表す。離散分布の場合には、確率関数から分布関数が計算できる。
+
+## 連続分布の確率関数
+連続分布の場合、確率関数ではなく確率密度関数。関数$f$を用いて、下記のように表される。
+
+$$
+F(x) = \int_{-Inf}^{x} f(x)dx, -Inf < x < Inf 
+$$
+このように定義される関数$F$が分布関数であるとき、$f$を確率密度関数と呼ぶ。注意として、このままでは同じ連続分布を特定するための確率密度関数が必ずしも一意に定まらないので、分布関数$F$を特定し、
+
+$$
+f(x) = F^{,}(x), -Inf < x < Inf
+$$
+
+として定義される$f$のみを確率密度関数とする。確率変数$X$が密度関数$f$をもつ連続分布に従うとき、一般に実数の集合$S$について、
+
+$$
+P(X \in S) = \int_{x \in S} f(x)dx
+$$
+
+確率密度関数$f$に対して、$f(x) > 0$となる$x$の集合の閉包のことを確率密度関数の$f$の台と呼ぶ。確率密度関数の台は実数すべての集合か$[a,b]$という閉区間のいずれか。たとえば、0から1の間の実数を一様にサンプリングする一様乱数の確率密度関数$f$は、
+
+$$
+f(x) = 1, 0 < x < 1
+$$
+
+であり、台は$[0,1]$となる。標準正規分布であれば、確率密度関数の台は$[-Inf,Inf]$で確率密度関数は下記の通り。
+
+$$
+f(x) = \frac{1}{\sqrt {2 \pi}} e^{-\frac{x^2}{2}}, \ -Inf < x < Inf
+$$
+
+## おまけ
+
+```{r}
+library(tidyverse)
+library(patchwork)
+
+x <- seq(25, 75, 0.01)
+mean <- 50
+sd <- seq(1,10,2)
+n <- length(sd)
+df_d <- df_p <- data.frame(x)
+pattern <- paste0('m=', mean, ',sd=', sd)
+for (i in 1:n) {
+  d <- dnorm(x, mean = 50, sd = sd[[i]])
+  p <- pnorm(x, mean = 50, sd = sd[[i]])
+  df_d <- cbind(df_d, d)
+  df_p <- cbind(df_p, p)
+}
+names(df_d) <- names(df_p) <- c('x', pattern)
+p1 <- df_p %>% 
+  tidyr::pivot_longer(cols = -x, names_to = 'patterns') %>% 
+  ggplot(., aes(x, value, col = patterns, fill = patterns)) + 
+  geom_line(size = 1) + 
+  theme_classic() + 
+  ylab('F(x)') + 
+  ggtitle('Cumulative Distribution Function')
+
+p2 <- df_d %>% 
+  tidyr::pivot_longer(cols = -x, names_to = 'patterns') %>% 
+  ggplot(., aes(x, value, col = patterns, fill = patterns)) + 
+  geom_line(size = 1) + 
+  theme_classic() + 
+  ylab('f(x)') + 
+  ggtitle('Probability Distribution Function')
+
+p1 + p2 + plot_annotation(title = "Normal Distribution")
+
+```

@@ -1,0 +1,517 @@
+---
+title: "αとβとnの話"
+pagetitle: "αとβとnの話"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここでは仮説検定で登場する$\alpha$と$\beta$と$n$についての話をまとめていきます。ゴールは仮説検定の話からはじめ、クックパッド様のABテスト記事の例に出ている「$\alpha=0.05$、$\beta=0.80$としたときのサンプルサイズ$n$はいくつか？」という質問に回答できるようにすることがゴールです。仮説検定の流れやサンプルデータなどは、下記、蓑谷先生の第5章を参考にし、個人的にRでの可視化や関数を用いて補足しています。また、おまけ程度に仮説検定の細かい話を末尾に記載しています。
+
+- [蓑谷千凰彦: 統計学入門](https://www.amazon.co.jp/%E7%B5%B1%E8%A8%88%E5%AD%A6%E5%85%A5%E9%96%80-%E8%93%91%E8%B0%B7-%E5%8D%83%E5%87%B0%E5%BD%A6/dp/4489006985/sr=1-3/qid=1171956000/ref=sr_1_3/503-7214809-8544723?ie=UTF8&s=books)
+- [仮説検証とサンプルサイズの基礎](https://techlife.cookpad.com/entry/2016/09/26/111601)
+
+## 仮説検定とサンプルデータ
+
+仮説検定をするためには仮説が必要です。例えば、[蓑谷千凰彦: 統計学入門](https://www.amazon.co.jp/%E7%B5%B1%E8%A8%88%E5%AD%A6%E5%85%A5%E9%96%80-%E8%93%91%E8%B0%B7-%E5%8D%83%E5%87%B0%E5%BD%A6/dp/4489006985/sr=1-3/qid=1171956000/ref=sr_1_3/503-7214809-8544723?ie=UTF8&s=books)にあるように既存製品は平均的に8時間の稼働時間でしたが、新開発された製品は平均的に9時間の稼働が可能になった場合、新製品は統計的に稼働時間が長くなったかどうかを調べたい、などです。観察された10個のデータは下記のとおりで、正規分布に従い、$\sigma = 1$とします。
+
+```{r}
+library(tidyverse)
+# p306
+x <- c(8.4, 10.2, 9.2, 8.9, 8.8, 6.8, 8.3, 9.9, 8.8, 8.7)
+```
+
+仮説をもとにまずは帰無仮説$H_{0}$を設定します。ここでの帰無仮説は「$H_{0}:\mu=8$」となります。本来立証したい仮説、対立仮説は「$H_{1}: \mu=9$」として設定します。
+
+## 検定統計量と分布
+
+母平均$\mu$に関する話なので、$\mu$のよい推定量である$\bar{ X }$を用いて、$\mu$に関する検定を行うことにします。この状況を整理すると、下記のように問題の条件をまとめることができます。
+
+$$
+\bar{ X } \sim N \left(\mu, \frac{\sigma^{2}}{n} \right),\quad n=10,\quad \sigma=1
+$$
+
+$\sigma$は未知のことが多いので、通常は代わりとなるt分布を代用して検定することになることが多いですが、ここでは学習のために簡単な設定のままで進めます。
+
+## 有意水準$\alpha$の設定
+
+まず$H_{0}:\mu=8$を棄却するためには、どのような状況になればよいか考えてみます。$H_{0}:\mu=8$としているにも関わらず、これを再現できないようなデータが観測されれば、$H_{0}:\mu=8$が正しいとする仮説設定には無理がでてきそうです。そのために、$H_{0}:\mu=8$を棄却する閾値$c$の$\bar{ X }$の領域R(egion)を考えて、この領域に入れば帰無仮説を棄却する方法を考えます。
+
+$$
+R = \{\bar{ X }: \bar{ X } > c\}
+$$
+
+$H_{0}:\mu=8$を棄却するためには、これが正しいとしたときに、$\bar{ X }$が小さな確率$\alpha$でしか生じないような場合、$H_{0}:\mu=8$を棄却するのが妥当と言えそうです。このときにでてくる$\alpha$は有意水準と呼ばれます。可視化したグラフの右側の色の濃い部分のことです。
+
+```{r}
+x <- seq(6.5, 9.5, 0.001)
+n <- 10
+mu_h0 <- 8
+sd_h0 <- 1/sqrt(n)
+y_h0 <- dnorm(x = x, mean = mu_h0, sd = sd_h0)
+upr <- qnorm(0.99, mean = mu_h0, sd = sd_h0, lower.tail = TRUE)
+# low <- qnorm(0.01, mean = mu_h0, sd = sd_h0, lower.tail = TRUE)
+
+df <- tibble(x, y_h0) %>% 
+    dplyr::mutate(y_h0_ = if_else(x >= upr, y_h0, 0))
+
+ggplot(data = df) + 
+  geom_polygon(aes(x, y_h0), fill = '#7FA6C9', alpha = 1/2) + 
+  geom_polygon(aes(x, y_h0_), fill = 'black') + 
+  theme_classic() + 
+  scale_x_continuous(breaks = seq(min(df$x), max(df$x), 0.5)) +
+  ggtitle('H0 Distribution')
+```
+
+例えば、$H_{0}:\mu=8$が正しいとする場合、有意水準$\alpha=0.01$としたとき、網掛け部分が1%となる$\bar{ X }$の値は`r upr`となります。この値が、さきほどの領域を分割する閾値$c$となり、$H_{0}:\mu=8$が正しいとしたときに、$\bar{ X }$が$\alpha=0.01$以下でしか生じないRに値が入れば、$H_{0}:\mu=8$を棄却することは妥当と言えます。
+
+$$
+P(\bar{X} > c | H_{0}\ is\ True ) = 0.01
+$$
+
+上記の等式を満たす$c$は`r upr`です。もちろん、下記のように標準化してZ分布に変換してから求める方法でも同じ結果となります。
+
+$$
+P(\bar{X} > c | H_{0}\ is\ True ) = P \left(Z >\frac{c-8}{\frac{1}{\sqrt {10}}}\right)= P(Z > \sqrt{10}(c-8)) = 0.01
+$$
+
+標準正規分布の片側で1%ととなる確率を与える$z$の値は`r qnorm(0.99, 0, 1, lower.tail = TRUE)`なので、この等式は下記の通り変形でき、そこから正規分布$N(8, 1/\sqrt{10})$の分布で上側1%となる$\bar{ X }$の値を計算できます。
+
+$$
+\sqrt{10}(c-8) = 2.326348\quad  \therefore c = 8.74
+$$
+
+これにより棄却域は$R = \{\bar{ X }: \bar{ X } > 8.74 \}$が得られます。従って、棄却域に帰無仮説$H_{0}$が入れば、帰無仮説$H_{0}$を棄却して、対立仮説$H_{1}$を受容して、仮説検定はおしまい…とはなりません。
+
+棄却域に入らない場合、もちろん帰無仮説$H_{0}$は棄却できず、対立仮説$H_{1}$も受容しないとなると、対立仮説$H_{1}$が正しい場合にも関わらず、受容しないという事象が発生します。その点について、次から詳しくみていきます。
+
+## 検定方法と$\beta$の話
+帰無仮説を棄却する基準となる閾値$c$を超えれば、帰無仮説$H_{0}$が正しいと主張するには、困難な観測データが得られたことになり、$H_{0}:\mu=8$が正しいと仮定しているときに確率1％でしか生じないデータと判断できるため、帰無仮説$H_{0}$が棄却します。
+
+一方で、帰無仮説を棄却する基準となる閾値$c$を超えない場合、帰無仮説$H_{0}$が正しいという仮定のもとで十分大きな確率で得られる観測データを得たと考えれるので、帰無仮説$H_{0}$を棄却しないことになります。とはいえ、対立仮説$H_{1}$を受容するわけではありません。この段階で十分ややこしいですが、書く場合に分けてみていきます。
+
+### 棄却域に検定統計量が「入る」場合 
+棄却域に入る場合、帰無仮説$H_{0}$が正しいが、1％の確率が起こったと主張するのは妥当ではなく、帰無仮説$H_{0}$が誤っていると考えた方が妥当といえます。かりに対立仮説$H_{1}$が正しいのであれば、今回の結果は対立仮説の分布のもとで、79%の確率で生じるため、対立仮説$H_{1}$が正しいと考えるのが妥当といえます。
+
+$$
+P(\bar{X} > c | H_{1}\ is\ True ) = P \left(Z >\frac{8.74-9}{\frac{1}{\sqrt {10}}}\right)= P(Z > -0.822) = 0.794
+$$
+
+上式のように標準化しなくてもRの関数を使えば簡単に計算できます。
+
+```{r}
+mu_h1 <- 9
+sd_h1 <- 1/sqrt(n)
+# qnormで得られる閾値の上側の確率
+p <- pnorm(
+  q = qnorm(0.99, mean = mu_h0, sd = sd_h0, lower.tail = TRUE), #8.735656を返す
+  mean = mu_h1,
+  sd = sd_h1,
+  lower.tail = FALSE
+)
+
+sprintf("Probability: %1.2f%%", p * 100)
+```
+
+このとき、対立仮説$H_{1}$が正しいと考えるのが妥当とはいえるかもしれませんが、100％正確な判断ではないので、このとき「帰無仮説$H_{0}$が正しいにも関わらず、帰無仮説$H_{0}$を棄却して、誤りである対立仮説$H_{1}$を受容する」という誤りを犯す可能性があります。これをタイプ1エラーと呼び、$\alpha$で表します。
+
+今回の例であれば、$P(\bar {X} > 8.74| \mu=8)=\alpha$となります。検定を行う際には、この$\alpha$の値を予めコントロールして設定します。都合の良い判断ができるデータが手に入らないからといって、$\alpha$を上げることはp値ハッキングとよばれ、分析に対して、望ましい態度とは言えません。
+
+### 棄却域に検定統計量が「入らない」場合
+
+棄却域に検定統計量が入らないからと言って、対立仮説$H_{1}$を受容するほどのでもない場合に起こり得る事象は、先ほどとは反対に「対立仮説$H_{1}$が正しいにも関わらず対立仮説$H_{1}$を棄却する」という誤りです。これはタイプ2エラーと呼ばれ、$\beta$で表します。
+
+$$
+P(\bar{X} \le 8.74 | \mu=9 ) = P \left(Z \le \frac{8.74 - 9}{\frac{1}{\sqrt {10}}}\right)= P(Z \le -0.822)  = 0.206 = 1 - 0.794
+$$
+
+このような関係にあるため統計的仮説検定は、2種類の誤りを考慮しなければいけません。2つ同時に起こることはありませんが、帰無仮説$H_{0}$と対立仮説$H_{1}$のいずれが正しいのかを知る術がないため、可能性として両方を同時に考慮する必要があります。
+
+下記のような表の通り、表側が「真の状態」で、表頭が「統計的な判断」として状況をまとめることができます。「タイプ1エラー」は「帰無仮説$H_{0}$が正しいにも関わらず、帰無仮説$H_{0}$を棄却する誤り(つまり、対立仮説$H_{1}$を受容する)」で、「タイプ2エラー」は「対立仮説$H_{1}$が正しいにも関わらず、対立仮説$H_{1}$を棄却する誤り(つまり、帰無仮説$H_{0}$を受容する)」です。
+
+||$H\_{0}$)を受容|$H\_{1}$を受容|
+|:---:|:---:|:---:|
+|$H\_{0}$が真|正しい判断|タイプ1エラー($\alpha$)|
+|$H\_{1}$が真|タイプ2エラー($\beta$)|正しい判断(検出力($1 - \beta$)|
+
+ここまで見たように$n$が固定されていれば、タイプ1エラー($\alpha$)とタイプ2エラー($\beta$)はトレード・オフの関係にあることがわかります。これは、閾値の$c$を基準に色分けした図で可視化するとわかりやすいです。
+
+```{r}
+# 状況設定のおさらいを兼ねて再代入
+x <- seq(6.5, 10.5, 0.001)
+n <- 10
+mu_h0 <- 8
+sd_h0 <- 1/sqrt(n)
+y_h0 <- dnorm(x = x, mean = mu_h0, sd = sd_h0)
+
+mu_h1 <- 9
+sd_h1 <- 1/sqrt(n)
+y_h1 <- dnorm(x = x, mean = mu_h1, sd = sd_h1)
+
+# qnorm(0.7984028, mean = mu_h1, sd = sd_h1, lower.tail = FALSE)と同じ
+c <- qnorm(0.99, mean = mu_h0, sd = sd_h0, lower.tail = TRUE)
+
+df <- tibble(x, y_h0, y_h1, c) %>% 
+  mutate(
+    y_h0_= if_else(x > c, y_h0, 0),
+    y_h1_= if_else(x < c, y_h1, 0)
+         )
+
+ggplot(data = df) + 
+  geom_polygon(aes(x, y_h0),  fill = '#7FA6C9', alpha = 1/5) +
+  geom_polygon(aes(x, y_h0_), fill = '#7FA6C9', alpha = 1/2) +
+  geom_polygon(aes(x, y_h1),  fill = '#E55A64', alpha = 1/5) +
+  geom_polygon(aes(x, y_h1_), fill = '#E55A64', alpha = 1/2) +
+  theme_classic() +
+  scale_x_continuous(breaks = seq(min(df$x), max(df$x), 0.5)) +
+  ggtitle('Type 1 Error & Type 2 Error')
+```
+
+$\alpha$と$\beta$は両方同時に小さくすることはできず、$\alpha$を小さくすると、$\beta$は大きくなり、$\alpha$を大きくすると、$\beta$は小さくなります。
+
+```{r echo=FALSE}
+library(patchwork)
+library(latex2exp)
+x <- seq(6.5, 11, 0.001)
+n <- 10
+mu_h0 <- 8
+sd_h0 <- 1/sqrt(n)
+y_h0 <- dnorm(x = x, mean = mu_h0, sd = sd_h0)
+
+mu_h1 <- 9
+sd_h1 <- 1/sqrt(n)
+y_h1 <- dnorm(x = x, mean = mu_h1, sd = sd_h1)
+df <- data.frame(x, n, y_h0, y_h1)
+
+
+upr_y_h0 <- qnorm(p = 0.975, mean = mu_h0, sd = sd_h0)
+alpha <- if_else(x >= upr_y_h0, df$y_h1, 0)
+beta <- if_else(x <= upr_y_h0, df$y_h1, 0)
+df2 <- cbind(df, alpha, beta)
+
+p1 <- df2 %>% 
+  ggplot(data = .) + 
+  geom_polygon(aes(x, y_h0), fill = '#7FA6C9', alpha = 1/6) + 
+  geom_polygon(aes(x, alpha), fill = '#7FA6C9', alpha = 1/2) + 
+  geom_polygon(aes(x, y_h1), fill = '#E55A64', alpha = 1/6) + 
+  geom_polygon(aes(x, beta), fill = '#E55A64', alpha = 1/2) + 
+  geom_vline(xintercept = upr_y_h0, col = 'black', linetype = 3) +
+  annotate("text", x = upr_y_h0, y = max(df2$y_h0) + 0.2, size = 7,
+           label = TeX('$\\c$')) +
+  annotate("text", x = mu_h0, y = max(df2$y_h0) + 0.2, size = 7, parse = TRUE, col = '#7FA6C9',
+           label= TeX('$H_{0}$')) + 
+  annotate("text", x = mu_h1, y = max(df2$y_h1) + 0.2, size = 7, parse = TRUE, col = '#E55A64',
+           label= TeX('$H_{1}$')) + 
+  theme_classic() + 
+  scale_x_continuous(breaks = seq(0,max(df2$x),1)) +
+  ylab('Probability')
+
+upr_y_h1 <- qnorm(p = 0.90, mean = mu_h0, sd = sd_h0)
+alpha2 <- if_else(x >= upr_y_h1, df$y_h0, 0)
+beta2 <- if_else(x <= upr_y_h1, df$y_h1, 0)
+df3 <- cbind(df, alpha2, beta2)
+
+p2 <- df3 %>% 
+  ggplot(data = .) + 
+  geom_polygon(aes(x, y_h0), fill = '#7FA6C9', alpha = 1/6) + 
+  geom_polygon(aes(x, alpha2), fill = '#7FA6C9', alpha = 1/2) + 
+  geom_polygon(aes(x, y_h1), fill = '#E55A64', alpha = 1/6) + 
+  geom_polygon(aes(x, beta2), fill = '#E55A64', alpha = 1/2) + 
+  geom_vline(xintercept = upr_y_h1, col = 'black', linetype = 3) +
+  geom_vline(xintercept = upr_y_h0, col = 'gray', linetype = 3) +
+  annotate("text", x = upr_y_h1, y = max(df3$y_h0) + 0.2, size = 7,
+           label = TeX('$\\c$')) +
+  annotate("text", x = mu_h0, y = max(df3$y_h0) + 0.2, size = 7, parse = TRUE, col = '#7FA6C9',
+           label= TeX('$H_{0}$')) + 
+  annotate("text", x = mu_h1, y = max(df3$y_h1) + 0.2, size = 7, parse = TRUE, col = '#E55A64',
+           label= TeX('$H_{1}$')) + 
+  theme_classic() + 
+  scale_x_continuous(breaks = seq(0,max(df3$x),1)) +
+  ylab('Probability')
+
+p1 / p2
+```
+
+### サンプルサイズの$n$
+これまで見たように、$\alpha$と$\beta$をコントロールするためには、サンプルサイズの$n$を変更する必要があります。例えば、$\alpha=0.01$と$\beta=0.05$とすると、これまで見たように下記の連立方程式を計算すれば、任意の$\alpha$と$\beta$のもとで、必要なサンプルサイズが求められます。$\alpha=0.01$と$\beta=0.05$の場合、
+
+$$
+\begin{eqnarray}
+  \left\{
+    \begin{array}{l}
+P(\bar{X} \in R | H_{0}) = P(\bar{X} > c | \mu = 8)= P \left(Z > \frac{c - 8}{\frac{1}{\sqrt {n}}}\right) = P(Z > \sqrt {n}(c-8)) \le 0.01(=\alpha)
+ \\
+P(\bar{X} \in R | H_{1}) = P(\bar{X} \le c | \mu = 9)= P \left(Z \le \frac{c - 9}{\frac{1}{\sqrt {n}}}\right) = P(Z \le \sqrt {n}(c-9)) \le 0.05(=\beta)    \end{array}
+  \right.
+\end{eqnarray}
+$$
+
+つまり、下記の$\alpha=0.01$と$\beta=0.05$を満たす$c$と$n$が必要になります。
+
+$$
+\begin{eqnarray}
+  \left\{
+    \begin{array}{l}
+    \sqrt {n}(c-8) = 2.326 \\
+    \sqrt {n}(c-9) = -1.645
+    \end{array}
+  \right.
+\end{eqnarray}
+$$
+
+$\alpha=0.01$と$\beta=0.05$に対応する$z$値は下記の関数でえられます。
+
+```{r}
+qnorm(0.01, 0, 1, lower.tail = FALSE);qnorm(0.05, 0, 1, lower.tail = TRUE);
+```
+
+実際に満たす値を計算します。
+
+```{r}
+library(nleqslv)
+
+fn <- function(val, alpha = 0.01, beta = 0.05, mu1 = 8, mu2 = 9) {
+  n <- val[1] # sample size
+  c <- val[2] # critical region
+  
+  # c-mu1/(1/√n)と標準化したものから計算
+  q1 <- (sqrt(n)*(c - mu1)) - qnorm(alpha, 0, 1, lower.tail = FALSE) 
+  q2 <- (sqrt(n)*(c - mu2)) - qnorm(beta , 0, 1, lower.tail = TRUE) 
+  
+  return(c(q1, q2))
+}
+ini <- c(5, 5)
+res <- nleqslv(ini, fn)$x
+res
+```
+
+値は$n$が`r res[1]`で、閾値$c$が`r res[2]`となります。つまり、$n=16$で検定すれば、$\alpha=0.01$と$\beta=0.05$を満たす検定を実現できることになります。
+
+### ゴール
+クックパッド様のABテスト記事の例に出ているサンプルサイズの計算を行ってみます。これまでの話では標本平均を使っていましたが、上記の記事では標本比率で話が進んでいるので、比率が従う分布に変更し、その仮定のもとで標準化を行って、同じように連立方程式を解くことにします。
+
+$$
+\begin{eqnarray}
+  \left\{
+    \begin{array}{l}
+P(\hat{p} \in R | H_{0}) = P(\hat{p} > c | p = 0.10)= P \left(Z > \frac{c - 0.10}{\sqrt {\frac{0.10(1-0.10)}{n}}} \right) = P \left(Z > \frac{\sqrt {n}(c-0.10)}{\sqrt {0.10(1-0.10)}} \right) \le 0.01(=\alpha)
+ \\
+P(\hat{p} \in R | H_{1}) = P(\hat{p} \le c | p = 0.15)= P \left(Z \le \frac{c - 0.15}{\sqrt {\frac{0.15(1-0.15)}{n}}} \right) = P \left(Z \le \frac{\sqrt {n}(c-0.15)}{\sqrt {0.15(1-0.15)}} \right) \le 0.05(=\beta)    \end{array}
+  \right.
+\end{eqnarray}
+$$
+
+参考記事の話を元に、$\alpha$と$\beta$がともに5%となるような$n$、つまり$\alpha$の右側2.5%と$\beta$の左側5%の数値が一致するような$n$を求めます。
+
+```{r}
+fn <- function(val, alpha = 0.025, beta = 0.05, p1 = 0.10, p2 = 0.15) {
+  n <- val[1] # sample size
+  c <- val[2] # critical region
+  
+  # c-p/√(p(1-p)/n)と標準化したものから計算
+  q1 <- (sqrt(n)*(c - p1)) / sqrt(p1 * (1 - p1)) - qnorm(alpha, 0, 1, lower.tail = FALSE)
+  q2 <- (sqrt(n)*(c - p2)) / sqrt(p2 * (1 - p2)) - qnorm(beta , 0, 1, lower.tail = TRUE)
+
+  return(c(q1, q2))
+}
+ini <- c(1, 1)
+res <- nleqslv(ini, fn)$x　
+res
+```
+
+すこし数字がずれていますが、だいたい同じ値が得られています。$n=$ `r ceiling(res[1])`で検定すれば、$\alpha$の右側2.5%と$\beta$の左側5%となるような検定を実現できます。
+
+## 参考文献
+- [蓑谷千凰彦: 統計学入門](https://www.amazon.co.jp/%E7%B5%B1%E8%A8%88%E5%AD%A6%E5%85%A5%E9%96%80-%E8%93%91%E8%B0%B7-%E5%8D%83%E5%87%B0%E5%BD%A6/dp/4489006985/sr=1-3/qid=1171956000/ref=sr_1_3/503-7214809-8544723?ie=UTF8&s=books)
+- [仮説検証とサンプルサイズの基礎](https://techlife.cookpad.com/entry/2016/09/26/111601)
+
+## おまけ: 仮説検定の数理
+### コイン投げ実験
+コインを繰り返し20回投げたとき、表が出る確率が0.5であるならば、期待される表の数は10回(確率0.5)のはずだが、観測結果は5回(確率0.25)だった。
+
+```{r}
+set.seed(1989)
+coin <- rbinom(n = 20, size = 1, prob = 0.25)
+coin
+```
+
+このコイン投げ実験がたまたま結果としてこうなったのかもしれない。もう一度同じように実験すれば、結果は変わるかもしれないので、「裏が出やすいコイン」という結論は間違っているかもしれない。このとき、何らかの根拠にしたがって、判断する方法の1つが統計的仮説検定。
+
+コインはイカサマコインではないと仮定すると、表の出る確率は0.5である。そのとき、コインの表が出る回数を(p)とすると、20回のコイン投げで表の出る合計は2項分布(B(20, p=0.5))に従う。この仮定のもと、0~5回の表の出る確率を足し合わせると、0.0207であり、極めて小さい。
+
+```{r}
+# sum(dbinom(x = 0:5, size = 20, prob = 0.5))
+sum(
+  dbinom(x = 0, size = 20, prob = 0.5) + 
+  dbinom(x = 1, size = 20, prob = 0.5) + 
+  dbinom(x = 2, size = 20, prob = 0.5) + 
+  dbinom(x = 3, size = 20, prob = 0.5) + 
+  dbinom(x = 4, size = 20, prob = 0.5) + 
+  dbinom(x = 5, size = 20, prob = 0.5)
+)
+```
+
+```{r}
+x <- 0:20
+y1 <- dbinom(x = x, size = 20, prob = 0.5)
+lwr <- if_else(x <= 5, y1, 0)
+y2 <- dbinom(x = x, size = 20, prob = 0.25)
+df_binom <- data.frame(y1, y2, x, lwr)
+
+ggplot(data = df_binom) + 
+  geom_bar(aes(x, y1), fill = '#7FA6C9', stat = 'identity', alpha = 1/4) + 
+  geom_bar(aes(x, lwr), fill = '#7FA6C9', stat = 'identity') + 
+  geom_bar(aes(x, y2), fill = '#E55A64', stat = 'identity', alpha = 1/4) + 
+  theme_classic() + 
+  scale_x_continuous(breaks = seq(0,max(df_binom$x), 1)) +
+  ylab('Probability') + 
+  ggtitle('Binomial Distribution')
+```
+
+このとき、実際の観測値から考えると、最初の仮定である「確率0.5で表がでる」という仮定がむしろ「誤り」であり、コインは「イカサマ」と考えたほうが自然である。この判断が「誤りの可能性はある」が、その確率は($\alpha$ )以下、つまり0.0207以下であることが保証されている。これを有意確率や$p$値と呼ぶ。
+
+##統計的仮説検定の数理
+確率ベクトル(標本確率変数)$\boldsymbol{ X } = (X_{1}, X_{2},...,X\_{n} )$は、標本空間$\varOmega$上の分布$P_{\theta}$, $\theta \in \Theta$に従うとする。
+
+このとき$\boldsymbol{ X }$の実現値$\boldsymbol{ x } = (x_{1}, x_{2},...,x_{n} )$に基づいて、$\boldsymbol{ X }$の従う分布が、$P_{\theta}$, $\theta  \in \Theta_{0}$であるか、$P_{\theta}$, $\theta \in \Theta_{1}$であるかを主張する行為が統計的仮説検定。$\theta \in \Theta_{0}$は帰無仮説($H_{0}$)であり、$\theta \in \Theta_{1}$は対立仮説($H_{1}$)と呼ぶ。
+
+```{r}
+# 2つ目の図
+x <- seq(0, 60, 0.1)
+size <- 200
+p1   <- 0.10
+p2   <- 0.15
+m1 <- size * p1
+s1 <- sqrt(size * p1 * (1 - p1))
+m2 <- size * p2
+s2 <- sqrt(size * p2 * (1 - p2))
+
+# Make Dataframe ---------------------------------
+y1 <- dnorm(x = x, mean = m1, sd = s1) # y1 <- dbinom(x = x, size = size, prob = p1)
+y2 <- dnorm(x = x, mean = m2, sd = s2) # y2 <- dbinom(x = x, size = size, prob = p2)
+df <- data.frame(x, size, p1, y1, p2, y2)
+
+# Plot ---------------------------------
+df %>% 
+  ggplot(data = .) + 
+  geom_polygon(aes(x, y1), fill = '#7FA6C9', alpha = 1/6) + 
+  geom_polygon(aes(x, y2), fill = '#E55A64', alpha = 1/6) + 
+  annotate("text", x = m1 - 5, y = max(df$y1), size = 5, parse = TRUE, col = '#7FA6C9',
+           label= TeX('$P_{theta_{1}}$')) + 
+  annotate("text", x = m1, y = max(df$y1) + 0.01, size = 5, parse = TRUE, col = '#7FA6C9',
+           label= TeX('$Theta_{0} = \\{theta_{0}\\}$')) + 
+  annotate("text", x = m2 + 5, y = max(df$y2), size = 5, parse = TRUE, col = '#E55A64',
+           label= TeX('$P_{theta_{2}}$')) + 
+  annotate("text", x = m2, y = max(df$y1) + 0.01, size = 5, parse = TRUE, col = '#E55A64',
+           label= TeX('$Theta_{1} = \\{theta_{1}\\}$')) + 
+  theme_classic() + 
+  scale_x_continuous(breaks = seq(0,max(df$x), 5)) +
+  ylab('Probability')
+```
+
+統計的仮説検定は、標本空間$\varOmega$を$\alpha$を基準に$\varOmega = C \cup C^{c}$に分割し、標本である$\boldsymbol{ x }$が$C$に属せば仮説$H_{0}$を棄却(Reject)、標本である$\boldsymbol{ x }$が$C^{c}$に属せば仮説$H_{0}$を受容(Accept)する方法で行われる。このとき$C$を棄却域(Critical Region)という。
+
+ここで、標本空間$\varOmega$の関数$\varphi( \boldsymbol{ x } )$を$C$の定義関数として、$\varphi( \boldsymbol{ x } ) = 1, (\boldsymbol{ x } \in C)$、$\varphi( \boldsymbol{ x } ) = 0, (\boldsymbol{ x } \in C^{c})$とすれば$\varphi( \boldsymbol{ x } )$は$ 0 \leq \varphi( \boldsymbol{ x } ) \leq 1$を満たし、棄却域$C$と定義関数$\varphi(\boldsymbol{ x })$は1対1で対応する。
+
+標本$\boldsymbol{ x }$をサンプリングしたとき、確率$\varphi( \boldsymbol{ x } )$で帰無仮説$H_{0}$を棄却する方法を考えるとき、$\varphi( \boldsymbol{ x } )$は検定関数(Critical Function)という。
+
+統計的仮説検定は、2種類の誤りを考慮しなければいけない。2つ同時に起こることはないが、帰無仮説$H_{0}$と対立仮説$H_{1}$のいずれが正しいのか知る術がないため、可能性とし両方を同時に考慮する必要がある。表側が「真の状態」で、表頭が「統計的な判断」となる。「タイプⅠエラー」は「帰無仮説$H_{0}$が正しいにも関わらず、帰無仮説$H_{0}$を棄却する誤り(つまり、対立仮説$H_{1}$を受容する)」で、「タイプⅡエラー」は「対立仮説$H_{1}$が正しいにも関わらず、対立仮説$H_{1}$を棄却する誤り(つまり、帰無仮説$H_{0}$を受容する)」である。
+
+これら「タイプⅠエラ$\alpha$」「タイプⅡエラー$\beta$」は両方同時に小さくすることはできない。「タイプⅠエラー$\alpha$」を小さくすると、「タイプⅡエラー$\beta$」は大きくなり、「タイプⅠエラー$\alpha$」を大きくすると、「タイプⅡエラー$\beta$」は小さくなる。
+
+```{r}
+# Plot ---------------------------------
+upr_y1 <- qnorm(p = 0.975, mean = m1, sd = s1)
+alpha <- if_else(x >= upr_y1, df$y1, 0)
+beta <- if_else(x <= upr_y1, df$y2, 0)
+df2 <- cbind(df, alpha, beta)
+
+p1 <- df2 %>% 
+  ggplot(data = .) + 
+  geom_polygon(aes(x, y1), fill = '#7FA6C9', alpha = 1/6) + 
+  geom_polygon(aes(x, alpha), fill = '#7FA6C9', alpha = 1/2) + 
+  geom_polygon(aes(x, y2), fill = '#E55A64', alpha = 1/6) + 
+  geom_polygon(aes(x, beta), fill = '#E55A64', alpha = 1/2) + 
+  geom_vline(xintercept = upr_y1, col = 'black', linetype = 3) +
+  annotate("text", x = upr_y1 + 1, y = max(df2$y1), size = 5,
+           label = TeX('$alpha$')) +
+  annotate("text", x = m1 - 5, y = max(df2$y1), size = 5, parse = TRUE, col = '#7FA6C9',
+           label= TeX('$H_{0}$')) + 
+  annotate("text", x = m2 + 5, y = max(df2$y2), size = 5, parse = TRUE, col = '#E55A64',
+           label= TeX('$H_{1}$')) + 
+  theme_classic() + 
+  scale_x_continuous(breaks = seq(0,max(df2$x),5)) +
+  ylab('Probability')
+
+
+# Plot ---------------------------------
+upr_y2 <- qnorm(p = 0.90, mean = m1, sd = s1)
+alpha2 <- if_else(x >= upr_y2, df$y1, 0)
+beta2 <- if_else(x <= upr_y2, df$y2, 0)
+df3 <- cbind(df, alpha2, beta2)
+
+p2 <- df3 %>% 
+  ggplot(data = .) + 
+  geom_polygon(aes(x, y1), fill = '#7FA6C9', alpha = 1/6) + 
+  geom_polygon(aes(x, alpha2), fill = '#7FA6C9', alpha = 1/2) + 
+  geom_polygon(aes(x, y2), fill = '#E55A64', alpha = 1/6) + 
+  geom_polygon(aes(x, beta2), fill = '#E55A64', alpha = 1/2) + 
+  geom_vline(xintercept = upr_y2, col = 'black', linetype = 3) +
+  geom_vline(xintercept = upr_y1, col = 'gray', linetype = 3) +
+  annotate("text", x = upr_y2 + 1, y = max(df3$y1), size = 5,
+           label = TeX('$alpha$')) +
+  annotate("text", x = m1 - 5, y = max(df3$y1), size = 5, parse = TRUE, col = '#7FA6C9',
+           label= TeX('$H_{0}$')) + 
+  annotate("text", x = m2 + 5, y = max(df3$y2), size = 5, parse = TRUE, col = '#E55A64',
+           label= TeX('$H_{1}$')) + 
+  theme_classic() + 
+  scale_x_continuous(breaks = seq(0,max(df3$x),5)) +
+  ylab('Probability')
+
+p1 / p2
+```
+
+検定$\varphi( \boldsymbol{ X } )$について、タイプⅠエラーを犯す確率は$\theta \in \Theta_{0}$に対して、$E_{\theta}(\varphi( \boldsymbol{ X } ))$で与えられ、その値の$ \Theta_{0} $上での上限
+
+$$
+\alpha_{0} := \displaystyle \sup_{\theta \in \Theta_{0}} E_{\theta}(\varphi( \boldsymbol{ X } ))
+$$
+
+を検定$\varphi( \boldsymbol{ X } )$の大きさと呼ぶ。さらに、$0 \leq \alpha \leq 1$から定数を与えられたとき、
+
+$$
+\displaystyle \sup_{\theta \in \Theta_{0}} E_{\theta}(\varphi( \boldsymbol{ X } )) \leq \alpha
+$$
+
+を満たす検定$\varphi( \boldsymbol{ X } )$を有意水準$ \alpha $の検定と呼ぶ。対立仮説$H_{1}$が正しいとき、
+
+$$
+\beta(\theta; \varphi) := E_{\theta}[\varphi( \boldsymbol{ X } )] (\theta \in \Theta_{1})
+$$
+
+は、対立仮説$H_{1}$を受容する確率であり、検定$\varphi( \boldsymbol{ X } )$の良さを表しており、これを$\varphi( \boldsymbol{ X } )$の検出力(Power)と呼ぶ。
+
+$0 \leq \alpha \leq 1$が与えられたとき、水準$\alpha$の検定の中で検出力を一様に最大にするものが存在すれば、それは水準$\alpha$の一様最強力検定(Uniformly Most Powerful Test: UMP Test)と呼ぶ。
