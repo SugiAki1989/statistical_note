@@ -15,8 +15,8 @@
 - [ベイジアンABテストのはなし](https://sugiaki1989.github.io/statistical_note/note_pvalue09/note_pvalue09.html)
 - [ベイジアンABテストのはなし(理論編)](https://sugiaki1989.github.io/statistical_note/note_pvalue10/note_pvalue10.html)
 - [ベイジアンABテストのはなし(rstan編)](https://sugiaki1989.github.io/statistical_note/note_pvalue11/note_pvalue11.html)
-- [ダミーWebサービスのデータでABテストを実践する1](https://sugiaki1989.github.io/statistical_note/note_pvalue14/note_pvalue14.html)
-- [ダミーWebサービスのデータでABテストを実践する2](https://sugiaki1989.github.io/statistical_note/note_pvalue15/note_pvalue15.html)
+- [ダミーWebサービスのデータでABテストを実践する1(非公開)](https://sugiaki1989.github.io/statistical_note/note_pvalue14/note_pvalue14.html)
+- [ダミーWebサービスのデータでABテストを実践する2(非公開)](https://sugiaki1989.github.io/statistical_note/note_pvalue15/note_pvalue15.html)
 - [母数の不偏性、一致性、有効性について](https://sugiaki1989.github.io/statistical_note/note_pvalue12/note_pvalue12.html)
 - [フィッシャー情報量の直感的な理解](https://sugiaki1989.github.io/statistical_note/note_pvalue13/note_pvalue13.html)
 
@@ -190,6 +190,7 @@
 - [ggplot2 の位置スケール](https://sugiaki1989.github.io/statistical_note/note_ggplot01/note_ggplot01.html)
 - [Base R のグラフィック(作成途中)](https://sugiaki1989.github.io/statistical_note/note_baseR01/note_baseR01.html)
 - [回帰平面、3D グラフ、ベクトル場](https://sugiaki1989.github.io/statistical_note/note_ggplot02/note_ggplot02.html)
+- [ggplot2のtheme関数](https://sugiaki1989.github.io/statistical_note/note_ggplot03/note_ggplot03.html)
 
 ## 線形代数
 

@@ -1,0 +1,88 @@
+---
+title: "ggplot2のtheme関数"
+pagetitle: "ggplot2のtheme関数"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+
+# はじめに
+
+このノートでは、ggplot2でグラフを作成する際に、タイトルやラベル、目盛など細かい部分を修正する方法についてまとめている。
+
+## theme()関数
+
+`theme()`はプロットの特定の要素を編集する。多数の引数が用意されている。基本的な構文は以下の通り。下記のブログも詳しい。
+
+- [ggplot2 の自分用メモ集を作ろう](https://triadsou.hatenablog.com/entry/20100528/1275042816#themeopts)
+
+```{r}
+library(tidyverse)
+
+ggplot(diamonds, aes(carat, price, col = clarity)) + geom_point() + geom_smooth(method = "lm") +
+  scale_x_continuous(breaks = seq(0, 5, 0.5)) + 
+  scale_y_continuous(breaks = seq(0, 30000, 2500)) +
+  scale_colour_viridis_d(alpha = 0.24, option = "inferno")+ 
+  # ラベル関係
+  labs(
+    title = "Title Here",
+    subtitle = "Subtitle Here",
+    caption = stringr::str_glue("Caption Date: {Sys.time()}"),
+    x = "X axis",
+    y = "Y axis",
+    col = "Color Label"
+       ) + 
+  # テーマ全体の設定
+  # theme()を使用する場合、先に利用しないとアップデートしてしまう
+  theme_minimal() +
+  # テーマの設定
+  theme(
+    plot.title = element_text(
+      size = 20, 
+      face = "bold", 
+      color = "tomato", 
+      hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    plot.caption = element_text(hjust = 0.5),
+    # 軸の設定 axis.text.xはx軸のみ変更できる
+    axis.text =  element_text(
+      size = 10,
+      face = "bold", 
+      color = "gray"),
+    axis.line = element_line(color = "gray"),
+    axis.ticks = element_line(color = "gray"),
+    # グラフ内の線を消す
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom",
+    # 一括の設定
+    text = element_text(family = "Fira code", size = 15)
+  ) 
+```
+
+
+
+
