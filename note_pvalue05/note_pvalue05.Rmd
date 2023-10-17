@@ -330,10 +330,10 @@ power.prop.test(n = NULL,
 
 ```{r}
 # 適当な値と雑なスクリプトですいません
-p1 <- c(0.10, 0.10, 0.10, 0.10)
-p2 <- c(0.11, 0.12, 0.14, 0.15)
+p1 <- c(0.05, 0.10)
+p2 <- c(0.11, 0.15)
 alpha <- 0.05
-beta <- c(0.90, 0.80, 0.70, 0.60)
+beta <- c(0.80, 0.60)
 n <- length(beta)
 
 for (i in 1:n) {
@@ -403,7 +403,16 @@ text(mu1, 0.003, round(b,2), col = 'blue', pos = 2)
 text((mu1 - mu0)/2, 0.005, round(mu1 - mu0, 2), col = 'black', pos = 3)
 ```
 
-このあたりに関しては、下記のGoogleのデータサイエンティストの方が解説している動画がわかりやすいです。
+こちらには、さきほどのサンプルサイズの計算式の導出がまとめられている。
+
+- [Probing into Minimum Sample Size Formula: Derivation and Usage](https://towardsdatascience.com/probing-into-minimum-sample-size-formula-derivation-and-usage-8db9a556280b)
+
+その内容をメモしたもの。読む前に[こちら](https://online.stat.psu.edu/stat415/lesson/25/25.3)でzスコアの計算方法とか累積分布関数とかの話をおさらいして、頭の体操をしてからの方が良いかも。
+
+![サンプルサイズ計算の基本形1](/Users/aki/Documents/statistical_note/note_pvalue05/samplesizebasicform1.png)
+![サンプルサイズ計算の基本形2](/Users/aki/Documents/statistical_note/note_pvalue05/samplesizebasicform2.png)
+
+ABテスト観点でのサンプルサイズ設計に関しては、下記のGoogleのデータサイエンティストの方が解説している動画がわかりやすいです。
 
 - [AB Testing 101 | Fmr. Google Data Scientist Explains How to Calculate the Sample Size](https://www.youtube.com/watch?v=KC1nwY7YCUE&list=LL&index=2&t=988s)
 
