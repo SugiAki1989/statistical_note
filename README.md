@@ -35,6 +35,7 @@
 - [最尤法とポアソン分布](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis10/note_NumericalAnalysis10.html)
 - [ニューラルネットワークの実装](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis11/note_NumericalAnalysis11.html)
 - [非線形最小二乗法のまとめ](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis12/note_NumericalAnalysis12.html)
+- [モンテカルロシュミレーションのまとめ](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis13/note_NumericalAnalysis13.html)
 
 ## 回帰分析
 

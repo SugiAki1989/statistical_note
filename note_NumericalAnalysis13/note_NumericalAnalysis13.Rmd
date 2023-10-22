@@ -1,0 +1,320 @@
+---
+title: "モンテカルロシュミレーションのまとめ"
+pagetitle: "モンテカルロシュミレーションのまとめ"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+
+## モンテカルロシュミレーションのまとめ
+
+ここではモンテカルロシュミレーションの基礎から簡単なモデルのシュミレーションまでを行う方法をまとめる。モンテカルロシミュレーションは、問題をモデル化し、ランダムにシミュレーションすることで答えを得る方法。
+
+## モンテカルロシュミレーションの基礎
+
+モンテカルロシミュレーションは、問題をモデル化し、ランダムにシミュレーションすることで答えを得る方法と書いたが、イメージが掴みづらいので簡単なモデルから始める。まずは、標準正規分布を-2から2までを積分する。可視化しておく。
+
+```{r}
+library(tidyverse)
+
+x <- seq(-5, 5, length.out = 100)
+y <- dnorm(x, 0, 1) 
+df_int <- tibble(x, y)
+
+ggplot(df_int, aes(x, y)) +
+  geom_line() +
+  geom_ribbon(data = df_int %>% filter(x > -2 & x < 2), 
+              aes(x = x, ymin = 0, ymax = y), alpha = 1/4) +
+  labs(x = "x", y = "Density") + 
+  ggtitle("Standard Normal Distribution") + 
+  theme_bw()
+```
+
+便利な数値積分関数を利用すると、およそ95%とだとわかる(2$\sigma$≒0.95)。
+
+```{r}
+f <- function(x) {dnorm(x = x, mean = 0, sd = 1)}
+integrate(f, -2, 2)
+```
+
+これをモンテカルロシュミレーションで計算する。まずはモデルを定義する。ここでのモデルは標準正規分布なので、モデル式を自分で立式する必要はない。標準正規分布から乱数を発生させて、指定した区間に入る割合を計算すれば、先程と同じ結果が得られる。
+
+```{r}
+set.seed(1989)
+n <- 100000
+xm <- rnorm(n, mean = 0, sd = 1)
+sum(xm >= -2 & xm <= 2)/n
+```
+
+このようにモデルをもとにランダムな値を利用して計算する方法がモンテカルロシュミレーション。あんまり有り難みがわからないかもしれないので、即解できない問題でモンテカルロシュミレーションの有り難みを感じておく。
+
+下記は対数正規分布で、この分布の0から2までの範囲を積分したい。
+
+```{r}
+xx <- seq(0, 5, length.out = 500)
+yy <- dlnorm(xx, meanlog = 0, sdlog = 1)
+df_int2 <- tibble(xx, yy)
+
+ggplot(df_int2, aes(xx, yy)) +
+  geom_line() +
+  geom_ribbon(data = df_int2 %>% filter(xx > 0 & xx < 2), 
+              aes(x = xx, ymin = 0, ymax = yy), alpha = 1/4) +
+  labs(x = "x", y = "Density") + 
+  ggtitle("Log Normal Distribution") + 
+  theme_bw()
+```
+
+モンテカルロシュミレーションの結果からおよそ75%ということがわかる。
+
+```{r}
+# f2 <- function(x) {dlnorm(x = x, meanlog = 0, sdlog = 1)}
+# integrate(f2, 0, 2)
+# 0.7558914 with absolute error < 1.9e-06
+
+set.seed(1989)
+xxm <- rlnorm(n, meanlog = 0, sdlog = 1)
+sum(xxm >= -2 & xxm <= 2)/n
+```
+
+## モンテカルロシュミレーションの応用
+
+ここでは少しモデルを複雑にして、漁業調査などで利用されるリッカーモデルでシュミレーションしてみる。リッカーモデルについては下記を参考にしている。
+
+- [4.6.3 Harvest Policy Analysis](https://bstaton1.github.io/au-r-workshop/ch4.html#harv-ex)
+- [8．再生産関係－親子の関係を知る](https://www.fra.affrc.go.jp/kseika/guide_and_manual/afr/pdf/8.pdf)
+
+モデル式は下記の通り。今年戻る新魚は、生まれた年に産卵した産卵魚総数の関数で、リッカーモデルはこの関係をモデル化している。$\alpha$は産卵魚1頭当たりの最大加入数(産卵者数が非常に少ないときに得られる)を表すパラメタで、$\beta$は密度依存性死亡率の強さを表す尺度。誤差項$\varepsilon$は対数正規分布。
+
+$$
+\begin{equation}
+R_{t} = \alpha S_{t-1} e^{-\beta S_{t-1} + \varepsilon_t} ,\varepsilon_t \sim N(0, \sigma)
+\end{equation}
+$$
+
+過去10年間、20％の漁獲率$U$(毎年戻る魚の20％が捕獲される）で年間平均850万が漁獲されるとする。この仮定とかモデルのコードは[こちら](https://bstaton1.github.io/au-r-workshop/ch4.html#harv-ex)を参考にお借りしている。そして、ここではモデルの内容に関して、関心がない。あくまでもモンテカルロシュミレーションするほうに興味があるので。
+
+- $R_{t}$: y年の資源量。
+- $S_{t-1}$: y-1年の親魚数。
+- $U$: 漁獲率。ここでは20％とする。
+- $\alpha$: 最大再生産率。ここでは6とする。
+- $\beta$: 密度効果のパラメタ。ここでは1e-7とする。
+- $\sigma$: 分散パラメタ。ここでは0.1とする。
+
+モデル式を関数として作成する。本来はパラメタを引数で渡せるようにするべきだが、ここではモデル式にはあまり焦点を当ててないので、関数内部で固定している。ここでは10年分を計算する。
+
+```{r}
+ricker_sim <- function() {
+  alpha <- 6
+  beta <- 1e-7
+  sigma <- 0.05
+  U <- 0.2
+  n <- 10
+  R <- S <- H <- numeric(n)
+
+  # initialize the population in the first year
+  R[1] = log(alpha * (1 - U))/(beta * (1 - U)) * exp(rnorm(1, 0, sigma))
+  S[1] = R[1] * (1 - U)
+  H[1] = R[1] * U
+  
+  # Ricker model with lognormal error
+  for (t in 2:n) {
+    R[t] = S[t-1] * alpha * exp(-beta * S[t-1] + rnorm(1, 0, sigma))
+    S[t] = R[t] * (1 - U)
+    H[t] = R[t] * U
+  }
+  
+  return(H)
+}
+```
+
+モデルが定義できたので、収穫量$H$を計算してみる。結果を見るとわかるが、実行するたびに収穫量が変化している。これはモデル式に含まれる対数正規分布から発生する誤差によるもの。ここでのモンテカルロシュミレーションのランダムな部分は、この誤差の部分になる。
+
+```{r}
+n <- 10
+tibble(
+  year = 1:n,
+  smi1 = ricker_sim(),
+  smi2 = ricker_sim(),
+  smi3 = ricker_sim()
+  )
+```
+
+10年間の収穫量の変化を500回ほどシュミレーションする。シュミレーション結果は10行×501列のデータフレームで返される。
+
+```{r}
+# replicate(n = n, expr = ricker_sim())と同じようなこと
+set.seed(1989)
+sim_n <- 500
+
+df_sim_ricker <- map_dfc(.x = 1:sim_n, .f = function(x){ricker_sim()}) %>% 
+  set_names(paste0('sim', 1:sim_n)) %>% 
+  bind_cols(tibble(year = 1:n))
+
+head(df_sim_ricker)
+```
+
+このシュミレーション結果を利用して、平均やパーセンタイルを計算して、大まかな変化を可視化できるようする。
+
+```{r}
+# apply(df_sim_ricker, 1, mean)と同じ
+df_sim_ricker_mean <- df_sim_ricker %>% 
+  rowwise() %>%
+  mutate(
+    mean = mean(c_across(-year)),
+    q10 = quantile(c_across(-year), probs = 0.1),
+    q90 = quantile(c_across(-year), probs = 0.9)
+  ) %>% 
+  select(year, mean, q10, q90)
+df_sim_ricker_mean
+```
+
+シュミレーション結果も合わせて可視化したいので、テーブルの構造をロング形式にしておく。
+
+```{r}
+df_sim_ricker_long <- df_sim_ricker %>% 
+  pivot_longer(
+    cols = -year,
+    names_to = 'sim',
+    values_to = 'harvest'
+  ) %>% 
+  arrange(sim, year)
+df_sim_ricker_long
+```
+
+モンテカルロシュミレーションを可視化すると、このような形で収穫量の推移を確認できる。
+
+```{r}
+ggplot() + 
+  geom_line(data = df_sim_ricker_long, aes(x = year, y = harvest, group = sim), alpha = 0.1) +
+  geom_ribbon(data = df_sim_ricker_mean, aes(x = year, ymin = q10, ymax = q90), alpha = 0.3) +
+  geom_line(data = df_sim_ricker_mean, aes(x = year, y = mean), col = 'tomato', size = 1) +
+  scale_x_continuous(breaks = seq(1:n)) + 
+  scale_y_continuous(
+    breaks = seq(
+      min(df_sim_ricker_long$harvest), 
+      max(df_sim_ricker_long$harvest),
+      250000)) + 
+  labs(title = "Ricker Model Simulation", y = 'Harvest_mean') +
+  theme_bw() + 
+  theme(legend.position = 'none', text = element_text(family = "Fira code", size = 13)) 
+  
+```
+
+このようにモンテカルロシュミレーションを使用ことで、関心のあるモデルから生成された値をランダム性を利用してシュミレーションできる。今回は、誤差項の部分を乱数を利用しているが、他のパラメタを同時に変化するほうが現実的なので、様々なパラメタが様々な値に変換する現実に即したモデルをシュミレーションすることで、実用的に活用できる。
+
+## 財務モデリング
+
+モンテカルロシュミレーションは財務モデリングでも利用できる財務モデルを作成し、各パラメタをランダムに変化させることで、収益を予想できる。ただ、財務モデルが現実に即していなければ数字あそびにしかならない。
+
+```{r}
+# library(truncnorm)
+# rtruncnorm(100, a = 0.4, b = 0.6, mean = 0.5, sd = 0.1)
+# 
+# n <- 10000
+# epsilon <- 0.001
+# y <- numeric(n) 
+# a <- numeric(n) 
+# b <- numeric(n) 
+# c <- numeric(n) 
+# d <- numeric(n) 
+# generate_abc <- function() {
+#   trials <- 0
+#   valid <- FALSE
+#   
+#   while(!valid) {
+#     
+#     a <- runif(1, 0.40, 0.50)
+#     b <- runif(1, 0.30, 0.40)
+#     c <- runif(1, 0.05, 0.30)
+#     d <- runif(1, 0.05, max(0.10, 1 - a - b - c))
+#     if(abs(1 - (a + b + c + d)) < epsilon) valid <- TRUE
+#   }
+#   return(c(a, b, c, d))
+# }
+# 
+# mat <- matrix(0, nrow = 4, ncol = n)  # 空の行列を作成
+# pb <- progress::progress_bar$new(
+#   format = "[:bar] :percent :elapsed",
+#   total = n
+# )
+# 
+# for(i in 1:n) {
+#   mat[, i] <- generate_abc()
+#   y[i] <- 
+#     100  * mat[1, i] + 
+#     50   * mat[2, i] + 
+#     1000 * mat[3, i] + 
+#     1000 * mat[4, i]
+#   pb$tick()  # 進捗を更新
+# }
+# 
+# progress::pb$terminate()  
+# 
+# hist(y)
+# summary(y)
+# summary(a)
+# summary(b)
+# summary(c)
+# summary(d)
+# 
+# # ---------------------------------
+# 
+# # 初期ユーザー数
+# init_num <- 1000
+# 
+# 
+# sim <- function(init_num) {
+#   repeat_num <- sample(2:4, 1)
+#   repeat_rates <- seq(0.2+rnorm(1,0.1,0.05), 0.8+rnorm(1,0.1,0.05), length.out = repeat_num)
+#   result <- numeric(repeat_num)
+#   
+#   result[1] <- init_num 
+#   for(i in 1:(length(repeat_rates)-1)) {
+#     result[i+1] <- floor(result[i] * repeat_rates[i])
+#   }
+#   return(result)
+# }
+# 
+# 
+# run_simulations <- function(init_num, num_simulations) {
+#   simulation_results <- list()  
+#   
+#   for (i in 1:num_simulations) {
+#     result <- sim(init_num)  
+#     simulation_results[[i]] <- result  
+#   }
+#   
+#   return(simulation_results)
+# }
+# 
+# num_simulations <- 10
+# 
+# results <- run_simulations(init_num, num_simulations)
+# results
+
+```
