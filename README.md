@@ -66,6 +66,8 @@
 - [非線形モデリングの基礎: 連続モデル](https://sugiaki1989.github.io/statistical_note/note_MultiLevelRegression10/note_MultiLevelRegression10.html)
 - [非線形モデリングの応用: 多項式モデル](https://sugiaki1989.github.io/statistical_note/note_MultiLevelRegression11/note_MultiLevelRegression11.html)
 - [非線形モデリングの応用: ロジスティックモデル](https://sugiaki1989.github.io/statistical_note/note_MultiLevelRegression12/note_MultiLevelRegression12.html)
+- [マルチレベルモデリングChapter6:非線形モデリング(非連続モデル)](https://sugiaki1989.github.io/statistical_note/note_MultiLevelRegression13/note_MultiLevelRegression13.html)
+- [マルチレベルモデルと固定効果モデル](https://sugiaki1989.github.io/statistical_note/note_MultiLevelRegression14/note_MultiLevelRegression14.html)
 
 ## 多変量解析
 
@@ -84,7 +86,7 @@
 - [因果推論の基礎](https://sugiaki1989.github.io/statistical_note/note_CausalInference01/note_CausalInference01.html)
 - [傾向スコアの基礎](https://sugiaki1989.github.io/statistical_note/note_CausalInference02/note_CausalInference02.html)
 - [傾向スコアと生存分析](https://sugiaki1989.github.io/statistical_note/note_CausalInference03/note_CausalInference03.html)
-- [差分の差分法](https://sugiaki1989.github.io/statistical_note/note_CausalInference04/note_CausalInference04.html)
+- [差分の差分法(DID)](https://sugiaki1989.github.io/statistical_note/note_CausalInference04/note_CausalInference04.html)
 - [回帰不連続デザイン](https://sugiaki1989.github.io/statistical_note/note_CausalInference05/note_CausalInference05.html)
 
 ## 生存時間解析(非公開)

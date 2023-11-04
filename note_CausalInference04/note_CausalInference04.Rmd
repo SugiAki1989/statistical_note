@@ -1,6 +1,6 @@
 ---
-title: "差分の差分法"
-pagetitle: "差分の差分法"
+title: "差分の差分法(DID)"
+pagetitle: "差分の差分法(DID)"
 output:
   html_document:
     toc: TRUE
@@ -496,6 +496,11 @@ lm_robust(mrate ~ 0 + legal + state + year_fct + state:year, data = df2, cluster
 - [計量経済分析2 講義10差の差(DID)法](https://sites.google.com/site/michihito7ando/lectures)
 
 ![DID回帰の発展版](/Users/aki/Documents/statistical_note/note_CausalInference04/did_advamced.png)
+
+上記に関しては下記が参考になるかも。
+
+- [マルチレベルモデルと固定効果モデル](https://sugiaki1989.github.io/statistical_note/note_MultiLevelRegression14/note_MultiLevelRegression14.html)
+
 
 ## 参考文献および参考資料
 
