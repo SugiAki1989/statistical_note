@@ -1,0 +1,853 @@
+---
+title: "WebアプリでABテストを実践する2"
+pagetitle: "WebアプリでABテストを実践する2"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは、Udemyで提供されている[Ultimate AB Testing Course with Python Coding](https://www.udemy.com/course/ultimate-ab-testing-course-with-python-coding)コースのPythonスクリプトをRスクリプトに変換したものをまとめているノート。
+
+## ABテストとメトリクス
+ここでは、ABテストを行う際に注意するべきメトリクスについて、各メトリクスの役割についてまとめる。
+
+### The North Star Metric(OEC)
+
+会社のミッションに対する良し悪しを表現するために最も適しているKPIのこと。NSMは下記を満たす。
+
+- ユーザーに価値を提供する必要がある
+- 利益への貢献
+- 長期的な指標であること
+
+GoogleであればNSMは年間検索量、MetaであればMetaエコシステムへの消費時間、NETFLIXであれば年間契約者数がNSMとなる。
+
+### Driver　Metric
+
+Driver Metricは、短期間におけるNSMを代替する製品レベル、機能レベルの指標のことで、ABテストではよく利用される。
+
+GoogleであればNSMは年間検索量で、Driver Metricは、ユーザーの1日における検索量、MetaであればNSMはMetaエコシステムへの消費時間で、Driver Metricは、ユーザーの1日における利用時間、NETFLIXであれば年間契約者数がNSMで、Driver Metricは、ユーザーの1日における視聴時間となる。
+
+### Guardrail Metrics
+
+Guardrail Metricsは、ビジネス上の意思決定におけるトレードオフを測定し、テスト結果がバイアスによって歪められていないことを保証する一連の指標のこと。Business MetricsはABテストのゴールと結びつく指標で、Validity Metricsは実験に付随する潜在的なバイアスを追跡する。
+
+Googleの事例であれば、Business Metricsを検索量としてABテストによって最適化されたとする。このとき、広告費がValidity Metricsとなる。広告費はどのような影響を受けるのか。検索は最適化されたけれども、広告費は下がったとなると、ビジネスとしてはあまりよろしく無い。ABテストを実施するときは常に他の指標を検討する必要がある。
+
+他にもNETFLIXの例で考えてみる。NSMは年間契約者数で、エンゲージメント向上のためにレコメンドシステムをリニューアルする。Driver　Metricは1日あたりのユーザーの視聴時間であり、1日あたりの収益、1日あたりのサインアップ率、1日あたりのキャンセル率などがBusiness Metricsとなり、Validity MetricsはSRM(Sample Ratio Mismatch)、AAテストを調べていくことになる。
+
+### Secondary Metrics
+
+NETFLIXの例をもとに理解する。NETFLIXのレコメンデーションを改善するABテストがあったとする。ABテストでは、ユーザーごとの平均消費時間を追跡する。しかし、ユーザーの別のインタラクションが変更された可能性もある。もしかしたら、検索方法に変化があるかもしれないし、視聴動画の頻度や本数に変化があるかもしれない。
+
+Secondary MetricsはABテストのゴールに設定しているDriver Metricとは異なる、変化しうる可能性ある指標のこと。このケースでは、Secondary Metricsは、ユーザーあたりの平均視聴回数、ユーザーあたりの平均検索数、ユーザーあたりの平均閲覧時間などとなる。
+
+### Segmentation Metrics
+
+Segmentation Metricsは、サブグループに分解した時の指標のこと。ここでのサブグループとは、位置、ブラウザ、デバイス、給料、年齢、性別、契約年数などを指す。
+
+シンプソンのパラドックスと呼ばれる概念がある。これは、全体レベルでは、何らかの傾向が見られるかもしれないが、サブグループの観点から見ると、場所やデバイスの種類ごとに見ると、傾向が別の方向にシフトしている現象のこと。Segmentation Metricsはこのような変化を指す指標となる。
+
+### Amazonの事例
+
+Amazonのレコメンデーションシステムに関するABテストをもとに、これまでの一連の指標について振り返る。
+
+- NSM: Amazonの年間総売上高
+- ABtest: 売上を上げるためにレコメンデーションシステムをテストする
+- Driver　Metric: ユーザーあたりの1日の平均売上
+- Guardrail Metrics(Business): 1日あたりの注文数、1日あたりのサインアップ数
+- Guardrail Metrics(Validity): SRM、AAテスト
+- Segmentation Metrics: ユーザーあたりの平均検索数、ユーザーあたりの平均カートサイズ、ユーザーあたりの平均閲覧時間
+- Segmentation Metrics: 位置、デバイス、ブラウザ
+
+## ABテストの実践
+
+Urban Wearという架空のeコマースストアの例を通じてABテストへの理解を深める。
+
+### Step 0 - はじめに
+
+Urban Wearは、eコマースストアを立ち上げている衣料品ブランドです。現在、プレローンチページではサイト訪問者からのメールアドレスを募集している。計画では、ウェブサイトの開設に向けてできるだけ多くのメールを収集する予定。
+
+Urban Wearのデータサイエンティストとしてのあなたの目標は、リリース前ページで2つのバージョンの電子メールのサインアップをツトするABテストを設計、実行、分析すること。コントロールは青い送信ボタンで、これが現在のバージョンでトリートメントは緑色の送信ボタン。
+
+Urban Wearの製品チームがABテストの結果に基づいてどのバージョンを使用するかを決定するのを支援する。
+
+```{r}
+library(tidyverse)
+library(scales)
+options(scipen = 100)
+
+pretest <- read_csv("~/Desktop/pretest.csv")
+test <- read_csv("~/Desktop/test.csv", na = c('', 'nan'))
+```
+
+### Step 1 - ビジネス課題を理解する
+
+AB テストの最初の重要なステップは、ビジネス上の問題を理解すること。ビジネス上の問題を理解する上で重要な側面は、データを調査すること。
+
+`pretest.csv`は`r dim(pretest)[1]`行、`r dim(pretest)[2]`カラムのデータ。
+
+- `visitor_id`: 訪問者の識別子IDでユニークなキー。
+- `date`: `r min(pretest$date)`から`r max(pretest$date)`まで
+- `email`: メールアドレスが記録される。
+- `experiment`: AAテストの対象者には`AA_test`の値が記録される。`AA_test`か`NA`のいずれか。
+- `group`: AAテストの対象者で、`0`はコントロールグループで、`1`がトリートメントグループ。`0`か`1`、`NA`のいずれか。`NA`はAAテストの対象者ではないことを意味する。
+- `submitted`: `1`はメールアドレスを申し込んだことを表す。`email`にも値が入る。
+
+```{r}
+head(pretest)
+```
+
+`email`、`experiment`、`group`のいずれのカラムも`NA`が90％を占める。
+
+```{r}
+# map(.x = pretest, .f = function(x){sum(is.na(x))/length(x)})
+tibble(
+  cols = names(pretest), 
+  na_ratio = map_dbl(.x = pretest, .f = function(x){mean(is.na(x))})
+  )
+```
+
+どのくらいの訪問者がいるのか、サインアップの数はいくらか、サインアップ率はいくらかなど、基本的な指標を計算しておく。
+
+```{r}
+list(
+  `Total visitor count` = length(unique(pretest$visitor_id)),
+  `Sign-up count` = sum(pretest$submitted),
+  `Sign-up rate` = round(mean(pretest$submitted), 3)
+)
+```
+
+1日あたりの訪問者をプロットする。1日あたりの平均的な訪問者の数は10000人であり、多少の変動はあるものの、平均を中心に上下にばらついている。1日あたりどれくらいの訪問者がいるかを理解することで、サンプルサイズを決定する際に、データを取得するために何日間必要かを教えてくれる。
+
+```{r}
+pretest_plot <- pretest %>% group_by(date) %>% count()
+pretest_visitors_mean <- mean(pretest_plot$n)
+
+pretest_plot %>% 
+  ggplot(., aes(date, n)) + 
+  geom_line() +
+  geom_point() +
+  geom_hline(yintercept = pretest_visitors_mean, col = 'tomato', alpha = 1/2) +
+  scale_x_date(
+    labels = date_format("%Y/%m/%d"),
+    breaks = "1 day",
+    minor_breaks = "1 day"
+  )  + labs(
+    title = "Urban Wear Visitor Count",
+    x = "Date",
+    y = "Visitors"
+    ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(
+    angle = 75,
+    vjust = 0.2,
+    hjust = 0.2
+  ))
+
+```
+
+1日あたりのサインアップ率をプロットする。サインアップ率は平均で10%。Driver Metricsとしてサインアップ率を利用する場合、可視化しておくことで、この情報をベースにMDEを決めることができる。
+
+```{r}
+pretest_plot2 <- pretest %>% group_by(date) %>% summarise(signup_rate = mean(submitted))
+pretest_signup_rate_mean <- mean(pretest_plot2$signup_rate)
+
+pretest_plot2 %>% 
+  ggplot(., aes(date, signup_rate)) + 
+  geom_line() +
+  geom_point() + 
+  geom_hline(yintercept = pretest_signup_rate_mean, col = 'tomato', alpha = 1/2) +
+  scale_x_date(
+    labels = date_format("%Y/%m/%d"),
+    breaks = "1 day",
+    minor_breaks = "1 day"
+  ) + 
+  scale_y_continuous(
+    breaks = seq(0, 1, 0.001), 
+    labels = scales::percent_format(scale = 100)
+    )+
+  labs(
+    title = "Urban Wear Pretest Sign-Up Rate",
+    x = "Date",
+    y = "Sign-Up Rate"
+    ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(
+    angle = 75,
+    vjust = 0.2,
+    hjust = 0.2
+  ))
+
+```
+
+### Step 2 - 仮説を立てる
+
+実験の2番目のステップは、仮説を立てること。有意水準$\alpha$、統計検出力$1-\beta$、最小検出効果(MDE:Minimum Detectable Effect)などのパラメタ値を設定する。
+
+仮説を設定する場合、ビジネス仮説から統計的仮説という流れで段階的に設定される。
+NETFLIXの事例では、新しいバージョンでレコメンデーションシステムを更新すると、ユーザー1人あたりの1日の平均消費時間で測定されるエンゲージメントが向上すると予想される。オフライン調査の結果では、ユーザーが次に見るものを予測する点で新しいモデルが古いモデルよりも優れていることが示されているため、というビジネス仮説が設定され、統計仮説として、帰無仮説と対立仮説は次のようになる。
+
+- **H0:** ユーザーあたりの 1 日の平均消費時間は、新旧の推奨システムは同じ
+- **H1:** ユーザーあたりの 1 日の平均消費時間は、新旧の推奨システムは同じではない
+
+次に、有意水準$\alpha$、統計検出力$1-\beta$を設定する。有意水準$\alpha$、統計検出力$1-\beta$については下記の図がわかり良い。
+
+![power](/Users/aki/Documents/statistical_note/note_pvalue15/power.png)
+
+左上は、検定を実行し、統計検出力を低く設定した場合の例で、この文脈では、効果が実際に存在する場合、その効果を検出する確率は10%になる。したがって、検出力が低いときに帰無仮説を棄却できなかった場合。解釈としては、サンプルが帰無仮説から得られたものであるかどうかは実際にはわからない、ということになる。
+
+右上は、統計的検出力を高めて、帰無仮説を棄却できなかった場合の例。統計検出力、つまり効果が実際に存在する場合に検出する確率を80%に設定している例。実際に効果が存在する場合にその効果が検出される確率として、効果が存在しないことを確認できる。したがって、この統計的検出力と結果によって、実際に効果が検出されたかどうかをよりよく把握できるようになる。
+
+左下は、検出力を10％として、実際には帰無仮説は棄却された例。帰無仮説を棄却して対立仮説で結論を出したとしても、サンプルが実際に対立仮説からのものであるかどうかはまだわからない。実際に真実であると仮定すると、効果を検出する可能性は 10% しかないため。
+
+右下は、統計検出力を80％に増加して、帰無仮説を棄却した場合の例。効果が存在する場合にその効果を検出する確率が高いため、その効果をより強力に確認することができる。
+
+つまり、帰無仮説を仮に棄却できても、検出力が低い(差がある時に差があるといえる確率が低い)のであれば、確信をもって差があったとは言い難いといえる。
+
+そして、有意水準と検出力が決まったら、MDEを検討する。MDEは、統計的有意性を持ってどのような小さな差を少なくとも観察したいかということを決めるもの。有意であっても実用的な差がなければ意味がないので、実用的に最低銀の差を使用する。大企業であればMDEが1%でも意味があるが、中小企業となると5%−10%くらいないと実用的な差とならない。NETFLIXであれば1%でも実用的な価値があるため、MDEを1%とする。
+
+Urban Wearの例に戻る。ビジネス仮説は記載していないが、Urban Wearの統計仮説およびMDEは下記の通りになる。
+
+- **H0:** 青と緑のボタンの登録率は同じ。
+- **H1:** 青と緑のボタンの登録率は異なる。
+
+ここでのMDEは、ベースに対する相対的な割合を考えている。`p1=10%`より相対的に10％増加は1%の増加を想定していることを意味する。
+
+```{r}
+alpha <- 0.05
+beta <- 0.2
+power <- 1 - beta
+# 相対的に10％の増加を見込む
+mde <- 0.10 
+
+p1 <- 0.10           # Control   (Blue)
+p2 <- p1 * (1 + p1)  # Treatment (Green)
+
+list(
+  alpha = alpha,
+  power = power,
+  MDE = mde,
+  p1 = p1,
+  p2 = p2
+)
+```
+
+### Step 3 - 実験を計画する
+
+実験の3番目のステップは、ランダム化単位を決定し、サンプルサイズの計算、実験期間を含む実験計画を決める。サンプルサイズは下記の式が基本的なベースとなる。$\Delta$は相対的な値ではなく、MDEの絶対的な値の差として表現される。
+
+$$
+\begin{eqnarray}
+n &=& \frac{(Z_{1-\frac{\alpha}{2}}+Z_{1-\beta})^{2}\sigma^{2}}{\Delta^{2}} \\
+&=& \frac{(Z_{1-\frac{\alpha}{2}}+Z_{1-\beta})^{2}\sigma^{2}}{(\theta_{2}-\theta_{1})^{2}} 
+\end{eqnarray}
+$$
+
+$\alpha$と1-$\beta$に対応するZ値は下記の通り。
+
+|$\alpha$|$Z_{1-\frac{\alpha}{2}}$|1-$\beta$|$Z_{1-\beta}$|
+|:---:|:---:|:---:|:---:|
+|$\alpha$=0.01|2.58|1-$\beta$=0.80|0.84|
+|$\alpha$=0.025|2.24|1-$\beta$=0.90|1.28|
+|$\alpha$=0.05|1.96|1-$\beta$=0.95|1.64|
+|$\alpha$=0.10|1.64|1-$\beta$=0.99|2.33|
+
+また、$\Delta$は平均値の差であれば$\mu_{1}-\mu_{2}$であり、比率の差であれば$p_{1}-p_{2}$となる。$\sigma$に関しては、推定する必要があり、決定するのが難しい。
+
+|-|Proportion|Mean|
+|:---:|:---:|:---:|
+|One-Sample|$\sigma^2=p(1-p)$|$S^{2}=\frac{\sum (x_{i}-\bar{x})}{k-1}$|
+|Two-Sample|$\sigma^2_{pooled}=p_{2}(1-p_{2})+p_{1}(1-p_{1})$|$S^{2}_{pooled}=2*S^{2}_{1}$|
+
+最後にトラフィックの割合を設計する。これは必要なサンプルサイズを何日で取得できるかを考えることである。
+
+$$
+DurationDays = \frac{N(=2n)}{TrafficDay \times \%Allocation}
+$$
+
+簡単な例で説明すると、1日あたり10000人の訪問があり、各グループで7000人、合計で14000人が必要だとする。1日あたり10%をテストに割当られるのであれば、1日あたり1000人がテスト対象になる。
+
+$$
+DurationDays = \frac{14000}{10000 \times 10\%} = 14
+$$
+
+サンプルサイズを短期間で回収出来ることは良いことではなく、1-2週間が望ましい。そもそも、実験開始後のユーザーを実験終了まで追跡するのではなく、日毎に日を区切って集計していく。言い換えると、14日の実験期間があったとすると、1日目のユーザーは14日追跡し、２日目のユーザーは13日追跡し、3日目のユーザーは12日追跡し、14日目のユーザーは1日追跡するわけではない。このようにすることで、サンプルの各ユーザーの期間がおなじになり、独立性が保たれ周期性も考慮できる。
+
+それではUrban Wearの例に戻る。先程紹介したサンプルサイズの計算式を使っても良いが、ここでは関数を利用して計算する。
+
+```{r}
+res <- power.prop.test(
+  n = NULL, 
+  p1 = p1, 
+  p2 = p2,
+  sig.level = alpha,
+  power = power,
+  alternative = "two.sided"
+  )
+# 14750.79が返るが説明のために15000に丸めておく
+n <- round(res$n,-3)
+n
+```
+
+テスト前の平均サインアップ率である10%から、MDEとして`r 100*(p2/p1-1)`%上昇した効果を検出するには、グループごとに必要なサンプルサイズは`r n`で、
+実験に必要なサンプルは合計`r n*2`となる。`pwr`パッケージの`pwr.2p.test`関数でも同じように計算できる。先程とサンプルサイズが異なるのは、説明のために丸めているためで、こちらの数字が本来の計算結果である。
+
+```{r}
+library(pwr)
+cohen_h <- ES.h(p1, p2)
+pwr.2p.test(
+  h = cohen_h, 
+  n = NULL, 
+  sig.level = alpha, 
+  power = power, 
+  alternative = "two.sided"
+  )
+```
+
+内部では、このような計算式のもとでサンプルサイズが計算されている。
+
+$$
+\begin{aligned}
+N &= \frac{1+\phi}{\phi}\frac{[ z_{1-\alpha/2} \sqrt{(1+\phi)\bar{p}(1-\bar{p})} + z_{1-\beta} \sqrt{\phi p_C (1-p_C) + p_T (1-p_T)} ]^2}{\phi (p_T - p_C)^2} \\
+\bar{p} &= \frac{p_C + \phi p_T}{1+\phi}
+\end{aligned}
+$$
+
+実際に計算してみると、同じ結果が返されている。
+
+```{r}
+delta <- p1 - p2
+phi <- 1
+barpi <- ((p1 + phi*p2)/(1 + phi))
+z0.975 <- qnorm(1 - alpha/2, 0, 1)
+z0.80 <- qnorm(1 - beta, 0, 1)
+
+PHI <- (1 + phi)/phi
+NUMERATOR <- (z0.975 * sqrt((1 + phi) * barpi * (1 - barpi)) + z0.80 * sqrt(phi * p1 * (1 - p1) + p2 * (1 - p2)))^2
+DENOMINATOR <- delta^2
+N <- PHI * (NUMERATOR/DENOMINATOR)   
+N_c <- N / (1 + phi)
+N_t <- phi * N / (1 + phi)
+list(
+  N   = sprintf('必要な全体サンプルサイズn = %.0f人', floor(N_c)+floor(N_c)),
+  N_c = sprintf('必要な群単位のサンプルサイズn = %.0f人', floor(N_c)),
+  N_t = sprintf('必要な群単位のサンプルサイズn = %.0f人', floor(N_t))
+  )
+```
+
+ここで想定しているように、0か1のベクトルを平均をとって比率とみなすことと、平均とみなすことは同じなので、`power.t.test`関数でも同じように計算できる。
+
+```{r}
+power.t.test(n = NULL, d = cohen_h, sig.level = 0.05, power = 0.8, alternative = "two.sided")
+```
+
+検出力分析も行っておく。この結果を見ると、テスト前のサインアップ率10%からMDEとして相対的な10.0%の上昇効果を検出するには、グループごとに必要なサンプルサイズは15000で、実験に必要なサンプルは合計30000。
+
+```{r}
+x <- seq(0,30000,1000)
+y_power <- power.prop.test(
+  n = x, 
+  p1 = p1, 
+  p2 = p2,
+  sig.level = alpha,
+  power = NULL,
+  alternative = "two.sided"
+  )$power
+
+tibble(x, y_power) %>% 
+  ggplot(., aes(x, y_power)) + 
+  geom_line() + 
+  geom_point() +
+  geom_vline(xintercept = n) + 
+  geom_hline(yintercept = power) +
+  labs(
+    title = "Power Analysis",
+    x = "Sample Size",
+    y = "Statistical Power"
+    ) +
+  scale_x_continuous(breaks = x*2) +
+  scale_y_continuous(
+    breaks = seq(0, 1, 0.1), 
+    labels = scales::percent_format(scale = 100)
+    ) +
+  theme_bw()
+```
+
+次に、サンプルを回収するために、どのくらいの日数が必要かを推定しておく。Urban Wearの1日あたりの訪問者は10000人なので、10%を毎日テストに割り当てることができればおよそ1000人を取得できる。およそ30000人必要なので、このペースであれば30日係ることになる。
+
+下記のグラフを見るとわかるが30%(=3000人)くらいを割り当てることができれば、およそ10日ちょっとで実験を終了できる。
+
+```{r}
+alloc <- seq(0.1, 1, 0.1)
+size <- round(pretest_visitors_mean, 3) * alloc
+days <- ceiling(2*n / size)
+tibble(alloc, days) %>% 
+  ggplot(., aes(alloc, days)) + 
+  geom_line() + 
+  geom_point() +
+  labs(
+    # 1 日あたりのトラフィック割り当てを考慮した場合の必要日数
+    title = "Days Required Given Traffic Allocation per Day",
+    # 1 日あたりの実験に割り当てられたトラフィックの割合
+    x = "% Traffic Allocated to the Experiment per Day",
+    # 実験期間 (日)
+    y = "Experiment Duration in Days"
+    ) +
+  scale_x_continuous(
+    breaks = seq(0, 1, 0.1), 
+    labels = scales::percent_format(scale = 100)) +
+  scale_y_continuous(breaks = seq(0, 30, 5)) +
+  theme_bw()
+```
+
+こちらの図は横軸を実際の訪問者数にしたもので、3000人(=30%)くらいを割り当てることができれば、およそ10日ちょっとで実験を終了できることがわかる。
+
+```{r}
+tibble(size, days) %>% 
+  ggplot(., aes(size, days)) + 
+  geom_line() + 
+  geom_point() +
+  labs(
+    # 1 日あたりのトラフィック割り当てを考慮した場合の必要日数
+    title = "Days Required Given Traffic Allocation per Day",
+    # 実験に割り当てられる 1 日あたりのトラフィック
+    x = "Traffic Allocated to the Experiment per Day",
+    # 実験期間 (日)
+    y = "Experiment Duration in Days"
+    ) +
+  scale_x_continuous(breaks = seq(0, 10000, 1000))+
+  scale_y_continuous(breaks = seq(0, 30, 5)) +
+  theme_bw()
+  
+```
+まとめると下記のようになる。
+
+- 21日間の実験の場合、1日あたり`r ceiling(n * 2 / 21)`人のユーザーが必要
+- 14日間の実験の場合、1日あたり`r ceiling(n * 2 / 14)`人のユーザーが必要
+-  7日間の実験の場合、1 日あたり`r ceiling(n * 2 / 7)`人のユーザーが必要
+
+### Step 4 - 実験を始める
+
+実験の実行に関わるステップに移る。実験を始めるときには実験プラットフォームとp値ピーキングを理解しておく必要がある。
+
+実験プラットフォームは、実験を管理するための実験システムのこと。そのシステムに実験を登録すると、ユーザーのリクエストに応じてグループIDを発番して管理することで、ユーザーを振り分ける。トリートメント群に割り振られたユーザーは変更さらたUIや機能の影響下でサービスを利用する。そして、その行動ログが蓄積される。場合によっては、ログが集計されて自動的に結果が集計される。
+
+![ExperimentPlatform](/Users/aki/Documents/statistical_note/note_pvalue15/ExperimentPlatform.png)
+
+p値ピーキングは統計的に有意な判断が出来ために実験を早期に停止することによって、タイプ1エラーが増加してしまうことをp値ピーキングという。
+
+同じ分布から生成された2つのデータがあったとする。サンプルサイズが数百を超えたあたりからは差が無いことが目で見てもわかるが、サンプルサイズが小さいときは推定誤差が大きくなってしまうため、異なる分布から生成されたようにも見えてしまう。
+
+Urban Wearの例に戻る。コントロール群、トリートメント群を取り出してサインアップ率を比較すると、1.2%ほどトリートメント群のほうが高い。
+
+`test.csv`は`r dim(test)[1]`行、`r dim(test)[2]`カラムのデータ。
+
+- `visitor_id`: 訪問者の識別子IDでユニークなキー。
+- `date`: `r min(test$date)`から`r max(test$date)`まで
+- `email`: メールアドレスが記録される。
+- `experiment`: ABテストの対象者には`email_test`の値が記録される。`email_test`か`NA`のいずれか。
+- `group`: ABテストの対象者で、`0`はコントロールグループで、`1`がトリートメントグループ。`0`か`1`、`NA`のいずれか。`NA`はABテストの対象者ではないことを意味する。
+- `submitted`: `1`はメールアドレスを申し込んだことを表す。`email`にも値が入る。
+
+```{r}
+# 各群のサブセットを取得する
+AB_test <- test %>% filter(experiment == 'email_test')
+control_signups <- AB_test %>% filter(group == 0) %>% pull(submitted)
+treatment_signups  <- AB_test %>% filter(group == 1) %>% pull(submitted)
+
+AB_control_cnt    <- sum(control_signups)       # Control Sign-Up Count
+AB_control_rate   <- mean(control_signups)      # Control Sign-Up Rate
+AB_control_size   <- length(control_signups)    # Control Sample Size
+AB_treatment_cnt  <- sum(treatment_signups)     # Treatment Sign-Up Count
+AB_treatment_rate <- mean(treatment_signups)    # Treatment Sign-Up Rate
+AB_treatment_size <- length(treatment_signups)  # Treatment Sample Size
+
+list(
+  control_cnt = AB_control_cnt,
+  control_size = AB_control_size,
+  treatment_cnt = AB_treatment_cnt,
+  treatment_size = AB_treatment_size,
+  `Control Sign-Up Rate` = AB_control_rate,
+  `Treatment Sign-Up Rate` = AB_treatment_rate,
+  Absolute = AB_treatment_rate - AB_control_rate
+)
+  
+```
+
+1.2%の差をグラフで可視化すると下記の通り。多少の変動はあるものトリートメント群のほうが一貫して高い傾向にある。
+
+```{r}
+signups_per_day <- AB_test %>% 
+  group_by(group, date) %>% 
+  summarise(mean_signups = mean(submitted)) %>% 
+  ungroup()
+
+signups_per_test <- signups_per_day %>% 
+  group_by(group) %>% 
+  summarise(mean_global = mean(mean_signups)) %>% 
+  pull(mean_global)
+
+signups_per_day %>% 
+  ggplot(., aes(date, mean_signups, col = as.character(group))) + 
+  geom_line() + 
+  geom_hline(
+    yintercept = signups_per_test, 
+    linetype = 'dashed', 
+    alpha = 1/2,
+    col = c('#e57f87','#6798c2')
+    ) +
+  scale_color_brewer(palette = 'Set1') + 
+  scale_x_date(
+    labels = date_format("%Y/%m/%d"),
+    breaks = "1 day",
+    minor_breaks = "1 day"
+  )  + labs(
+    title = "Email Sign Up Rates across a 14-Day Experiment",
+    x = "Days in the Experiment",
+    y = "Sign-Up Rate (Proportion)",
+    col = 'Group'
+    ) +
+  scale_y_continuous(
+    breaks = seq(0, 1, 0.005), 
+    labels = scales::percent_format(scale = 100)
+    ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(
+    angle = 75,
+    vjust = 0.2,
+    hjust = 0.2
+  ))
+```
+
+### Step 5 - テストの妥当性を評価する
+
+このステップでは、サンプル比不一致(SRM:Sample Ratio Mismatch)、AAテストとカイ2乗検定を含む、テストの妥当性に関する2つのチェックをチェックする。前提としてSUTVAが満たされていることを前提とする。
+
+SUTVA(Stable Unit Treatment Value Assumption)とは、介入による影響は、介入を受ける処置群の個々のみに閉じていなければならず、対照群は処置群から一切の処置の影響を受けないということ。
+
+実験のチェックを実施すると、ABテストの結果が信頼できることが保証され、タイプ1またはタイプ2エラーが発生するリスクが軽減する。
+
+AAテストを実行して、両者の間に根本的な違いがないことを確認する。実際の実験では、AAテストはABテストの前に実施される。
+
+グループサイズに対してカイ二乗検定を実行して、サンプル比の不一致(SRM)をチェックする。このテストでは、ランダム化アルゴリズムが機能していることを確認する。新規性チェックなどを実行するためのセグメンテーション分析など、実行できる可能性のあるチェックは他にもある。
+
+#### AAテスト
+
+何らかの変更をテストする前にコントロール群とトリートメント群に違いがないこと把握する必要がある。ランダム化を行い、コントロール群とトリートメント群の間に差がないことを確認することがAAテスト。
+
+Urban Wearの例に戻る。コントロール群、トリートメント群を取り出してサインアップ率を比較すると、違いがないことがわかる。
+
+```{r}
+# AA テストで対照群と治療群を把握する
+AA_test <- pretest %>% filter(experiment == 'AA_test')
+AA_control <- AA_test %>% filter(group == 0) %>% pull(submitted)
+AA_treatment <- AA_test %>% filter(group == 1) %>% pull(submitted)
+
+AA_control_cnt    <- sum(AA_control)       # Control Sign-Up Count
+AA_control_rate   <- mean(AA_control)      # Control Sign-Up Rate
+AA_control_size   <- length(AA_control)    # Control Sample Size
+AA_treatment_cnt  <- sum(AA_treatment)     # Treatment Sign-Up Count
+AA_treatment_rate <- mean(AA_treatment)    # Treatment Sign-Up Rate
+AA_treatment_size <- length(AA_treatment)  # Treatment Sample Size
+
+list(
+  control_cnt = AA_control_cnt,
+  control_size = AA_control_size,
+  treatment_cnt = AA_treatment_cnt,
+  treatment_size = AA_treatment_size,
+  `Control Sign-Up Rate` = AA_control_rate,
+  `Treatment Sign-Up Rate` = AA_treatment_rate,
+  Absolute = AA_treatment_rate - AA_control_rate
+)
+```
+
+可視化するとこのようになる。多少のばらつきはあるものの、平均値も近く、大きな差はない。
+
+```{r}
+AA_signups_per_day <- AA_test %>% 
+  group_by(group, date) %>% 
+  summarise(mean_signups = mean(submitted)) %>% 
+  ungroup()
+
+AA_signups_per_test <- AA_signups_per_day %>% 
+  group_by(group) %>% 
+  summarise(mean_global = mean(mean_signups)) %>% 
+  pull(mean_global)
+
+AA_signups_per_day %>% 
+  ggplot(., aes(date, mean_signups, col = as.character(group))) + 
+  geom_line() + 
+  geom_hline(
+    yintercept = AA_signups_per_test, 
+    linetype = 'dashed', 
+    alpha = 1/2,
+    col = c('#e57f87','#6798c2')
+    ) +
+  scale_color_brewer(palette = 'Set1') + 
+  scale_x_date(
+    labels = date_format("%Y/%m/%d"),
+    breaks = "1 day",
+    minor_breaks = "1 day"
+  )  + labs(
+    title = "AA Test",
+    x = "Days in the Experiment",
+    y = "Sign-Up Rate (Proportion)",
+    col = 'Group'
+    ) +
+  scale_y_continuous(
+    breaks = seq(0, 1, 0.005), 
+    labels = scales::percent_format(scale = 100)
+    ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(
+    angle = 75,
+    vjust = 0.2,
+    hjust = 0.2
+  ))
+```
+
+`r min(AA_test$date)`から`r max(AA_test$date)`のAAテストの結果は下記の通り。
+
+- **H0:** 青ボタンと緑ボタンのサインアップ率は同じ
+- **H1:** 青ボタンと緑ボタンのサインアップ率は同じではない
+
+```{r}
+res_AA_proptest <- prop.test(
+  x = c(AA_control_cnt, AA_treatment_cnt),
+  n = c(AA_control_size, AA_treatment_size),
+  correct = FALSE
+  )
+
+list(
+  X_squared = res_AA_proptest$statistic[[1]],
+  p_value = res_AA_proptest$p.value,
+  x = c(AA_control_cnt, AA_treatment_cnt),
+  n = c(AA_control_size, AA_treatment_size)
+)
+```
+
+p値は`r res_AA_proptest$p.value`より、帰無仮説を棄却できないため、青ボタンと緑ボタンのサインアップ率は同じと言える。
+
+#### サンプル比不一致(SRM:Sample Ratio Mismatch)
+
+サンプル比不一致の問題とは、50%/50%としてABに割り付けたが、結果として40%/60%のように不均衡な状態となってしまうこと。その結果、各群間で属性や何らかの傾向などの特徴面で差が生じてしまい、分析結果にバイアスが生じる可能性が高くなってしまう。そのため、各群のサンプルサイズが同じであることが望ましい。
+
+各群のサンプルサイズが同じかどうかはχ2乗検定で調べることが出来る。SRMのためのχ2乗検定の結果は下記の通り。
+
+- **H0:** サンプルの比率は1:1
+- **H1:** サンプルの比率は1:1ではない
+
+
+```{r}
+email_test <- test %>% filter(experiment == 'email_test')
+observed <- email_test %>% group_by(group) %>% count() %>% pull(n)
+# expected <- (nrow(email_test)*0.5*c(1, 1))/nrow(email_test)
+expected <- c(0.5, 0.5)
+res_SRM_result <- chisq.test(x = observed, p = expected)
+
+list(
+  X_squared = res_SRM_result$statistic,
+  p_value = res_SRM_result$p.value
+)
+```
+
+p値は、`r res_SRM_result$p.value`より、帰無仮説を棄却できない。そのため、サンプルの比率は1:1といえる。
+
+### Step 6 - 統計的推論の実施
+
+このステップでは、電子メールに関するサインアップ率向上のためのABテストに統計テストを適用する。 実験の結果を評価するために、比率の差の検定とT検定を行う。実際には、いずれかののテストだけで十分。まずは比率の差の検定を行う。
+
+```{r}
+res_AB_proptest <- prop.test(
+  x = c(AB_treatment_cnt,  AB_control_cnt),
+  n = c(AB_treatment_size, AB_control_size),
+  correct = FALSE
+  )
+
+list(
+  X_squared = res_AB_proptest$statistic[[1]],
+  p_value = res_AB_proptest$p.value,
+  x = c(AB_treatment_cnt,  AB_control_cnt),
+  n = c(AB_treatment_size, AB_control_size)
+)
+```
+
+`r min(AB_test$date)`から`r max(AB_test$date)`の期間における、比率の差の検定を使ったABテストの結果は下記の通り。
+
+- **H0:** 青ボタンと緑ボタンのサインアップ率は同じ
+- **H1:** 青ボタンと緑ボタンのサインアップ率は同じではない
+
+`r res_AB_proptest$p.value`より、帰無仮説を棄却し、青ボタンと緑ボタンのサインアップ率は異なると言える。
+
+ちなみに、カイ2乗検定(chisq.test)と比率の差の検定(prop.test)では、与えるデータが異なるが、結果は同じである。
+
+```{r}
+# カイ2乗検定(chisq.test)と母比率の差の検定(prop.test)では、与えるデータが異なる
+# 母比率の差の検定は、総数に対するクリック数を渡す一方で、
+# カイ2乗検定は、クリック数とクリックしていない数を渡す。
+
+m <- matrix(c(AB_control_cnt,   AB_control_size - AB_control_cnt,
+              AB_treatment_cnt, AB_treatment_size - AB_treatment_cnt),
+            2, byrow = TRUE)
+chisq.test(m, correct = FALSE)
+
+```
+
+比率に対するt検定は下記の通り。
+
+```{r}
+res_AB_ttest <- t.test(treatment_signups, control_signups)
+list(
+  T_stat = res_AB_ttest$statistic[[1]],
+  p_value = res_AB_ttest$p.value,
+  df = res_AB_ttest$parameter[[1]]
+)
+```
+
+`r min(AB_test$date)`から`r max(AB_test$date)`の期間における、比率に対するt検定を使ったABテストの結果は下記の通り。
+
+- **H0:** 青ボタンと緑ボタンのサインアップ率は同じ
+- **H1:** 青ボタンと緑ボタンのサインアップ率は同じではない
+
+`r res_AB_ttest$p.value`より、帰無仮説を棄却し、青ボタンと緑ボタンのサインアップ率は異なると言える。
+
+#### 最終結果と信頼区間
+
+絶対差の95%信頼区間は、`r res_AB_proptest$conf.int[1]`から`res_AB_proptest$conf.int[2]`より、この区間が真の比率差を含んでいる可能性が高い。また、間隔に0が含まれていないことを考えると、この結果、つまり統計的に有意な上昇が見られると考えられる。一方で、絶対差を評価するのではなく、相対的なリフトを使うことで、どの程度どの程度優れているかについて理解できる。
+
+```{r}
+# 信頼区間の下限と上限を取得
+lower <- res_AB_proptest$conf.int[1]
+upper <- res_AB_proptest$conf.int[2]
+
+# コントロール群の率に対する信頼区間の下限と上限
+lower_lift <- lower / AB_control_rate
+upper_lift <- upper / AB_control_rate
+
+list(
+  `Sample Sizes` = 'Sample Sizes',
+  AB_control_size = AB_control_size,
+  AB_treatment_size = AB_treatment_size,
+  `Sign-Up Counts (Rates)` = 'Sign-Up Counts (Rates)',
+  AB_control_cnt = AB_control_cnt,
+  AB_control_rate = sprintf("%.2f%%", AB_control_rate*100),
+  AB_treatment_cnt = AB_treatment_cnt,
+  AB_treatment_rate = sprintf("%.2f%%", AB_treatment_rate*100),
+  `Differences` = 'Differences',
+  Absolute = AB_treatment_rate - AB_control_rate,
+  `Relative (lift)` = sprintf("%.2f%%", (AB_treatment_rate - AB_control_rate) / AB_control_rate*100),
+  `X_squared` = 'X-squared',
+  `X_squared` = res_AB_proptest$statistic[[1]],
+  p_value = res_AB_proptest$p.value,
+  `T-Stats` = 'T-Stats',
+  `T Test Statistic` = res_AB_ttest$statistic[[1]],
+  p_value = res_AB_ttest$p.value,
+  `Confidence Intervals` = 'Confidence Intervals',
+  `Absolute Difference CI` = c(lower, upper),
+  `Relative Difference (lift) CI` = c(sprintf("%.2f%%", lower_lift*100), sprintf("%.2f%%", upper_lift*100))
+)
+
+```
+
+絶対差では、実際の改善がどのようなものであるかがわかりにくい。相対的な差分(リフト)が役立つ。リフトは、`r sprintf("%.2f%%", lower_lift*100)`から`r sprintf("%.2f%%", upper_lift*100)`であり、改善率がわかりやすい。
+
+`Relative (lift)%`の部分の補足の説明をまとめる。例えば、対照群のコンバージョン率(`AB_control_rate`)は10%、処理群のコンバージョン率(`AB_treatment_rate`)は12%。このとき、相対的な変化率(`Relative (lift)%`)は`(AB_treatment_rate - AB_control_rate) / AB_control_rate * 100`と定義される。
+
+$$
+\frac{(0.12 - 0.10) }{0.10}* 100 = \frac{0.02}{0.10}* 100= 0.20(=20\%)
+$$
+
+この相対的な変化率である20%は、処理群が対照群に比べてコンバージョン率を20%改善したことを示している。この値が正の場合、処理群の結果が対照群に比べて良好であることを意味する。また、`Relative Difference (lift) CI`の方についてもまとめる。信頼区間が次のようになっていると仮定する。
+
+- コントロール群のコンバージョン率(`AB_control_rate`)は0.10 
+- 処理群のコンバージョン率(`AB_treatment_rate`)は0.12 
+- 信頼区間下限(`lower`) = 0.01
+- 信頼区間上限(`upper`) = 0.03
+- 下限信頼区間 (`lower_lift`) の計算: $\frac{lower}{ABControlRate} = \frac{0.01}{0.10} = 0.1$
+- 上限信頼区間 (`upper_lift`) の計算: $\frac{upper}{ABControlRate} = \frac{0.03}{0.10} = 0.3$
+
+これらの値を解釈すると、コントロール群と比べて処理群のコンバージョン率は、信頼区間の下限から上限の範囲内で10%から30%のリフトがある可能性があることを示す。したがって、処理群がコンバージョン率においてコントロール群に対して改善があったことが示唆される。`lower`も`upper`も`(AB_treatment_rate - AB_control_rate)`のように計算された値、`lower-0`のように考えれば解釈しやすい。
+
+
+### Step 7 - ローンチするかどうかを決定する
+
+ローンチするかどうかを決定する際の検討事項をここではまとめる。
+
+Urban Wear の例に戻る。Urban Wearプレローンチページのメール登録テストでは、送信ボタンの色を青から緑に変更することで登録率の向上を目指した。ユーザーのサンプルをコントロールグループ(青)とトリートメントグループ(緑)に登録する2週間のランダム化実験(2022年2月1日から2022年2月14日)を実施した。
+
+![ConfidenceInterval(Lift)](/Users/aki/Documents/statistical_note/note_pvalue15/Lift.png)
+
+- 1. 統計的および実用的な有意性のないポジティブなリフト。ローンチしない。
+- 2. 統計的および実用的な有意性のあるポジティブなリフト。ローンチを検討。
+- 3. 統計的にネガティブなリフト。ローンチしない。
+- 4. 統計的に有意性のないポジティブなリフト。しかし、信頼区間上限がポジティブ。検出力をあげて再テスト。
+- 5. 統計的に有意性のあるポジティブなリフト。しかし、信頼区間下限がMDEの下にある。検出力をあげて再テスト。
+
+テストの結果、ベンチマーク(青)の9.5%から12.8%のリフトが確認できた。結果は統計的に有意で、相対的なリフトは95%信頼区間で5.7%～19.9%だった。実用的かつ統計的な有意性が観察されたことを考慮して、緑色の新しい送信ボタンを変更することをお勧めする。
+
+|Groups|SampleSize|SignUpCounts|SignUpRate|
+|:---: |:---:     |:---:       |:---:     |
+|Control|`r AB_control_size`|`r AB_control_cnt`|`r sprintf("%.2f%%", AB_control_rate*100)`|
+|Treatment|`r AB_treatment_size`|`r AB_treatment_cnt`|`r sprintf("%.2f%%", AB_treatment_rate*100)`|
+
+
+|AbsoluteDifference|RelativeDifference|TestStatistic|p-Value|95% ConfidenceInterval(RelativeDifference)|
+|:---:             |:---:             |:---:        |:---:  |:---:                                     |
+`r AB_treatment_rate - AB_control_rate`|`r sprintf("%.2f%%", (AB_treatment_rate - AB_control_rate) / AB_control_rate*100)`|`r res_AB_proptest$statistic[[1]]`|`r res_AB_proptest$p.value`|`r c(sprintf("%.2f%%", lower_lift*100), sprintf("%.2f%%", upper_lift*100))`|
+
+## 参考文献
+
+- [Ultimate AB Testing Course with Python Coding](https://www.udemy.com/course/ultimate-ab-testing-course-with-python-coding)
+
+## おまけ
+
+p値ピーキングの例。
+
+```{r}
+# set.seed(1)
+# sim_n <- 500
+# x1 <- map_dbl(.x = 1:sim_n, .f = function(x){mean(rnorm(n = x, 10, 5))})
+# x2 <- map_dbl(.x = 1:sim_n, .f = function(x){mean(rnorm(n = x, 10, 5))})
+# flag <- rep(c('A', 'B'), each = sim_n)
+# index <- rep(1:sim_n, times = 2)
+# tibble(
+#   index = index,
+#   x = c(x1, x2),
+#   flag = flag
+# ) %>% 
+#   ggplot(., aes(index, x, col = flag)) + 
+#   geom_line(alpha = 1/2)
+# map2_dbl(
+#   .x = map(.x = 2:sim_n, .f = function(x){rnorm(n = x, 10, 5)}),
+#   .y = map(.x = 2:sim_n, .f = function(x){rnorm(n = x, 10, 5)}),
+#   .f = function(x, y){
+#     t.test(
+#       x = x,
+#       y = y
+#     )$p.value
+#   }
+#   ) < 0.05
+```
+

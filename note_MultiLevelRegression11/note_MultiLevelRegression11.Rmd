@@ -1,0 +1,340 @@
+---
+title: "マルチレベルモデリングChapter6:非線形モデリング(非連続モデル)"
+pagetitle: "マルチレベルモデリングChapter6:非線形モデリング(非連続モデル)"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)を利用してマルチレベルモデリングの勉強内容をまとめたもの。下記のサポートサイトにサンプルデータなどが保存されている。
+
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+
+ここでの目的は、非線形なモデリング方法についてまとめておくこと。
+
+## 非線形な変換
+
+青年期のアルコール摂取量の変化に関する分析のデータを利用する。82人(`n`)を対象に14歳,15歳,16歳の3回(`age`)の計測タイミングがある。`alcuse`はアルコール摂取に関する頻度の合成スコアで、予測変数として、友達の飲酒割合に関する`peer`と親がアルコール依存症かを表す`coa`が用意されている。
+
+この分析の目的は、親がアルコール依存症であったり、自分の周囲の友だちが飲酒していれば、自分のアルコール摂取量も14歳,15歳,16歳の時間経過とともに、アルコール摂取量が増加していくのではないか、という仮説を検証すること。
+
+```{r}
+library(tidyverse)
+library(broom)
+library(nlme)
+library(DT)
+library(patchwork)
+library(stargazer)
+
+alcohol <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/alcohol1_pp.txt", header=T, sep=",")
+#table 4.1, model e
+model.e <- lme(alcuse~coa+peer*age_14 , data=alcohol, random= ~ age_14 | id, method="ML")
+#obtaining the fixed effects parameters 
+fixef.e <- fixef(model.e)
+```
+
+結果変数あるいはレベル1サブモデルの`TIME`を変換し、結果変数または予測変数が線形変化するように成長モデルを定式化する必要がある。例えば、下記の例では、`alcuse`は平方根をとって変換されていたので、これを二乗することでもとの尺度に変換する。平方根の結果変数に当てはめた線形モデルの予測値を二乗することで、もともと直線だった変化の軌跡を曲線にすることができる。
+
+下記が可視化した例で左が平方根、右が二乗したもの。`PEER`は平均値±標準偏差×0.5の値を採用し、高低を分けている。変換を施したからといって結果が変わることはなく、アルコール依存症の親を持つ個人は、初期時点でアルコール摂取量が多いが、その後の変化もより大きくなるわけではない。
+
+ただ、変化が曲線になることで、変化率が時間とともに一定ではなく、アルコール摂取量の増加率は時間とともに大きくなっている。平方根変換した場合、アルコール摂取量は線形に変化し、変化率は一定であるが、このモデルの予測値を二乗して元の尺度に戻した場合、アルコール摂取量の変化は時間とともに加速する。
+
+```{r}
+peer_prototype <- mean(alcohol$peer) + c(-1,1) * sd(alcohol$peer)/2
+df_fit_plt_e <- expand_grid(age_14 = seq(from = 0, to = 2, length.out = 30),
+            coa = 0:1,
+            peer = peer_prototype) %>% 
+  mutate(peer_flg = rep(c("LowPeer", "HighPeer"), times = n()/2),
+         type = paste0("coa=",coa," & ",peer_flg)) %>% 
+  mutate(alcuse = 
+           fixef.e[[1]] + 
+              fixef.e[[2]] * coa + 
+              fixef.e[[3]] * peer + 
+              fixef.e[[4]] * age_14 + 
+              fixef.e[[5]] * age_14 * peer,
+         alcuse2 = alcuse^2
+  )
+
+p1 <- ggplot(df_fit_plt_e, aes(age_14, alcuse, col = as.character(type))) + 
+  geom_path(size = 1) +
+  scale_x_continuous(breaks = c(0, 1, 2), label = c("14", "15", "16")) +
+  scale_color_manual(values = c("#ec6d71", "#a22041", "#a0d8ef", "#19448e"), name = "coa") +
+  scale_y_continuous(breaks = seq(0, 3, 0.5), limits = c(0, 3)) +
+  xlab("age") + 
+  ggtitle("Model E: Linear effects") +
+  theme_bw() + 
+  theme(legend.position = "none")
+
+p2 <- ggplot(df_fit_plt_e, aes(age_14, alcuse2, col = as.character(type))) + 
+  geom_path(size = 1) +
+  scale_x_continuous(breaks = c(0, 1, 2), label = c("14", "15", "16")) +
+  scale_color_manual(values = c("#ec6d71", "#a22041", "#a0d8ef", "#19448e"), name = "coa") +
+  scale_y_continuous(breaks = seq(0, 3, 0.5), limits = c(0, 3)) +
+  xlab("age") + 
+  ggtitle("Model E: Non-linear effects") +
+  theme_bw()
+
+p1|p2
+```
+
+どのように変換を施すのが良いかは、参考書の「はしごとでっぱりの法則」が参考になる。下記のデータでは、一番端にも変換してないデータの散布図を可視化しているが、左上凸な形をしている。この場合、はしごとでっぱりの法則に従うと、`Y`を上昇させるか、`TIME`を下降させることで、線形に変換できる。真ん中の図は`$Y^{2.3}$`したもので、右の図は$age^{1/2.3}$したもの。変換することで、元の関係よりも線形になっていることがわかる。
+
+```{r}
+berkeley <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/berkeley_pp.txt", header=T, sep=",")
+berkeley$age2.3 <- berkeley$age^(1/2.3)
+berkeley$iq2.3 <- berkeley$iq^2.3
+p1 <- 
+  berkeley %>% 
+  ggplot(aes(age, iq)) +
+  geom_point() +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 250))
+
+# middle
+p2 <-
+  berkeley %>% 
+  ggplot(aes(age, iq2.3)) +
+  geom_point() +
+  scale_y_continuous(expression(iq^(2.3)), breaks = 0:6 * 50000, 
+                     limits = c(0, 3e5), expand = c(0, 0))
+
+# right
+p3 <-
+  berkeley %>% 
+  ggplot(aes(age2.3, iq)) + 
+  geom_point() +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 250)) +
+  xlab(expression(age^(1/2.3)))
+
+(p1 | p2 | p3) &
+  scale_x_continuous(expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) &
+  theme_bw()
+```
+
+## 時間の多項式関数で変換
+
+曲線をモデリングする方法として、多項式成長モデルがある。。下記で取り上げているような0次からn次多項式を利用することで、時間を伴う複雑なパターンを扱えるが、モデルが複雑になるので、解釈が難しくなる場合がある。
+
+- 変化なし(0次)：軌跡は平坦。ランダム項があれば個人ごとに異なる切片をとる。
+
+- 線形変化(1次)：軌跡は直線。ランダム項があれば個人ごとに異なる切片と変化率をとる。レベル2サブモデルを利用することで、切片と変化に関する個人差を、個人特有の特徴と関連付けれる。
+
+- 線形変化(2次)：軌跡は曲線。$TIME^2$を追加することで実現できる。$\pi_{0i}$は、$\pi_{1i}$と$\pi_{2i}$が0のときの切片を表す。$\pi_{1i}$は線形変化のモデルとは異なり、一定の変化を表すわけではない。`TIME=0`のときの瞬間的な変化率を表す。$\pi_{2i}$は曲率で、変化率の変化を表している。切片、瞬間的な変化率、曲率の個人差を定式化している。
+
+```{r}
+# make the four small data sets
+pi0 <- 71
+d1 <- tibble(time = 0:100) %>% mutate(y = pi0)
+
+pi0 <- 71
+pi1 <- 1.2
+d2 <- tibble(time = 0:100) %>% mutate(y = pi0 + pi1 * time) 
+
+pi0 <- 50
+pi1 <- 3.8
+pi2 <- -0.03
+d3 <- tibble(time = 0:100) %>% mutate(y = pi0 + pi1 * time + pi2 * time^2)
+
+pi0 <- 30
+pi1 <- 10
+pi2 <- -0.2
+pi3 <- 0.0012
+d4 <- tibble(time = 0:100) %>% mutate(y = pi0 + pi1 * time + pi2 * time^2 + pi3 * time^3)
+
+bind_rows(d1, d2, d3, d4) %>% 
+  mutate(row = rep(c("No change", "Linear change", 
+                     "Quadratic change", "Cubic change"), each = n()/4)) %>% 
+  ggplot(., aes(time, y)) + 
+  geom_line() +
+  scale_x_continuous(breaks = 0:2 * 50, limits = c(0, 100)) +
+  scale_y_continuous(breaks = 0:2 * 100, limits = c(0, 205)) +
+  theme_bw() +
+  facet_wrap( ~ row, ncol = 2)
+```
+
+## 多項式の次数の選択方法
+
+ここでは、外在化型問題行動の度合いを0-68点で測定するCBCLスコア(`external`)について、1年生から6年生まで追跡した45人のデータを利用する。
+
+```{r}
+external <- read.table("https://stats.idre.ucla.edu/wp-content/uploads/2020/01/external_pp.txt", header=T, sep=",")
+external$grade2 <- external$grade^2
+external$grade3 <- external$grade^3
+external$grade4 <- external$grade^4
+head(external)
+```
+
+私のggplotへの理解が足りないのでおそらくすごく手間なことをしているが、各個人に合わせた多項式(赤)と、データ内で必要とされる最高次数の4次多項式(青)を可視化している。結局のところ、個人ごとに探索していき、必要であるだろう次数を探すことになる。
+
+ただ、個人ごとに適切な関数の形状を探すことは非生産的で、全員に共通した形状を想定できなければ、レベル1サブモデルを定式化することが難しい。そのため、必要な多項式の中で最も高い次数を選択する方法もありうる。こうすることで、これ以上次数を上げる必要もなく、次数が高ければ平坦な変化も直線的な変化も近似できるためである。
+
+```{r}
+external_plt <- external %>% 
+  filter(id %in% c(1, 6, 11, 25, 34, 36, 40, 26)) %>% 
+  mutate(case = factor(id,
+                       levels = c(1, 6, 11, 25, 34, 36, 40, 26),
+                       labels = LETTERS[1:8])
+         )
+
+# quadratic
+p_a <- external_plt %>% filter(case == "A") %>% 
+  ggplot(aes(grade, external)) +
+  geom_point(size = 2) +
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2) + I(x^3) + I(x^4), linetype = 2, size = 1) + # quartic
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2), col = "tomato") + # quadratic
+  scale_y_continuous(limits = c(0, 60)) + 
+  facet_wrap(~ case)
+
+p_b <- external_plt %>% filter(case == "B") %>% 
+  ggplot(aes(grade, external)) +
+  geom_point(size = 2) +
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2) + I(x^3) + I(x^4), linetype = 2, size = 1) + # quartic
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2), col = "tomato") + # quadratic
+  scale_y_continuous(limits = c(0, 60)) + 
+  facet_wrap(~ case)
+
+p_g <- external_plt %>% filter(case == "G") %>% 
+  ggplot(aes(grade, external)) +
+  geom_point(size = 2) +
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2) + I(x^3) + I(x^4), linetype = 2, size = 1) + # quartic
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2) , col = "tomato") + # quadratic
+  scale_y_continuous(limits = c(0, 60)) + 
+  facet_wrap(~ case)
+
+# cubic
+p_e <- external_plt %>% filter(case == "E") %>% 
+  ggplot(aes(grade, external)) +
+  geom_point(size = 2) +
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2) + I(x^3) + I(x^4), linetype = 2, size = 1) + # quartic
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2) + I(x^3), col = "tomato") + # cubic
+  scale_y_continuous(limits = c(0, 60)) + 
+  facet_wrap(~ case)
+
+# quartic
+p_f <- external_plt %>% filter(case == "F") %>% 
+  ggplot(aes(grade, external)) +
+  geom_point(size = 2) +
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2) + I(x^3) + I(x^4), linetype = 2, size = 1) + # quartic
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2) + I(x^3) + I(x^4), col = "tomato") + # quartic
+  scale_y_continuous(limits = c(0, 60)) + 
+  facet_wrap(~ case)
+
+p_h <- external_plt %>% filter(case == "H") %>% 
+  ggplot(aes(grade, external)) +
+  geom_point(size = 2) +
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2) + I(x^3) + I(x^4), linetype = 2, size = 1) + # quartic
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2) + I(x^3) + I(x^4), col = "tomato") + # quartic
+  scale_y_continuous(limits = c(0, 60)) + 
+  facet_wrap(~ case)
+
+# liner
+p_c <- external_plt %>% filter(case == "C") %>% 
+  ggplot(aes(grade, external)) +
+  geom_point(size = 2) +
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2) + I(x^3) + I(x^4), linetype = 2, size = 1) + # quartic
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x , col = "tomato") + # liner
+  scale_y_continuous(limits = c(0, 60)) + 
+  facet_wrap(~ case)
+
+p_d <- external_plt %>% filter(case == "D") %>% 
+  ggplot(aes(grade, external)) +
+  geom_point(size = 2) +
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x + I(x^2) + I(x^3) + I(x^4), linetype = 2, size = 1) + # quartic
+  stat_smooth(method = "lm", se = FALSE, formula = y ~ x, col = "tomato") + # liner
+  scale_y_continuous(limits = c(0, 60)) + 
+  facet_wrap(~ case)
+
+(p_a | p_b | p_c | p_d)/(p_e | p_f | p_g | p_h) & theme_bw() 
+```
+
+モデルを当てはめると下記の結果が得られる。`time`は`grade-1`しているため、切片は1年生時点でのCBCLスコアを表す。1次のモデルを見ると、１年生において、CBCLスコアは13ポイント程度で、時間経過とともに、平均的に変化するわけでもない事がわかる。
+
+モデルAとBがどちらが望ましいかは、モデル間のすべての条件の差(線形成長率、分散、共分散)の組み合わせに関する複合帰無仮説の検定を行う方法もあるが、ここではAICやBICをもとにモデル選択を行う。AICであればモデルC、BICであればモデルBということになる。つまり、1次のモデルBないし2次のモデルCを利用して、自分の仮説に適合するモデルを利用し、考察すればよいと思われる。
+
+```{r}
+external$time2 <- external$time^2
+external$time3 <- external$time^3
+model.a <- lme(external ~ 1               , random =  ~ 1                | id, method = "ML", external)
+model.b <- lme(external ~ time            , random =  ~ time             | id, method = "ML", external)
+model.c <- lme(external ~ time+time2      , random =  ~ time+time2       | id, method = "ML", external)
+# mod.d <- lme(external ~ time+time2+time3, random =  ~ time+time2+time3 | id, method = "ML", external,
+
+```
+```{r, cache=TRUE}
+control.list <-
+  lmeControl(
+    maxIter = 500,
+    msMaxIter = 500,
+    msMaxEval = 500,
+    tolerance = 0.1,
+    msTol = 0.1,
+    sing.tol = 1e-20
+  )
+model.d <- lme(external ~ time+time2+time3, random =  ~ time+time2+time3 | id, method = "ML", external,
+               control = control.list)
+```
+
+```{r, include=FALSE}
+stargazer::stargazer(
+  model.a,
+  model.b,
+  model.c,
+  model.d,
+  type = "html")
+```
+
+<table style="text-align:center"><tr><td colspan="5" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"></td><td colspan="4"><em>Dependent variable:</em></td></tr>
+<tr><td></td><td colspan="4" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left"></td><td colspan="4">external</td></tr>
+<tr><td style="text-align:left"></td><td>(A)</td><td>(B)</td><td>(C)</td><td>(D)</td></tr>
+<tr><td colspan="5" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Constant</td><td>12.963<sup>***</sup></td><td>13.290<sup>***</sup></td><td>13.970<sup>***</sup></td><td>13.795<sup>***</sup></td></tr>
+<tr><td style="text-align:left">time</td><td></td><td>-0.131</td><td>-1.151</td><td>-0.350</td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.417)</td><td>(1.113)</td><td>(2.345)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">time2</td><td></td><td></td><td>0.204</td><td>-0.234</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td>(0.229)</td><td>(1.067)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">time3</td><td></td><td></td><td></td><td>0.058</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td>(0.131)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left"></td><td>(1.487)</td><td>(1.843)</td><td>(1.784)</td><td>(1.930)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td></tr>
+<tr><td colspan="5" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Observations</td><td>270</td><td>270</td><td>270</td><td>270</td></tr>
+<tr><td style="text-align:left">Log Likelihood</td><td>-1,005</td><td>-995</td><td>-987</td><td>-983</td></tr>
+<tr><td style="text-align:left">Akaike Inf. Crit.</td><td>2,016</td><td>2,003</td><td>1,995</td><td>1,997</td></tr>
+<tr><td style="text-align:left">Bayesian Inf. Crit.</td><td>2,027</td><td>2,025</td><td>2,031</td><td>2,051</td></tr>
+<tr><td colspan="5" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"><em>Note:</em></td><td colspan="4" style="text-align:right"><sup>*</sup>p<0.1; <sup>**</sup>p<0.05; <sup>***</sup>p<0.01</td></tr>
+</table>
+
+## 参考文献
+
+- [縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)
+- [Applied Longitudinal Data Analysis: Modeling Change and Event Occurrence](https://www.amazon.com/Applied-Longitudinal-Data-Analysis-Occurrence/dp/B017YBZFW0)
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+- [Chapter 9 Mixed Effects Models](https://glennwilliams.me/r4psych/mixed-effects-models.html)
+- [Applied longitudinal data analysis in brms and the tidyverse](https://bookdown.org/content/4253/index.html)
+

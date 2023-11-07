@@ -1,0 +1,258 @@
+---
+title: "マルチレベルモデリングChapter6:非線形モデリング(非連続モデル)"
+pagetitle: "マルチレベルモデリングChapter6:非線形モデリング(非連続モデル)"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)を利用してマルチレベルモデリングの勉強内容をまとめたもの。下記のサポートサイトにサンプルデータなどが保存されている。
+
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+
+**ここでの目的は、ロジスティックモデルを用いたモデリング方法についてまとめておくこと。このノートでは、サポートサイトと書籍でコードやモデル、可視化した図が異なるため、`nlme`パッケージの式の指定方法と想定しているモデルが一致していない可能性がある。**
+
+## ロジスティックモデル
+
+ここまで扱ったモデルは非線形な軌跡に関しては非線形であっても、個人の成長パラメタに関して線形であった。これまでの非線形性の原因は予測変数の表現の仕方にあった。`TIME`を変換するか、多項式を利用するかなど、予測変数を利用して非線形な軌跡を表現していた。ここでは、パラメタについて線形ではないモデルを考える。
+
+例えば$Y_{ij}=\pi_{0i} + \pi_{1i}TIME + \pi_{2i}TIME^{2}+\epsilon_{ij}$を例にすると、各パラメタに対して$TIME$が乗じられて、合計することで$Y$が計算される。つまり、個人の成長パラメタが重みと数との積の合計で計算されており、成長モデルは個人の成長パラメタの重み付き線形結合、あるいは、パラメタに関して線形であることになる。
+
+また、パラメタに関して線形なモデルは「動的一致性」という性質をもつ。平均的な軌跡を使って個人すべてを集約する際に、この平均的な軌跡を「平均の曲線(各時点での結果変数のを推定して平均を通る曲線を得る)」から計算しても「曲線の平均(個人ごとの軌跡について成長パラメタを推定し、これらの値を平均する)」として計算しても一致する性質のこと。関数がパラメタに関して線形であるならば、動的一致性を持っている。直線、二次曲線、多項式もパラメタに対して線形なモデルなので、動的一致性をもつ。以降で利用するロジスティックモデルは動的一致性をもたず、レベル1サブモデルもパラメタに関して線形ではない。
+
+ここでは1年生、2年生の合計17人のガチョウとキツネのボードゲームを用いた認知能力に関する調査のデータを利用する。ゲームでの致命的な間違い行動を犯すまでの移動数(`nmoves`は1-20をとる)が記録されている。間違いを犯すまでの成功の移動が多いほど、子供の認知能力は高いことになる。一人のこどもにつき27ゲーム(`game`)行っている。
+
+```{r}
+library(tidyverse)
+library(broom)
+library(nlme)
+library(DT)
+library(patchwork)
+library(stargazer)
+
+fg <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/foxngeese_pp.txt", header=T, sep=",")
+datatable(fg)
+```
+
+個人成長プロットを見てみると、4、7、8、15は最初は間違いを起こしているが、20手目まで生き残ることができている。また、11、12は間違いを侵さず20手目まで成功するのにゲーム数がかかっている。1、6は上手くゲームを進めることができていない。このモデルで直線を仮定するのはあまり理にかなっていない。下方漸近線として床(1手目が最小)が存在し、上方漸近線として天井(20手目が最大)が存在する。また、学習理論からも考えると、線形よりも非線形な滑らかな成長曲線が考えられる。
+
+```{r}
+fg %>% 
+  filter(id %in% c(1, 4, 6, 7, 8, 11, 12, 15)) %>% 
+  ggplot(., aes(game, nmoves)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", formula = "y ~ x", se = FALSE, colour = "tomato", size = 1) + 
+  facet_wrap( ~ id, scales = "free", nrow = 2) + 
+  xlim(0, 27) + 
+  ylim(0, 25) + 
+  theme_bw()
+```
+
+このような問題から、これら3つの問題をクリアするロジスティックモデルが望ましい。成長パラメタが$e$の前と中に存在しているの、これらの解釈は通常の線形モデルとは異なる。
+
+$$
+Y_{ij} = 1 + \frac{19}{1 + \pi_{0i} e^{-(\pi_{1i}TIME_{ij})}} + \epsilon_{ij}
+$$
+
+よく見るロジスティック回帰モデル(黒い線)の式といくつか異なる部分があるが、床と天井を設定している関係で異なっている。赤い線が今回利用するモデル(説明のために天井を3にしている)。天井だけ設定しているオレンジの先は分子を調整することで天井を設定している。3にしているためオレンジのモデルは天井が3になっている。また、床だけ設定している緑のモデルでは、1を加算することで床が1になっている。これらを組み合わせた赤い線では、床が1で天井は3だが、床が上がることで天井も上がるため、1から4までの範囲をとる。つまり今回のモデルでは床が1で、天井が19、つまり天井は床を加味すると20ということになる。
+
+![ロジスティックモデル](/Users/aki/Documents/statistical_note/note_MultiLevelRegression12/logistic.png)
+
+$\pi_{0i}, \pi_{1i}$の関係を可視化して考える。
+
+- $\pi_{0i}$は切片の位置を決めており、切片ではないが、切片と関係していることがわかる。可視化した図では$\pi_{0i}$ごとにブロックを作って可視化しているが、$\pi_{0i}$が同じであれば、同じ場所から線が伸びている。
+
+- $\pi_{1i}$はマイナスの場合、右下がりの曲線となり、プラスの場合、右上がりの曲線となる。また、大きさに応じて天井までの加速度合いを表している。$\pi_{1i}$が小さい時(各図の一番下の線)、曲線はゆっくりと起き上がり、$\pi_{1i}$が大きい時(各図の一番上の線)、天井にすぐに到達する。
+
+```{r}
+fg_logistic <- function(pi0 = 15, pi1 = 0.3, game = 10) {
+  1 + (19 / (1 + pi0 * exp(-pi1 * game)))
+}
+
+expand_grid(
+  game = 0:30,
+  pi0 = c(1.5, 15, 150),
+  pi1 = c(0.1, 0.3, 0.5)) %>% 
+  mutate(y     = fg_logistic(pi0, pi1, game),
+         pi0_f = factor(str_c("pi0=", pi0))) %>%
+  ggplot(aes(game, y, group = pi1)) +
+  geom_line() + 
+  scale_y_continuous("nmoves", limits = c(0, 25)) +
+  theme_bw() +
+  facet_wrap( ~ pi0_f) 
+```
+
+ロジスティックモデルはパラメタに関して線形ではない。パラメタが分母に表れ、指数の形になっているため、結果変数をパラメタの重み付き線形結合として表すことができない。パラメタに関して線形ではないからといって、レベル2サブモデルを利用できないわけではない。下記のようなモデルを当てはめることはできる。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& 1 + \frac{19}{1 + \pi_{0i} e^{-(\pi_{1i}TIME_{ij})}} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} +  \zeta_{0i}\\
+\pi_{1i} &=& \gamma_{10} +  \zeta_{1i}\\
+\end{eqnarray}
+$$
+
+乱数を利用してこのモデルにランダム項が加わると、どのようになるのか可視化しておく。
+
+```{r}
+set.seed(1989)
+n <- 1000
+tibble(n   = 1:n,
+       gamma00 = rnorm(n, mean = 15, sd = 3),
+       gamma10 = rnorm(n, mean = 0.1, sd = 0.1)) %>% 
+  expand(nesting(n, gamma00, gamma10),
+         game = 0:30) %>% 
+  mutate(y = fg_logistic(gamma00, gamma10, game)) %>%
+  ggplot(aes(game, y, group = n)) +
+  geom_line(size = 1/4, alpha = 1/10) + 
+  scale_y_continuous(limits = c(1, 20)) +
+  theme_bw()
+```
+
+サポートサイトの該当部分には下記の注記が書かれている。
+
+> Notice, this model does not correspond to equation (6.8) in the book. Instead, it corresponds to the following equation:
+> このモデルは本の式 (6.8)に対応していないことに注意してください。代わりに、次の式に対応します。
+
+$$
+Y_{ij} = 1 + \frac{19}{(1 + \pi_{0}*exp(- (\pi_{1}+u_{1})×Time – u_{0}))} + ε_{ij}
+$$
+
+`nmoves ~ 1 + 19 / (1 + xmid * exp(-scal * game + u))`となっているが、書籍のパラメタを計算するためには、サポートサイトのコードの`u`を括弧の外におく必要があると思われる。ただ、`nlme`パッケージの式の指定方法とここで想定しているモデルが一致している自信がない。
+
+```{r}
+model.a <- nlme(
+  model  = nmoves ~ 1 + 19 / (1 + pi0 * exp(-pi1 * game)) + u,
+  fixed  = pi1 + pi0 ~ 1,
+  random = pi1 + u ~ 1 | id,
+  # start = c(pi0 = 12, pi1 = .2)という並びはエラー：Singularity in backsolve at level 0, block 1
+  start = c(pi1 = .2, pi0 = 12),
+  data = fg,
+  method = "ML"
+)
+
+summary(model.a)
+```
+
+計算されたパラメタを利用して可視化しておく。最初は低い位置にあり、時間をかけてゆっくりと曲線が立ち上がっている。つまり、ゲーム回数を重ねることで、致命的な行動は取りにくくなる。
+
+```{r}
+fixef.a <- fixef(model.a)
+df_fit_plt_a <- 
+  tibble(xmid = seq(from = 0, to = 30, by = 0.1)) %>% 
+  mutate(nmoves = 1 + 19/(1 + fixef.a[[2]]*exp(-fixef.a[[1]]*xmid)))
+
+ggplot(df_fit_plt_a, aes(xmid, nmoves)) + 
+  geom_path(size = 1) +
+  scale_x_continuous(breaks = seq(0, 30, 5)) +
+  scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0, 30)) +
+  xlab("game") + 
+  ggtitle("Model A: Unconditional logistic growth") +
+  theme_bw()
+```
+
+レベル2サブモデルに読む能力を表す予測変数`read_c`を入れたモデルを考えることもできる。ただ、`nlme`パッケージの式の指定方法とここで想定しているモデルが一致している自信がない。
+
+```{r}
+# 中心化
+fg$read_c <- fg$read - mean(fg$read)
+model.b <-
+  nlme(
+    # expの中がマイナスなのは外のマイナスを分配した形式のため
+    nmoves ~ 1 + 19 / (1 + gamma00 * exp(-gamma10 * game - gamma01 * read_c - gamma11 * read_c * game)) + u,
+    fixed = gamma10 + gamma01 + gamma11 + gamma00 ~ 1,
+    random = gamma10 + u ~ 1 | id,
+    start = c(
+      gamma10 = .12,
+      gamma01 = -.4,
+      gamma11 = .04,
+      gamma00 = 12
+    ),
+    data = fg
+  )
+summary(model.b)
+```
+
+下記で可視化しているモデルBのグラフは、書籍のグラフとサポートサイト(SAS,R)のグラフがそもそも一致してないのでどちらが正しいのかわからない。
+
+![サポートサイトのSASとRのの画像](/Users/aki/Documents/statistical_note/note_MultiLevelRegression11/sasr.png)
+
+ただ、下記のモデルを仮定しているのであれば、サポートサイトのコードとは異なると思われる。下記の合成モデルでは、説明のため残差を省略している。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& 1 + \frac{19}{1 + \pi_{0i} e^-({\pi_{1i} GAME_{ij}})} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} READ\_C_{i} + \zeta_{0i}\\
+\pi_{1i} &=& \gamma_{10} + \gamma_{11} READ\_C_{i} + \zeta_{1i}\\
+\\
+Y_{ij} &=& 1 + \frac{19}{1 + (\gamma_{00} + \gamma_{01} READ\_C_{i}) e^-({(\gamma_{10} + \gamma_{11} READ\_C_{i}) GAME_{ij}})} \\
+Y_{ij} &=& 1 + \frac{19}{1 + (\gamma_{00} + \gamma_{01} READ\_C_{i}) e^-({\gamma_{10}GAME_{ij} + \gamma_{11} READ\_C_{i}× GAME_{ij}})} \\
+Y_{ij} &=& 1 + \frac{19}{1 + \left[\gamma_{00} e^-({\gamma_{10}GAME_{ij} + \gamma_{11} READ\_C_{i}× GAME_{ij}}) \right] + \left[\gamma_{01} READ\_C_{i} e^-({\gamma_{10}GAME_{ij} + \gamma_{11} READ\_C_{i}× GAME_{ij}})\right]} \\
+\end{eqnarray}
+$$
+
+左がサポートサイトのコードで可視化したもので、右がおそらく仮定されているマルチレベルモデルで可視化したもの。読む能力については、標本平均からプラスマイナス2標準偏差を使って典型的な個人を表している。読む能力が高いと、27ゲーム後では、致命的な行動は取りにくくなっている。
+
+```{r}
+fixef.b <- fixef(model.b)
+df_fit_plt_b <- 
+  expand_grid(xmid = seq(from = 0, to = 30, by = 0.1),
+              # 2*sd(fg$read_c)=1.55
+              read_c = c(-1,1)*1.58) %>% 
+  mutate(type = ifelse(read_c >= 0, "High Reading Level", "Low Reading Level"),
+         nmoves_site = 1 + 19/(1+fixef.b[[4]]*exp(-fixef.b[[1]]*xmid - fixef.b[[2]]*read_c - fixef.b[[3]]*read_c*xmid)),
+         nmoves_book = 1 + (19 / (1 + (fixef.b[[4]] + fixef.b[[2]]*read_c) * exp(-1 * (fixef.b[[1]]*xmid + fixef.b[[3]]*read_c*xmid))))
+         )
+p1 <- ggplot(df_fit_plt_b, aes(xmid, nmoves_site, col = type)) + 
+  geom_path(size = 1) +
+  scale_x_continuous(breaks = seq(0, 30, 5)) +
+  scale_y_continuous(breaks = seq(0, 30, 5)) +
+  xlab("game") + 
+  ggtitle("Model B: Fitted logistic growth by reading level") +
+  theme_bw() + 
+  theme(legend.position = "none")
+
+p2 <- ggplot(df_fit_plt_b, aes(xmid, nmoves_book, col = type)) + 
+  geom_path(size = 1) +
+  scale_x_continuous(breaks = seq(0, 30, 5)) +
+  scale_y_continuous(breaks = seq(0, 30, 5)) +
+  xlab("game") + 
+  ggtitle("Model B: Fitted logistic growth by reading level") +
+  theme_bw()
+p1 | p2
+```
+
+
+## 参考文献
+
+- [縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)
+- [Applied Longitudinal Data Analysis: Modeling Change and Event Occurrence](https://www.amazon.com/Applied-Longitudinal-Data-Analysis-Occurrence/dp/B017YBZFW0)
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+- [Chapter 9 Mixed Effects Models](https://glennwilliams.me/r4psych/mixed-effects-models.html)
+- [Applied longitudinal data analysis in brms and the tidyverse](https://bookdown.org/content/4253/index.html)
+

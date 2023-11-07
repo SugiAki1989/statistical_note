@@ -1,0 +1,233 @@
+---
+title: "マルチレベルモモデル(線形混合モデル)と固定効果モデル"
+pagetitle: "マルチレベルモモデル(線形混合モデル)と固定効果モデル"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+マルチレベルモモデル(線形混合モデル)と固定効果モデルの違いがいつもわからなくなるので、違いに関するまとめ。因果推論の勉強をしていると固定効果モデルがDIDあたりと同じタイミングで説明されるものの、この固定効果モデルがマルチレベルモデルとどう違うのか、いつも混乱するのでまとめておく。下記が非常にわかりやすかった。ありがとうございました。
+
+- [固定効果とランダム効果：統計学と計量経済学での定義](https://keita43a.hatenablog.com/entry/2020/05/20/042845)
+
+自分の解釈も入っているので、上記の参考サイトと異なる部分があるかもしれません。また、あまり自身もないので、参考サイトを信頼したほうが良いかと思います。
+
+## モデルのいろは
+
+パネルデータの対して用いられるモデルを目指している点では同じはず。$y_{it}$が目的変数、$x_{it}$が説明変数、$v_{it}$が誤差項。そして、誤差項が$v_{it}=μ_{i}+ε_{it}$として表現される。$μ_{i}$が各個人などのまとまりの固定効果で、$ε_{it}$が平均0の分布を持つ誤差項。
+
+$$
+y_{it} = a + x_{it}'\beta  + \alpha_{it}, \alpha_{it}=μ_{i}+ε_{it}
+$$
+
+固定効果が、各個人ごとに切片として推定される場合は固定効果、誤差項の一部としてパラメタを持つ分布として推定される場合はランダム効果と呼ぶ。マルチレベルモデルは、切片や係数を固定なのか、ランダムなのか、モデルを柔軟に調整できるので、経済系の固定効果モデルは、このうちの1つとして表現できると思われる。
+
+直接観察できない個人に関する固定的な効果$\alpha$が変数$Y$に影響を与え、$X$とも相関していると想定される場合、$\alpha$がモデルに含まれないと、内生生バイアスが生じてしまう。つまり、固定効果$\alpha$を含めることで、$X$への内生生バイアスをコントロールできる。
+
+呼び方に関しては、経済系の方は固定効果モデル、ランダム係数モデルと呼ぶ一方で、心理系の方はマルチレベルモデル、線形混合モデル、階層線形モデル、混合効果モデルとかで呼んでいる。心理系の方は、もしかしたら細かい点で異なる部分があるかもしれない。
+
+Rのパッケージに関しては、経済系の方は`plm`パッケージ、心理系は`nlme`や`lme4`を利用している気がする。
+
+推定法に関しても違いがある。経済系での固定効果モデルの数理の説明を読むと一般化最小2乗法で説明されているケースが個人的には多く見られる。一方で、マルチレベルモデルは最尤法である。最尤法でマルチレベルモデルを推定する話については、このマルチレベルモデルのシリーズで扱ってきたので、そちらを参照願う。
+
+## 固定効果モデルの説明
+
+おまけ程度に固定効果モデルの説明をまとめておく。ここでは、個人、企業、集団などのまとまりのことはユニットと表現する。DIDの流れで説明されることが多いと思うが、それはDIDの欠点を補ってくれるからである。DIDの問題として、ユニットの状態に影響を与える可能性がある要因は観測できないケースが多い。介入前後の観測値を利用するが、その前後でユニット内で変化が生じているケースがありうる。この場合、介入の効果はユニットが変化することでの影響を内生してしまい、介入効果にバイアスが含まれる。
+
+失業者に職業訓練を与えるプログラムを提供することで、賃金の増加にどの程度の効果があるのか。この例はよく利用されるが、ここでもその例にそって、上記の問題を具体的に説明しておく。失業者の賃金に与えるよう影響は、性別、年齢、学歴、職歴、家族有無など様々あるが、「ビジネス能力」という漠然としたものは観察できない。代替変数を利用してモデリングする場合もあるが、ここでは観測できていないとする。また、この能力は賃金に影響しつつ、学歴や職歴、プログラムの受講有無にも影響する。そこで利用するのが固定効果である。個人ごとの能力は時間が経過しても一定と仮定して、個人をダミー変数としてモデルに取り込む。時間が経過してもあまり変化しないのであれば、時間が経過しても一定と言えるかもしれないが、この仮定をおけるかどうかは難しい。
+
+このようにして、モデルに固定効果を取り込むことで、観測できないが影響を与える重要な要因をモデルに反映できる。複数時点でデータを取得できるのであれば、ユニット固有の特徴を個別に推定して、固定効果を消し去るモデルが固定効果モデル。100ユニットあれば、99のダミー変数をモデルに含める。
+
+推定方法としては、ダミー変数をモデルに含めOLSで推定する方法やユニットごとに平均値を引いたデータでモデルを推定する平均値除去法も存在する。これらを検討せずパネルデータにそのまま回帰モデルを当てはまる方法をプール回帰分析と呼ばれる。また、ユニットをまとめて推定することになるので、ユニット内(ユニット内変動)のデータが相関してしまう。このため、通常の標準誤差ではなく、これらの問題を考慮したロバスト標準誤差が利用される。
+
+固定効果モデルが因果的な効果を推定できる識別条件としては「観測できない固定効果を除去すると説明変数と誤差項が無相関となる」がある。当たり前ではあるが、固定効果で観測できないユニット固有の効果を除去しても、誤差項と相関してしまうと、バイアスが存在することになる。当たり前とは言いつつも判断は難しい。
+
+例えば、観察できない変数が、時間経過とともに変化しているかもしれない。「警察の予算が増えると、犯罪は減るのか」という問題に注目しているとする。ユニットは市区町村とする。識別条件を満たさない1つの変数が好景気となる。好景気は時間経過とともに、景気が上昇することではあるが、好景気だと市区町村の予算が増え続け、そして、犯罪は一般的に起こりにくくなる。各市区町村を固定効果としてモデルに取り込んでいても、実際は時間経過とともに変化しているため、因果効果を識別できない。
+
+この問題を解決する方法として、時点トレンド(年固定効果モデル-Year Fixed Effect)をモデルに取り込む。トレンドのう良さが2乗の関係にあるのであれば、トレンドを2乗した変数を入れ、時点とユニットごとで異なるのであれば、交互作用を入れればよい。施策の効果がずれるのであれば、ラグ変数として、時間差の効果を表現する。
+
+他にも、目的変数に依存して説明変数が決定される場合、同時決定性という問題が存在する。これは予算を前年度の犯罪率をもとに決める場合のことで、犯罪率が高ければ予算が増え、犯罪率が低ければ予算は減るという関係を意味する。予算の上昇によって、犯罪率が低下した因果関係を想定しているが、メカニズムとしては、犯罪率が高ければ予算が増え、犯罪率が低ければ予算は減るという関係があるため因果を見誤ってしまう。
+
+## 固定効果モデルの参考
+
+下記のサイトを参考に固定効果と年固定効果が含まれるパネルデータを作成する。
+
+- [計量経済学5：差分の差分(DID)法](https://michihito-ando.github.io/econome_ml_with_R/09_DID.html)
+- [差分の差分法(DID)](https://sugiaki1989.github.io/statistical_note/note_CausalInference04/note_CausalInference04.html)
+- [Topic 6 差分の差分法](https://yukiyanai.github.io/econometrics2/difference-in-differences.html#%E6%9C%80%E4%BD%8E%E8%B3%83%E9%87%91%E3%81%AE%E5%BD%B1%E9%9F%BF)
+
+能力が均等に分布した個体の所得(`income`)をアウトカムとした分析を行う。処置変数は職業訓練(`training`)である。1年目と2年目の2期間DIDのパネルデータを作成する。
+
+
+1年目は、誰も職業訓練を受けず、所得は、定数項、能力、誤差項のみによって決まる。2年目は、能力を部分的に反映した適正試験(`score`)が180点以上であれば職業訓練(`training`)を受けられる。職業訓練(`training`)の介入効果は500万円の増加。ここで、職業訓練(`training`)を受けた個体が処置群、受けなかった個体が対照群となる。、また、年ショックとして乱数を加えておく。
+
+データ生成過程は下記の通り。
+
+```{r}
+library(tidyverse)
+library(estimatr)
+
+set.seed(1989)
+n <- 1000
+ability <- floor(runif(n, min = 1, max = 100))
+df <- tibble(ID = 1:n, ability)
+
+# 1年目
+df0 <- df %>% mutate(
+  year = 0,
+  training = 0,
+  income = 200 + 10*ability + rnorm(n, mean = 0, sd = 50)
+  ) 
+
+# 2年目
+## 職業訓練フラグ(training)
+## 条件: 
+## abilityをlogで非線形に変換しscoreが180点以上(約20%が該当)であればtrainingを受ける
+## abilityとscoreの関係は非線形
+## trainingの介入効果はincomeを500引き上げる
+df1 <- df %>% mutate(
+  year = 1,
+  score = 30 * log10(ability) + rnorm(n, mean = 115, sd = 10),
+  training = case_when(score >= 180 ~ 1, TRUE ~ 0),
+  income = 200 + 10*ability + 500 * training + 
+    # year effectを明示するため*year(=1)としている
+    rnorm(n, mean = 100, sd = 25) * year + 
+    rnorm(n, mean = 0, sd = 50)
+  )
+
+# フラグ関係を処理する
+df_binded <- bind_rows(df0, df1)
+df_treated <- df_binded %>% filter(training == 1) %>% select(ID)%>% mutate(treated = 1)
+df_panel <- left_join(df_binded, df_treated, by ="ID") %>% 
+  mutate(
+    treated = replace(treated, which(is.na(treated)), 0),
+    ID_fctr = as.factor(ID),
+    year_fctr = as.factor(year)
+    ) %>% 
+  arrange(ID)
+
+head(df_panel,20)
+```
+
+モデリングを行う。まずは固定効果と年固定効果がないモデルで試して、推定が誤ることを確認する。職業訓練(`training`)の介入効果は500万円の増加なので、過大に推定している。
+
+```{r}
+# 固定効果と年固定効果が足りていないので推定が誤っている
+lm_robust(
+  income ~ training,
+  data = df_panel,
+  se_type = "stata"
+)
+```
+
+次に固定効果として、個体効果を追加する。介入効果の500万円に近くはなったが、年固定効果が欠落しているので、まだ過大推定している。
+
+```{r}
+# 年固定効果が足りていないので推定が誤っている
+lm_robust(
+  income ~ training,
+  fixed_effects = ~ ID_fctr,
+  data = df_panel,
+  se_type = "stata"
+)
+```
+
+逆のパターンでも同様である。
+
+```{r}
+# 固定効果が足りていないので推定が誤っている
+lm_robust(
+  income ~ training,
+  fixed_effects = ~ year_fctr,
+  data = df_panel,
+  se_type = "stata"
+)
+```
+
+目的は同じなので、書き方はどれでもよい。特定のパラメタの係数を確認したいなどあれば、それに適している方法で記載する。
+
+```{r}
+# 固定効果と年固定効果が足りているので推定が誤っていない
+# DID with a two-by-two DID model (オーソドックスなDIDモデル)
+DID_robust1 <- lm_robust(income ~ treated + year + treated:year,
+                         data = df_panel,
+                         clusters = ID,
+                         se_type = "stata")
+
+# DID with two-way FE model (年ダミー変数は活用し、個体固定効果はlm_robustで指定） 
+DID_robust2 <- lm_robust(income ~ treated:year + year,
+                         fixed_effects = ~ ID, #個体固定効果
+                         data = df_panel,
+                         clusters = ID,
+                         se_type = "stata")
+
+# DID with two-way FE model（個体固定効果と年固定効果をlm_robustで指定）
+DID_robust3 <- lm_robust(income ~ treated:year,
+                         fixed_effects = ~ ID + year, #個体固定効果と年固定効果
+                         data = df_panel,
+                         clusters = ID,
+                         se_type = "stata")
+list(
+  DID_robust1,
+  DID_robust2,
+  DID_robust3
+  )
+```
+
+`training`を使っても同様に推定できる。
+
+```{r}
+# 介入効果を測定したいので、treatedではなくtrainingを利用する
+# treatedだと介入前も1が付与されるため、介入効果がわからない
+DID_robust4 <- lm_robust(
+  income ~ training,
+  fixed_effects = ~ ID_fctr + year_fctr, #固定効果と年固定効果
+  clusters = ID_fctr,
+  data = df_panel,
+  se_type = "stata"
+)
+# 上と同じ
+DID_robust5 <- lm_robust(
+   income ~ training + ID_fctr + year_fctr,
+   clusters = ID_fctr,
+   data = df_panel,
+   se_type = "stata"
+ ) %>% 
+   tidy() %>% 
+   filter(term == 'training')
+
+list(
+  DID_robust4,
+  DID_robust5
+  )
+```
+
+
+## 参考文献
+
+- [固定効果とランダム効果：統計学と計量経済学での定義](https://keita43a.hatenablog.com/entry/2020/05/20/042845)

@@ -1,0 +1,579 @@
+---
+title: "最小2乗推定量の性質について"
+pagetitle: "最小2乗推定量の性質について"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+ここではシンプルな単回帰モデルを利用して、モデルが仮定する内容を元に、最小2乗推定量の性質についてまとめておく。下記の書籍を参考にしており、自分が理解するために、参考書の行間を埋めたメモです。。
+
+- [44の例題で学ぶ計量経済学](https://www.ohmsha.co.jp/book/9784274069314/)
+- [Rによる計量経済学　第2版](https://www.ohmsha.co.jp/book/9784274222658/)
+
+## 回帰モデルの仮定と最小2乗推定量
+
+回帰モデルは誤差項$u_{i}$を確率変数として考える。
+
+$$
+Y_{i} = \alpha + \beta X_{i} + u_{i}
+$$
+
+そのため、回帰モデルを実行するときは、下記の過程が満たされていることを前提としている。前提なので、満たされなくても計算は可能である。ただ、最小2乗推定量の望ましい性質が成り立たないため、様々な回帰モデルの結果に関する解釈ができなくなる。
+
+- 仮定1:$X_{i}$は非確率変数
+- 仮定2:$E[u_{i}] = 0$
+- 仮定3:$V[u_{i}] = E[u_{i}^{2}] = \sigma^{2}$
+- 仮定4:$Cov[u_{i},u_{j}] = E[u_{i}u_{j}] = 0$
+- 仮定5:$u_{i} \sim N(0, \sigma^{2})$
+
+## 最小2乗推定量の期待値$E$
+
+単回帰モデルの切片と傾きは最小2乗法のもとで、下記の通り与えられる。
+
+$$
+\begin{eqnarray}
+\hat{\beta} &=& \frac{S_{xy}}{S_{xx}} = \frac{\sum(X_{i}-\bar{X})(Y_{i}-\bar{Y})}{\sum(X_{i}-\bar{X})^{2}} \\
+\hat{\alpha} &=&  \bar{Y} - \hat{\beta}\bar{X}
+\end{eqnarray}
+$$
+
+### $\hat{\beta}$の公式を分解する
+
+偏差積和$S_{xy}$は$\sum_{i}(X_{i} - \bar{X}) = 0$という性質を使うと、下記のように変形できる。
+
+$$
+S_{xy} = \sum(X_{i}-\bar{X})(Y_{i}-\bar{Y}) = \sum(X_{i}-\bar{X})Y_{i}
+$$
+
+上記の変形は下記のように行っている。
+
+$$
+\begin{eqnarray}
+S_{xy} 
+&=&  \sum(X_{i}-\bar{X})(Y_{i}-\bar{Y}) \\
+&=& \sum( (X_{i}-\bar{X})Y_{i} - (X_{i}-\bar{X})\bar{Y}) \\
+&=& \sum(X_{i}-\bar{X})Y_{i} - \bar{Y}\overbrace{\sum(X_{i}-\bar{X})}^{=0} \\
+&=&  \sum(X_{i}-\bar{X})Y_{i}
+\end{eqnarray}
+$$
+
+これは$X,Y$に限ることではなく、下記のようなケースでも同じである。
+
+$$
+S_{x\epsilon} = \sum(X_{i}-\bar{X})(\epsilon_{i}-\bar{\epsilon}) = \sum(X_{i}-\bar{X})\epsilon_{i}
+$$
+
+これを利用して$\hat{\beta}$を書き直すと、重み$w_{i}$と$Y_{i}$の掛け合わせで$\beta$が計算できることがわかる。
+
+$$
+\hat{\beta} = \frac{S_{xy}}{S_{xx}} = \frac{\sum(X_{i}-\bar{X})Y_{i}}{\sum(X_{i}-\bar{X})^{2}} = \sum \overbrace{ \left\{ \frac{(X_{i}-\bar{X})}{\sum(X_{i}-\bar{X})^{2}} \right\}}^{w_{i}} Y_{i} = \sum w_{i}Y_{i}
+$$
+
+ここでは、仮定1の「$X_{i}$は非確率変数」を利用すると、回帰モデルの$\beta$は観測値$Y_{i}$の線形結合で表される。つまり線形推定量である。また、重み$w_{i}$は下記の性質を持つ。
+
+$$
+\sum w_{i} =
+\sum \left\{ \frac{(X_{i}-\bar{X})}{\sum (X_{i}-\bar{X})^2}\right\} = 
+\frac{\overbrace{\sum(X_{i}-\bar{X})}^{=0}}{\sum (X_{i}-\bar{X})^2} = 
+0
+$$
+
+$$
+\sum w_{i}X_{i} = 
+\sum \left\{ \frac{(X_{i}-\bar{X})}{\sum (X_{i}-\bar{X})^2}\right\}X_{i} = 
+\frac{\sum(X_{i}-\bar{X})X_{i}}{\sum (X_{i}-\bar{X})^2} = 
+\frac{\overbrace{\sum(X_{i}-\bar{X})X_{i}}^{\sum(X_{i} - \bar{X})^{2}}}{\sum (X_{i}-\bar{X})^2} = 
+1
+$$
+
+$$
+\sum w_{i}^{2} =
+\sum \left\{ \frac{(X_{i}-\bar{X})}{\sum (X_{i}-\bar{X})^2}\right\}^2 = 
+\frac{\sum (X_{i}-\bar{X})^2}{\left\{\sum(X_{i}-\bar{X})^2\right\}^{2}} = 
+\frac{1}{S_{xx}}
+$$
+更に、$\beta = \sum w_{i}Y_{i}$に$Y_{i}=\alpha + \beta X_{i} + u_{i}$を代入し、上記の$w_{i}$の性質を利用すると、
+
+$$
+\hat{\beta} = \sum w_{i}Y_{i} = 
+\sum w_{i}(\alpha + \beta X_{i} + u_{i}) = 
+\alpha \overbrace{\sum w_{i}}^{=0} + \beta \overbrace{\sum w_{i} X_{i}}^{=1} + \sum w_{i}u_{i} = 
+\beta + \sum w_{i}u_{i}
+$$
+
+推定値$\hat{\beta}$は、$\beta$と重みと誤差項$\sum w_{i}u_{i}$の足し合わせで表現できる。
+
+### $\hat{\alpha}$の公式を分解する
+
+続いて、$\hat{\alpha}$も$\hat{\beta}$と同じく観測値の線形推定量として表現できるかどうか、確認する。重み$w_{i}^{*}$に含まれる$w_{i}$も定数より、重み$w_{i}^{*}$も定数。
+
+$$
+\hat{\alpha} =
+\bar{Y} - \hat{\beta}\bar{X} = 
+\sum \frac{Y_{i}}{n} - \bar{X} \sum w_{i}Y_{i} = 
+\sum \overbrace{\left( \frac{1}{n} - \bar{X}w_{i}\right)}^{=w_{i}^{*}}Y_{i} = 
+\sum w_{i}^{*}Y_{i}
+$$
+
+先程同様、重み$w_{i}^{*}$にも下記の性質が成り立つ。
+
+$$
+\sum w_{i}^{*} = 
+\sum \left(\frac{1}{n} - \bar{X}w_{i} \right) =
+\overbrace{\frac{1}{n}\sum }^{=1} - \bar{X} \overbrace{\sum w_{i}}^{=0} = 
+1
+$$
+
+$$
+\sum w_{i}^{*} X_{i} = 
+\sum \left(\frac{1}{n} - \bar{X}w_{i} \right) X_{i} = 
+\sum \frac{X_i{}}{n} - \bar{X} \overbrace{\sum w_{i}X_{i}}^{=1} =
+\bar{X} - \bar{X} = 
+0\
+$$
+
+$$
+\begin{eqnarray}
+\sum w_{i}^{*2} &=& \sum \left(\frac{1}{n} - \bar{X}w_{i} \right)^2 \\
+&=& \sum \frac{1}{n^{2}} - \frac{2}{n}\bar{X} \overbrace{\sum w_{i}}^{=0} + \bar{X}^{2}\overbrace{\sum w_{i}^{2}}^{=1/S_{xx}} \\
+&=& \frac{1}{n} + \frac{\bar{X}^{2}}{S_{xx}} \\
+&=& \frac{\overbrace{S_{xx}}^{= \sum X_{i}^{2}- n \bar{X}^{2}} + n\bar{X}^{2}}{n S_{xx}} \\
+&=& \frac{\sum X_{i}^{2}}{n S_{xx}}
+\end{eqnarray}
+$$
+
+$$
+\hat{\alpha} = 
+\sum w_{i}^{*} Y_{i} = 
+\alpha \overbrace{\sum w_{i}^{*}}^{=1} + \beta \overbrace{\sum w_{i}^{*} X_{i}}^{=0} + \sum w_{i}^{*}u_{i} = 
+\alpha + \sum w_{i}^{*}u_{i}
+$$
+
+推定値$\hat{\alpha}$は、$\alpha$と重みと誤差項$\sum w_{i}^{*}u_{i}$の足し合わせで表現できる。
+
+### 不偏性の確認
+
+さきほど計算して導いた下記の切片と回帰係数に対して期待値をとって不偏性が成り立つかを確認する。
+
+$$
+\begin{eqnarray}
+\hat{\beta} &=& \beta + \sum w_{i}u_{i} \\
+\hat{\alpha} &=& \alpha + \sum w_{i}^{*}u_{i}
+\end{eqnarray}
+$$
+
+$w_{i}, w_{i}^{*}$はいずれも仮定1より非確率変数(=const)であり、仮定2の$E(u_{i})=0$が満たされるのであれば、最小2乗推定量は線形不偏推定量であり、不偏性が成り立つ。
+
+- <span style="color: red;"> 仮定1:$X_{i}$は非確率変数</span>
+- <span style="color: red;"> 仮定2:$E[u_{i}] = 0$</span>
+
+$$
+\begin{eqnarray}
+E[\hat{\alpha}] &=& \alpha + \sum \overbrace{w_{i}^{*}}^{=const}\overbrace{E[u_{i}]}^{=0} = \alpha \\
+E[\hat{\beta}] &=& \beta + \sum \overbrace{w_{i}}^{=const} \overbrace{E[u_{i}]}^{=0} = \beta 
+\end{eqnarray}
+$$
+
+## 最小2乗推定量の分散$V$
+
+次は、最小2乗推定量の分散$V(\hat{\beta})$を確認する。$\hat{\beta}=\beta + \sum w_{i}u_{i}$、$E[\hat{\beta}] = \beta$を利用すると、下記の通り変形できる。
+
+$$
+\begin{eqnarray}
+V[\hat{\beta}] &=& E\left[\left\{\hat{\beta} - E[\hat{\beta}]\right\}^{2}\right] \\
+&=& E\left[\left\{\beta + \sum w_{i}u_{i} - \beta \right\}^{2}\right] \\
+&=& E\left[\left\{\sum w_{i}u_{i}\right\}^{2}\right] \\
+&=& E\left[\sum_{i} w_{i}^{2}u_{i}^{2} + \sum_{i \ne j}\sum_{j \ne i} w_{i}w_{j}u_{i}u_{j}\right]
+\end{eqnarray}
+$$
+
+ここで下記の仮定3、仮定4が成り立つのであれば、
+
+- <span style="color: red;">仮定3:$V[u_{i}] = E[u_{i}^{2}] = \sigma^{2}$</span>
+- <span style="color: red;">仮定4:$Cov[u_{i},u_{j}] = E[u_{i}u_{j}] = 0$</span>
+
+$$
+\begin{eqnarray}
+V[\hat{\beta}] &=& E\left[\sum_{i} w_{i}^{2}u_{i}^{2} + \sum_{i \ne j}\sum_{j \ne i} w_{i}w_{j}u_{i}u_{j}\right] \\
+&=& \sum_{i} w_{i}^{2}\overbrace{E[u_{i}^{2}]}^{=\sigma^{2}} + \sum_{i \ne j}\sum_{j \ne i} w_{i}w_{j}\overbrace{E[u_{i}u_{j}]}^{=0} \\
+&=& \sigma^{2} \overbrace{\sum w_{i}^{2}}^{1/S_{xx}} \\
+&=& \frac{\sigma^{2}}{S_{xx}}
+\end{eqnarray}
+$$
+
+また、$\hat{\alpha} = \alpha + \sum w_{i}^{*}u_{i}$、$E[\hat{\alpha}] = \alpha$を利用して、
+
+$$
+\begin{eqnarray}
+V[\hat{\alpha}] &=& E\left[\left\{\hat{\alpha} - E[\hat{\alpha}]\right\}^{2}\right] \\
+&=& E\left[\alpha + \sum w_{i}^{*}u_{i} - \alpha \right] \\
+&=& E\left[\sum w_{i}^{*}u_{i} \right] \\
+&=& \sum_{i} w_{i}^{*2}\overbrace{E[u_{i}^{2}]}^{=\sigma^{2}} + \sum_{i \ne j}\sum_{j \ne i} w_{i}^{*}w_{j}^{*}\overbrace{E[u_{i}u_{j}]}^{=0} \\
+&=& \sigma^{2} \overbrace{\sum w_{i}^{*2}}^{\frac{\sum X_{i}^{2}}{n S_{xx}}} \\
+&=& \sigma^{2} \left(\frac{\sum X_{i}^{2}}{n S_{xx}} \right)
+\end{eqnarray}
+$$
+
+### 最小分散線形不偏推定量
+
+期待値の不偏性は下記のとおり、仮定が満たされるのであれば成立する。
+
+$$
+\begin{eqnarray}
+E[\hat{\alpha}]= \alpha + \sum \overbrace{w_{i}^{*}}^{=const}\overbrace{E[u_{i}]}^{=0} = \alpha \\
+E[\hat{\beta}] = \beta + \sum \overbrace{w_{i}}^{=const} \overbrace{E[u_{i}]}^{=0} = \beta 
+\end{eqnarray}
+$$
+
+ここで線形推定量を任意の定数を利用して、$\tilde{\beta} = \sum c_{i} Y_{i}, \tilde{\alpha} = \sum c_{i}^{*} Y_{i}$とかける。これが不偏性を持つためには$E[\tilde{\beta}] = \beta, E[\tilde{\alpha}] = \alpha$となる必要がある。ここで、任意定数が
+
+$$
+\begin{eqnarray}
+c_{i} &=& w_{i} + d_{i} \\
+c_{i}^{*} &=& w_{i}^{*} + d_{i}^{*} \\
+\end{eqnarray}
+$$
+
+とすると、下記のように$\tilde{\beta}$を変形できる。
+
+$$
+\begin{eqnarray}
+\tilde{\beta} = \sum c_{i} Y_{i} &=& \sum c_{i}(\alpha + \beta X_{i} + u_{i}) \\
+&=& \alpha \sum c_{i} + \beta \sum c_{i} X_{i} + \sum c_{i} u_{i} \\
+&=& \alpha \sum (w_{i} + d_{i}) + \beta \sum (w_{i} + d_{i}) X_{i} + \sum (w_{i} + d_{i}) u_{i}
+\end{eqnarray}
+$$
+
+これから$E[\tilde{\beta}]$の期待値を計算すると、仮定1より$w_{i}, d_{i}, X_{i}$は定数として、
+
+$$
+\begin{eqnarray}
+E[\tilde{\beta}] &=& \alpha \sum (w_{i} + d_{i}) + \beta \sum (w_{i} + d_{i}) X_{i} + \sum (w_{i} + d_{i}) \overbrace{E[u_{i}]}^{=0} \\
+&=& \alpha \sum (w_{i} + d_{i}) + \beta \sum (w_{i} + d_{i}) X_{i} \\
+&=& \alpha \overbrace{\sum w_{i}}^{0} + \alpha \sum d_{i} + \beta \overbrace{\sum w_{i} X_{i}}^{=1} + \beta \sum d_{i} X_{i} \\
+&=& \beta + \alpha \sum d_{i} + \beta \sum d_{i} X_{i}
+\end{eqnarray}
+$$
+
+であり、同様に$E[\tilde{\alpha}]$の期待値を計算すると、
+
+$$
+\begin{eqnarray}
+E[\tilde{\alpha}] &=& \alpha \sum (w_{i}^{*} + d_{i}^{*}) + \beta \sum (w_{i}^{*} + d_{i}^{*}) X_{i} + \sum (w_{i}^{*} + d_{i}) \overbrace{E[u_{i}]}^{=0} \\
+&=& \alpha \sum (w_{i}^{*} + d_{i}^{*}) + \beta \sum (w_{i}^{*} + d_{i}^{*}) X_{i} \\
+&=& \alpha + \alpha \sum d_{i}^{*} + \beta \sum d_{i}^{*} X_{i} \\
+\end{eqnarray}
+$$
+
+となる。まとめると下記が得られる。
+
+$$
+\begin{eqnarray}
+E[\tilde{\alpha}] &=& \alpha + \alpha \sum d_{i}^{*} + \beta \sum d_{i}^{*} X_{i} \\
+E[\tilde{\beta}] &=& \beta + \alpha \sum d_{i} + \beta \sum d_{i} X_{i}
+\end{eqnarray}
+$$
+
+これらが不偏性を持つためには、$E[\tilde{\alpha}]$について、
+
+$$
+\begin{eqnarray}
+\sum d_{i}^{*} = 0 \quad and \quad \sum d_{i}^{*} X_{i} = 0
+\end{eqnarray}
+$$
+
+であり、$E[\tilde{\beta}]$について、
+
+$$
+\begin{eqnarray}
+\sum d_{i} = 0 \quad and \quad \sum d_{i} X_{i} = 0
+\end{eqnarray}
+$$
+
+が必要になる。
+
+次に分散も調べる。$V[\hat{\alpha}], V[\hat{\beta}]$を利用して線形不偏推定量の中での最も分散が小さい推定量であることを示す。まず任意の定数を用意する。
+
+$$
+\begin{eqnarray}
+c_{i} &=& w_{i} + d_{i} \\
+c_{i}^{*} &=& w_{i}^{*} + d_{i}^{*} \\
+\end{eqnarray}
+$$
+
+これらの定数からなる線形不偏推定量の分散を考える。
+
+$$
+\begin{eqnarray}
+\tilde{\beta} = \sum c_{i} Y_{i} \\
+\tilde{\alpha} = \sum c_{i}^{*} Y_{i}
+\end{eqnarray}
+$$
+
+
+$$
+\begin{eqnarray}
+V[\tilde{\beta}] &=& E\left[\left\{\tilde{\beta} - E[\tilde{\beta}]\right\}^{2}\right] \\
+&=& E\left[\left\{\sum c_{i} Y_{i} - E[\tilde{\beta}]\right\}^{2}\right] \\
+&=& E\left[\left\{\sum c_{i} (\alpha + \beta X_{i} + u_{i}) - E[\tilde{\beta}]\right\}^{2}\right] \\
+&=& E\left[\left\{\alpha \sum c_{i} + \beta \sum c_{i} X_{i} + \sum c_{i} u_{i}) - E[\tilde{\beta}]\right\}^{2}\right] \\
+&=& E\left[\left\{\alpha \sum (w_{i} + d_{i}) + \beta \sum (w_{i} + d_{i}) X_{i} + \sum (w_{i} + d_{i}) u_{i}) - E[\tilde{\beta}]\right\}^{2}\right] \\
+&=& E\left[\left\{ \alpha \overbrace{\sum d_{i}}^{=0} + \beta + \beta \overbrace{\sum d_{i} X_{i}}^{=0} + \sum w_{i}u_{i} + \sum d_{i} u_{i} - \beta \right\}^{2} \right] \\
+&=& E\left[\left\{\sum w_{i}u_{i} + \sum d_{i} u_{i} \right\}^{2} \right] \\
+&=& E\left[\left\{\sum (w_{i} + d_{i}) u_{i} \right\}^{2} \right] \\
+&=& E\left[\left\{\sum c_{i} u_{i} \right\}^{2} \right] \\
+&=& E\left[\sum_{i} c_{i}^{2} u_{i}^{2} + \sum_{i \ne j}\sum_{j \ne i} c_{i}c_{j}u_{i}u_{j} \right] \\
+&=& \sum_{i} c_{i}^{2} \overbrace{E\left[u_{i}^{2}\right]}^{=\sigma^{2}} + \sum_{i \ne j}\sum_{j \ne i} c_{i}c_{j}\overbrace{E\left[u_{i}u_{j}\right]}^{=0} \\
+&=& \sigma^{2} \sum_{i} c_{i}^{2} \\
+\end{eqnarray}
+$$
+
+
+すごく無駄に長くなっているが、さらに下記のように計算できる。
+
+$$
+\begin{eqnarray}
+V[\tilde{\beta}] &=& \sigma^{2} \sum c_{i}^{2} \\
+&=& \sigma^{2} \sum (w_{i} + d_{i})^{2} \\
+&=& \sigma^{2} \overbrace{\sum w_{i}^{2}}^{1/S_{xx}} + 2 \sigma^{2} \sum w_{i} d_{i} + \sigma^{2} \sum d_{i}^{2} 
+\end{eqnarray}
+$$
+
+ここで、$w_{i} d_{i}$は$\sum d_{i} = 0, \sum d_{i} X_{i} = 0$、$w_{i} = \frac{(X_{i} - \bar{X})}{\sum (X_{i} - \bar{X})^{2}}$を利用して
+
+$$
+\begin{eqnarray}
+\sum w_{i} d_{i} &=& \sum \frac{(X_{i} - \bar{X})}{\sum (X_{i} - \bar{X})^{2}} d_{i}\\
+&=& \frac{\sum (X_{i} - \bar{X})d_{i}}{S_{xx}} \\
+&=& \frac{\overbrace{\sum X_{i}d_{i}}^{=0} - \bar{X} \overbrace{\sum d_{i}}^{=0}}{S_{xx}} \\
+&=& 0
+\end{eqnarray}
+$$
+
+最小2乗推定量$\hat{\beta}$の分散は任意の線形不偏推定量の分散の下限になっているため、最小2乗推定量は最小分散線形不偏推定量となる。
+
+$$
+\begin{eqnarray}
+V[\tilde{\beta}] 
+&=& \frac{\sigma^{2}}{S_{xx}} + 0 + \sigma^{2} \overbrace{\sum d_{i}^{2}}^{>0} \\
+&=& \frac{\sigma^{2}}{S_{xx}} + \sigma^{2} \sum d_{i}^{2} \ge \frac{\sigma^{2}}{S_{xx}} = V[\hat{\beta}] 
+\end{eqnarray}
+$$
+
+同様に$\hat{\alpha}$の分散も示すことができる。つまり、仮定1,2,3,4が満たされていれば、最小2乗推定量が最小分散線形不偏推定量となり、これをガウスマルコフの定理と呼ぶ。
+
+- <span style="color: red;">仮定1:$X_{i}$は非確率変数</span>
+- <span style="color: red;">仮定2:$E[u_{i}] = 0$</span>
+- <span style="color: red;">仮定3:$V[u_{i}] = E[u_{i}^{2}] = \sigma^{2}$</span>
+- <span style="color: red;">仮定4:$Cov[u_{i},u_{j}] = E[u_{i}u_{j}] = 0$</span>
+- 仮定5:$u_{i} \sim N(0, \sigma^{2})$
+
+これまで見たとおり、誤差項が正規分布に従うという仮定5は不偏性、分散の有効性に関して必要ではない。
+
+## 推定量の共分散$Cov$
+
+ここでは、推定量の共分散を計算する。下記の仮定1,2,3,4が成立するとして、
+
+- <span style="color: red;">仮定1:$X_{i}$は非確率変数</span>
+- <span style="color: red;">仮定2:$E[u_{i}] = 0$</span>
+- <span style="color: red;">仮定3:$V[u_{i}] = E[u_{i}^{2}] = \sigma^{2}$</span>
+- <span style="color: red;">仮定4:$Cov[u_{i},u_{j}] = E[u_{i}u_{j}] = 0$</span>
+
+$$
+\begin{eqnarray}
+Cov[\hat{\alpha}, \hat{\beta}] &=& E \left[ (\hat{\alpha} - E[\hat{\alpha}])(\hat{\beta} - E[\hat{\beta}])\right] \\
+&=& E \left[(\alpha + \sum w_{i}^{*} u_{i} - \alpha) (\beta + \sum w_{i} u_{i} - \beta) )\right] \\
+&=& E \left[(\sum w_{i}^{*} u_{i}) (\sum w_{i} u_{i}) \right] \\
+&=& E \left[\sum_{i} w_{i}^{*}w_{i} u_{i}^{2} + \sum_{i \ne j}\sum_{j \ne i} w_{i}^{*}w_{i} u_{i}u_{j} \right] \\
+&=& \sum_{i} w_{i}^{*}w_{i} \overbrace{E \left[u_{i}^{2} \right] }^{=\sigma^{2}}+ \sum_{i \ne j}\sum_{j \ne i} w_{i}^{*}w_{i} \overbrace{E \left[u_{i}u_{j} \right]}^{=0} \\
+&=& \sigma^{2} \sum_{i} \overbrace{w_{i}^{*}}^{=\frac{1}{n}-\bar{X}w_{i}} w_{i} \\
+&=& \sigma^{2} \sum_{i} \left(\frac{1}{n}-\bar{X} \right) w_{i} \\
+&=& \sigma^{2} \frac{1}{n}\overbrace{\sum w_{i}}^{=0} - \sigma^{2}  \bar{X}\sum \overbrace{w_{i}^{2}}^{1/S_{xx}} \\
+&=& - \sigma^{2} \frac{\bar{X}}{S_{xx}}
+\end{eqnarray}
+$$
+
+として計算される。
+
+## 残差分散の不偏性$\sigma^2$
+
+仮説検定では、検定統計量として、推定値を標準誤差(分散の推定値の平方根)で割ったt値を利用する。実際には、誤差項の$\sigma^{2}$ではなく、残差分散$\hat{\sigma}^{2}$を利用する。
+
+$$
+\begin{eqnarray}
+s_{\hat{\beta}}^{2} &=& \frac{\hat{\sigma}^{2}}{S_{xx}} \\
+s_{\hat{\alpha}}^{2} &=& \hat{\sigma}^{2} \left(\frac{\sum X_{i}^{2}}{n S_{xx}} \right)
+\end{eqnarray}
+$$
+
+ここで、$\sigma^{2}$の推定値は、
+
+$$
+\hat{\sigma}^{2} = \frac{\sum u_{i}^{2}}{n-2}
+$$
+
+であり、下記の仮定1,2,3,4が成立するとして、
+
+- <span style="color: red;">仮定1:$X_{i}$は非確率変数</span>
+- <span style="color: red;">仮定2:$E[u_{i}] = 0$</span>
+- <span style="color: red;">仮定3:$V[u_{i}] = E[u_{i}^{2}] = \sigma^{2}$</span>
+- <span style="color: red;">仮定4:$Cov[u_{i},u_{j}] = E[u_{i}u_{j}] = 0$</span>
+
+最小2乗残差の分散$\hat{\sigma}^{2}$の性質を考える。残差の定義より
+
+$$
+\hat{u_{i}} = \overbrace{Y_{i}}^{Y_{i} = \alpha + \beta X_{i} + u_{i}} - \overbrace{\hat{Y_{i}}}^{\hat{\alpha} = \bar{Y} - \hat{\beta} \bar{X}} = u_{i} - [(\hat{\alpha} - \alpha) + (\hat{\beta} - \beta)X_{i}]
+$$
+
+となり、残差2乗和は、
+
+$$
+\begin{eqnarray}
+\sum \hat{u_{i}}^{2} &=& \sum u_{i}^{2} - 2\left[ (\hat{\alpha} - \alpha) \sum u_{i} + (\hat{\beta} - \beta)X_{i} u_{i} \right] + n(\hat{\alpha} - \alpha)^{2} + 2(\hat{\alpha} - \alpha)(\hat{\beta} - \beta) \sum X_{i} + (\hat{\beta} - \beta)^{2} \sum X_{i}^{2}\\
+\end{eqnarray}
+$$
+
+であり、ここで両辺の期待値を計算する。
+
+$$
+\begin{eqnarray}
+E \left[\sum \hat{u_{i}}^{2} \right] &=& \sum E[u_{i}^{2}] - 2\left[ E[\hat{\alpha} \sum u_{i}] - \alpha \sum E[u_{i}] + E[\hat{\beta} \sum X_{i}u_{i}] - \beta \sum X_{i}E[u_{i}] \right] + n E[(\hat{\alpha} - \alpha)^{2}] + 2E[(\hat{\alpha} - \alpha)(\hat{\beta} - \beta)] \sum X_{i} + E[(\hat{\beta} - \beta)^{2}] \sum X_{i}^{2}\\
+\end{eqnarray}
+$$
+
+各項ごとに下記が成り立っている。
+
+$$
+\begin{eqnarray}
+\sum E[u_{i}^{2}] &=& n \sigma^{2} \\
+E[u_{i}] &=& 0 \\
+E\left[ (\hat{\alpha} - \alpha)^{2} \right] &=& V[\hat{\alpha}] = \frac{\sigma^{2}\sum X_{i}^{2}}{S_{xx}} \\
+E\left[ (\hat{\beta} - \beta)^{2} \right] &=& V[\hat{\beta}] = \frac{\sigma^{2}}{S_{xx}} \\
+E\left[ (\hat{\alpha} - \alpha)(\hat{\beta} - \beta) \right] &=& Cov[\alpha, \beta] = -\frac{\sigma^{2}}{S_{xx}}
+\end{eqnarray}
+$$
+
+
+$$
+\begin{eqnarray}
+E\left[ \hat{\alpha} \sum u_{i} \right] &=& E\left[ (\alpha + \sum w_{i}^{*} u_{i} )\sum u_{i} \right] \\
+&=& E\left[ \alpha \sum u_{i} + \left(\sum w_{i}^{*}u_{i} \right) \sum u_{i} \right] \\
+&=& \alpha \sum \overbrace{E[u_{i}]}^{=0} +  \overbrace{\sum w_{i}^{*}}^{=1} \overbrace{E[u_{i}^{2}]}^{\sigma^{2}} \\
+&=& \sigma^{2} \\
+\end{eqnarray}
+$$
+
+
+$$
+\begin{eqnarray}
+E\left[ \hat{\beta} \sum X_{i}u_{i} \right] &=& E\left[ (\beta + \sum w_{i}u_{i}) \sum X_{i}u_{i} \right] \\
+&=& E\left[ \beta \sum X_{i} u_{i} + (\sum w_{i} u_{i}) \sum X_{i}u_{i} \right] \\
+&=& \beta \sum X_{i} \overbrace{E\left[ u_{i} \right]}^{=0} + \sum w_{i} X_{i} \overbrace{E\left[u_{i}^{2} \right]}^{\sigma^{2}} \\
+&=& \overbrace{\sum w_{i} X_{i}}^{=1} \sigma^{2}\\
+&=& \sigma^{2} \\
+\end{eqnarray}
+$$
+
+これらを利用すると、最小2乗残差の分散$\frac {\sum \hat{u_{i}}^{2}}{n - 2}$は、誤差項の分散の不偏推定値となっている。残差が誤差項の良い推定量となっている。
+
+$$
+E \left[\sum \hat{u_{i}}^{2} \right] = n\sigma^{2} - 2\sigma^{2} = (n-2)\sigma^{2} \\
+\therefore \sigma^{2} = E \left[\frac {\sum \hat{u_{i}}^{2}}{n - 2} \right] 
+$$
+
+## 分散不均一のケース
+
+下記の仮定3が成立せず、分散不均一になっているケースを扱う。分散不均一になっていると、どのような性質が失われるのたろうか。
+
+- 仮定1:$X_{i}$は非確率変数
+- 仮定2:$E[u_{i}] = 0$
+- <span style="color: red;">仮定3:$V[u_{i}] = E[u_{i}^{2}] = \sigma^{2}$</span>
+- 仮定4:$Cov[u_{i},u_{j}] = E[u_{i}u_{j}] = 0$
+- 仮定5:$u_{i} \sim N(0, \sigma^{2})$
+
+分散不均一とは$V[u_{i}]=E[u_{i}^{2}] = \sigma_{i}^{2}$となっているケースであり、データによって、分散に大小ばらつきが出ることになる。仮定3自体、パラメタの不偏性には影響しないので、不偏性は失われません。ただ、分散に影響がでる。仮定1,2,4は成立しているとすると、$\beta$の最小2乗推定量の分散は下記のようになる。最終行では$w_{i} = \frac{X_{i} - \bar{X_{i}}}{\sum (X_{i} - \bar{X_{i}})^{2}}$を利用している。
+
+$$
+\begin{eqnarray}
+V[\hat{\beta}] &=& E\left[\left\{\hat{\beta} - E[\hat{\beta}]\right\}^{2}\right] \\
+&=& E\left[\left\{\beta + \sum w_{i}u_{i} - \beta \right\}^{2}\right] \\
+&=& E\left[\left\{\sum w_{i}u_{i}\right\}^{2}\right] \\
+&=& E\left[\sum_{i} w_{i}^{2}u_{i}^{2} + \sum_{i \ne j}\sum_{j \ne i} w_{i}w_{j}u_{i}u_{j}\right] \\
+&=& \sum_{i} w_{i}^{2}\overbrace{E[u_{i}^{2}]}^{=\sigma_{i}^{2}} + \sum_{i \ne j}\sum_{j \ne i} w_{i}w_{j}\overbrace{E[u_{i}u_{j}]}^{=0} \\
+&=& \sum w_{i}^{2}\sigma_{i}^{2} \\
+&=& \frac{\sum (X_{i} - \bar{X_{i}})^{2} \sigma_{i}^{2}}{S^{2}_{xx}}
+\end{eqnarray}
+$$
+
+
+回帰係数を検定する際に、標準誤差として、残差分散$\hat{\sigma}^{2}$を用いて、
+
+$$
+s_{\hat{\beta}} = \sqrt{\frac{\hat{\sigma}^{2}}{S_{xx}}}
+$$
+を利用して計算しているので、このままでは分散が正確に計算できず、過大(過小)に推定することになるため、そこから計算されたt値も信用できない数値となる。t値が信用できない以上、検定の結果も芋づる式に信用がない。加え、仮定3が満たされていなければ、ガウスマルコフの定理も成り立たず、有効性も失われる。
+
+## 系列相関のケース
+
+下記の仮定4が成立せず、自己相関になっているケースを扱う。自己相関になっていると、どのような性質が失われるのたろうか。
+
+- 仮定1:$X_{i}$は非確率変数
+- 仮定2:$E[u_{i}] = 0$
+- 仮定3:$V[u_{i}] = E[u_{i}^{2}] = \sigma^{2}$
+- <span style="color: red;">仮定4:$Cov[u_{i},u_{j}] = E[u_{i}u_{j}] = 0$</span>
+- 仮定5:$u_{i} \sim N(0, \sigma^{2})$
+
+自己相関とは$Cov[u_{i},u_{j}] = E[u_{i}u_{j}] = \sigma_{ij}$となっているケースであり、誤差項の共分散が0ではない状態。時系列などのデータでよく見る自己相関(系列相関)がある状態。仮定4自体、パラメタの不偏性には影響しないので、不偏性は失われない。ただ、分散に影響がでる。仮定1,2,3が成り立っているとすると、$\beta$の最小2乗推定量の分散は下記のようになる。
+
+$$
+\begin{eqnarray}
+V[\hat{\beta}] &=& E\left[\left\{\hat{\beta} - E[\hat{\beta}]\right\}^{2}\right] \\
+&=& E\left[\left\{\beta + \sum w_{i}u_{i} - \beta \right\}^{2}\right] \\
+&=& E\left[\left\{\sum w_{i}u_{i}\right\}^{2}\right] \\
+&=& E\left[\sum_{i} w_{i}^{2}u_{i}^{2} + \sum_{i \ne j}\sum_{j \ne i} w_{i}w_{j}u_{i}u_{j}\right] \\
+&=& \sum_{i} w_{i}^{2}\overbrace{E[u_{i}^{2}]}^{=\sigma^{2}} + \sum_{i \ne j}\sum_{j \ne i} w_{i}w_{j}\overbrace{E[u_{i}u_{j}]}^{=\sigma_{ij}} \\
+&=& \frac{\sigma^{2}}{S_{xx}} + \sum_{i \ne j}\sum_{j \ne i} w_{i}w_{j}\sigma_{ij}\\
+\end{eqnarray}
+$$
+
+分散不均一のときと同じく、このままでは分散が正確に計算できず、過大(過小)に推定することになるため、そこから計算されたt値も信用できない数値となる。t値が信用できない以上、検定の結果も芋づる式に信用がない。加え、仮定4が満たされていなければ、ガウスマルコフの定理も成り立たず、有効性も失われる。
+
+## まとめ
+
+- $\hat{\alpha},\hat{\beta}$が不偏性を持つためには仮定1,2が満たされる必要がある。不偏性には仮定3,4は必要ない。
+- $\hat{\alpha},\hat{\beta}$の分散が最小2乗推定量の最小分散線形不偏推定量となるためには、仮定1,2,3,4が必要。
+- 誤差項が分散不均一だと仮定3が満たされないことで、分散の有効性が失われ、検定の信用性がなくなる。
+- 誤差項が自己相関だと仮定4が満たされないことで、分散の有効性が失われ、検定の信用性がなくなる。
+
+## 参考文献
+
+- [44の例題で学ぶ計量経済学](https://www.ohmsha.co.jp/book/9784274069314/)
+- [Rによる計量経済学　第2版](https://www.ohmsha.co.jp/book/9784274222658/)
+
+
+

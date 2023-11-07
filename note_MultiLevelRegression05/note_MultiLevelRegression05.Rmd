@@ -1,0 +1,226 @@
+---
+title: "マルチレベルモデリングChapter4:予測変数の中心化"
+pagetitle: "マルチレベルモデリングChapter4:予測変数の中心化"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)を利用してマルチレベルモデリングの勉強内容をまとめたもの。下記のサポートサイトにサンプルデータなどが保存されている。
+
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+
+## 分析内容について
+分析内容は、前回に引き続き、青年期のアルコール摂取量の変化に関する分析。[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)のp75に詳細は書いてあるとおり、青年期のアルコール摂取量の変化に関する分析をここでもお借りする。82人(`n`)を対象に14歳,15歳,16歳の3回(`age`)の計測タイミングがある。`alcuse`はアルコール摂取に関する頻度の合成スコアで、予測変数として、友達の飲酒割合に関する`peer`と親がアルコール依存症かを表す`coa`が用意されている。
+
+この分析の目的は、親がアルコール依存症であったり、自分の周囲の友だちが飲酒していれば、自分のアルコール摂取量も14歳,15歳,16歳の時間経過とともに、アルコール摂取量が増加していくのではないか、という仮説を検証すること。
+
+```{r}
+library(tidyverse)
+library(nlme)
+library(DT)
+
+alcohol1 <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/alcohol1_pp.txt", header=T, sep=",")
+alcohol1 <- alcohol1 %>% mutate(
+  mean_peer = mean(peer), 
+  flg_peer = ifelse(peer < mean_peer, "low peer", "high peer"),
+  flg_peer = factor(flg_peer, levels = c("low peer", "high peer"))
+  )
+#Models
+model.a <- lme(alcuse ~ 1, alcohol1, random = ~1 |id, method = "ML")
+model.b <- lme(alcuse ~ age_14 , data = alcohol1, random= ~ age_14 | id, method = "ML")
+model.c <- lme(fixed  = alcuse ~ coa*age_14, random = ~ age_14 | id, data = alcohol1, method = "ML")
+model.d <- lme(fixed  = alcuse ~ coa * age_14 + peer * age_14, random = ~ age_14 | id, data = alcohol1, method = "ML")
+model.e <- lme(fixed  = alcuse ~ coa + peer * age_14, random = ~ age_14 | id, data = alcohol1, method = "ML")
+datatable(alcohol1 %>% mutate_if(is.numeric, round, digit = 2))
+```
+
+## 予測変数の中心化
+
+以前のノートで時間を表す変数の中心化を行うことの意味についてはまとめた。時間を表す変数から特定の定数を引くことで、切片$\pi_{0i}$は初期値を表すことになった。予測変数を中心化した場合、モデルの解釈はどのように変わるのであろうか。
+
+前回のノートのモデルEを例に考える。まず、推定された$\hat{\gamma}_{00}$は、関連するレベル2の変数が全て0のという条件であれば、レベル1の成長パラメタ$\pi_{0i}$を表すが、より多くの予測変数がモデルに含まれ、すべてが0ではない場合や0がそもそも適切ではない場合などに遭遇すると、解釈が難しくなる。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} COA_{i} + \gamma_{02} PEER_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{12} PEER_{i} + \zeta_{1i} \\
+\\
+Y_{ij} &=& \gamma_{00} + \gamma_{01} COA_{i} + \gamma_{02} PEER_{i} + \gamma_{10} TIME_{ij} + \gamma_{12} PEER_{i} × TIME_{ij} + (\epsilon_{ij} + \zeta_{0i} + \zeta_{1i} × TIME_{ij})
+\end{eqnarray}
+$$
+
+このようなケースで、予測変数を中心化しておくと解釈が簡単になる場合もある。予測変数を平均で引いて中心化すると、レベル2の当てはめられた切片は、初期値の平均的な予測値となる。平均的なとはどういうことか。
+
+例えば、IQテストであれば、基準値は100なので、100が中心化に適した値となる。このように、中心化に用いる定数が現実的に意味を持つとき、または定数として、標本平均を利用するのであれば、それは平均的な影響となるためである。
+
+下記は、`x`軸にIQスコアをとって、何らかの`y`との関係を見たものとする。平均で中心化をするため、平均値の100を引くことになる。つまり、赤色が中心化したもの。中心化しても傾きに変化が出るわではないが、中心化前の平均値100が取る`y`の値は、中心化後の0がとる`y`の値と一致している。つまり、予測変数を中心化しておけば、元の変数の平均的な影響として解釈ができるようになり、それがIQスコアのように馴染みがあるものであれば、より直感的に理解しやすくなる。
+
+```{r}
+set.seed(3)
+X <- 80:120
+Y <- 10 + 3 * X + rnorm(length(X), sd = 10)
+X_c <- X - mean(X)
+DF <- tibble(Y, X, X_c)
+
+plot(Y ~ X, xlim = c(-50, 150), ylim = c(200, 400), xlab = "X or X_c", xaxt = "n")
+axis(1, at = seq(-50, 150, 10))
+par(new = TRUE) 
+plot(Y ~ X_c, xlim = c(-50, 150), ylim = c(200, 400), xlab = "", pch = 2, col = "red")
+
+legend("bottomright", pch = 1:2, col = 1:2, legend = c("Y ~ X", "Y ~ X_c"))
+LM <- lm(Y ~ X)
+LM_c <- lm(Y ~ X_c)
+abline(LM)
+abline(LM_c, col = "red", lty=2)
+segments(0, 0, 0, 309)
+segments(100, 0, 100, 309)
+segments(x0 = -50, x1 = 150, y0 = mean(Y), y1 = mean(Y))
+```
+
+## 予測変数を中心化したモデル
+
+モデルFはモデルEと比べると、`PEER`が中心化されている`C_PEER`かどうかの違いしかない。初期値$\pi_{0i}$については`COA`と`C_PEER`の効果を含み、変化率$\pi_{1i}$については`C_PEER`の効果を含むモデル。
+
+$$
+\begin{eqnarray}
+ModelF\\
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} COA_{i} + \gamma_{02} C\_PEER_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{12} C\_PEER_{i} + \zeta_{1i} \\
+\\
+Y_{ij} &=& \gamma_{00} + \gamma_{01} COA_{i} + \gamma_{02} C\_PEER_{i} + \gamma_{10} TIME_{ij} + \gamma_{12} C\_PEER_{i} × TIME_{ij} + (\epsilon_{ij} + \zeta_{0i} + \zeta_{1i} × TIME_{ij})
+\end{eqnarray}
+$$
+
+モデルGは、初期値$\pi_{0i}$については`C_COA`と`C_PEER`の効果を含み、変化率$\pi_{1i}$については`PEER`の効果を含むモデル。
+
+$$
+\begin{eqnarray}
+ModelG\\
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} C\_COA_{i} + \gamma_{02} C\_PEER_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{12} PEER_{i} + \zeta_{1i} \\
+\\
+Y_{ij} &=& \gamma_{00} + \gamma_{01} C\_COA_{i} + \gamma_{02} C\_PEER_{i} + \gamma_{10} TIME_{ij} + \gamma_{12} C\_PEER_{i} × TIME_{ij} + (\epsilon_{ij} + \zeta_{0i} + \zeta_{1i} × TIME_{ij})
+\end{eqnarray}
+$$
+
+下記が各モデルの係数をまとめたもので、モデルE,F,Gに注目する。まず、$\hat{\gamma}_{01}$、$\hat{\gamma}_{02}$、$\hat{\gamma}_{12}$はモデルに使用されている変数は中心化されているかどうかの違いしかないが、回帰係数自体は同じで変化がない。標準誤差も同じであり、中心化したからといって分散成分が変化するわけでもない。各レベル2で異なっているのは、切片$\hat{\gamma}_{00}$、$\hat{\gamma}_{10}$のパラメタと標準誤差。
+
+$$
+\begin{eqnarray}
+Model E \\
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \color{red}{-0.314} + 0.571 × COA_{i} + 0.695 × PEER_{i} + \zeta_{0i} \\
+\pi_{1i} &=&  \color{red}{0.425} - 0.151 × PEER_{i} + \zeta_{1i} \\
+\\
+ModelF\\
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \color{red}{0.394} + 0.571 × COA_{i} + 0.695 × C\_PEER_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \color{red}{0.271} - 0.151 × C\_PEER_{i} + \zeta_{1i} \\
+\\
+ModelG\\
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \color{red}{0.651} + 0.571 × C\_COA_{i} + 0.695 × C\_PEER_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \color{red}{0.271} - 0.151 × PEER_{i} + \zeta_{1i} \\
+\\
+\end{eqnarray}
+$$
+
+モデルEは`COA`と`PEER`は中心化されていないため、友人がアルコールを全く摂取せず(`PEER=0`)、親がアルコール依存症でない(`COA=0`)ときの個人の14歳時点のアルコール摂取量を表している(`PEER=0 & COA=0`)。
+
+モデルFは、`PEER`は中心化されており、`COA`は中心化されていないため、`PEER`が平均的(`C_PEER`)で、親がアルコール依存症でない(`COA=0`)個人の14歳時点のアルコール摂取量を表している(`PEER=1.08 & COA=0`)。切片は、親がアルコール依存症でなく、平均的な個人を表現しており、$\hat{\gamma}_{00}$は、そのような子どもの初期値を表し、$\hat{\gamma}_{10}$は、そのような子どもの変化率を表す。
+
+モデルGは、、`PEER`と`COA`は中心化されているため、`PEER`が平均的(`C_PEER`)で、親がアルコール依存症でもなければ、依存症でもあるような、平均的な親(表現が難しい)をもつ個人の14歳時点のアルコール摂取量を表している。(`PEER=1.08 & COA=0.451`)。
+
+モデルサマリーは下記の通りである。
+
+<table style="text-align:center" cellpadding="20">
+<tr><td colspan="8" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"></td><td colspan="7"><em>Dependent variable:</em></td></tr>
+<tr><td></td><td colspan="7" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left"></td><td colspan="7">alcuse</td></tr>
+<tr><td style="text-align:left"></td><td>A</td><td>B</td><td>C</td><td>D</td><td>E</td><td>F_c</td><td>G_c</td></tr>
+<tr><td colspan="8" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Intercept($\pi_{0i},\gamma_{00}$)</td><td>0.922<sup>***</sup></td><td>0.651<sup>***</sup></td><td>0.316<sup>**</sup></td><td>-0.317<sup>**</sup></td><td>-0.314<sup>**</sup></td><td>0.394<sup>***</sup></td><td>0.651<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.096)</td><td>(0.106)</td><td>(0.132)</td><td>(0.150)</td><td>(0.148)</td><td>(0.105)</td><td>(0.081)</td></tr>
+<tr><td style="text-align:left">coa($\pi_{0i},\gamma_{01}$)</td><td></td><td></td><td>0.743<sup>***</sup></td><td>0.579<sup>***</sup></td><td>0.571<sup>***</sup></td><td>0.571<sup>***</sup></td><td>0.571<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td>(0.196)</td><td>(0.165)</td><td>(0.148)</td><td>(0.148)</td><td>(0.148)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">peer($\pi_{0i},\gamma_{02}$)</td><td></td><td></td><td></td><td>0.694<sup>***</sup></td><td>0.695<sup>***</sup></td><td>0.695<sup>***</sup></td><td>0.695<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td>(0.113)</td><td>(0.112)</td><td>(0.112)</td><td>(0.112)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">age_14($\pi_{1i},\gamma_{10}$)</td><td></td><td>0.271<sup>***</sup></td><td>0.293<sup>***</sup></td><td>0.429<sup>***</sup></td><td>0.425<sup>***</sup></td><td>0.271<sup>***</sup></td><td>0.271<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.063)</td><td>(0.085)</td><td>(0.115)</td><td>(0.107)</td><td>(0.062)</td><td>(0.062)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">coa:age_14($\pi_{1i},\gamma_{11}$)</td><td></td><td></td><td>-0.049</td><td>-0.014</td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td>(0.126)</td><td>(0.126)</td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">peer:age_14($\pi_{1i},\gamma_{12}$)</td><td></td><td></td><td></td><td>-0.150<sup>*</sup></td><td>-0.151<sup>*</sup></td><td>-0.151<sup>*</sup></td><td>-0.151<sup>*</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td>(0.087)</td><td>(0.085)</td><td>(0.085)</td><td>(0.085)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td colspan="8" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Observations</td><td>246</td><td>246</td><td>246</td><td>246</td><td>246</td><td>246</td><td>246</td></tr>
+<tr><td style="text-align:left">Log Likelihood</td><td>-335</td><td>-318</td><td>-310</td><td>-294</td><td>-294</td><td>-294</td><td>-294</td></tr>
+<tr><td style="text-align:left">Akaike Inf. Crit.</td><td>676</td><td>648</td><td>637</td><td>608</td><td>606</td><td>606</td><td>606</td></tr>
+<tr><td style="text-align:left">Bayesian Inf. Crit.</td><td>686</td><td>669</td><td>665</td><td>643</td><td>638</td><td>638</td><td>638</td></tr>
+<tr><td colspan="8" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"><em>Note:</em></td><td colspan="7" style="text-align:right"><sup>*</sup>p<0.1; <sup>**</sup>p<0.05; <sup>***</sup>p<0.01</td></tr>
+</table>
+
+結局のところ、今回のケースであればモデルFが望ましく、パラメタを解釈しやすいモデルになる。親がアルコール依存症でない(`COA=0`)個人の表す場合に、0という値は意味を持っており、`PEER`は中心化されているので、平均的な`PEER`かつ親がアルコール依存症かどうかを表現しやすいモデルであるためである。
+
+ちなみに、モデルF、Gを実行するときは下記のスクリプトで行う。
+
+```{r}
+#Model F
+model.f <- lme(
+  fixed  = alcuse ~ coa + cpeer * age_14 , 
+  random = ~ age_14 | id, 
+  data = alcohol1, 
+  method = "ML")
+summary(model.f)
+```
+
+
+```{r}
+#Model G
+model.g <- lme(
+  fixed  = alcuse ~ ccoa + cpeer * age_14, 
+  random = ~ age_14 | id, 
+  data = alcohol1, 
+  method = "ML")
+summary(model.g)
+```
+
+## 参考文献
+
+- [縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)
+- [Applied Longitudinal Data Analysis: Modeling Change and Event Occurrence](https://www.amazon.com/Applied-Longitudinal-Data-Analysis-Occurrence/dp/B017YBZFW0)
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+- [Chapter 9 Mixed Effects Models](https://glennwilliams.me/r4psych/mixed-effects-models.html)
+- [Applied longitudinal data analysis in brms and the tidyverse](https://bookdown.org/content/4253/index.html)
+

@@ -1,0 +1,614 @@
+---
+title: "マルチレベルモデリングChapter3"
+pagetitle: "マルチレベルモデリングChapter3"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)を利用してマルチレベルモデリングの勉強内容をまとめたもの。下記のサポートサイトにサンプルデータなどが保存されている。
+
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+
+## 中心化について
+
+時間をともなうマルチレベルモデリングでは、変数を中心化することで切片の意味が解釈がしやすくなる。例えば、中心化していない年齢を利用する場合、切片は0歳時点の値を表すことになる。そのため、分析の内容に応じて、年齢から定数を引くことで、プロットの原点を移動させ、切片を解釈しやすくする。変数を中心化しても傾きには影響は出ない。
+
+例えば、年齢として1歳から5歳までの範囲を取るとして、回帰分析(黒い線)を行ったとする。この場合、切片は年齢が0歳のときの値を表すことになる。`X_c = X - 1`している中心化済みの変数で回帰している赤い線の場合、切片は1歳のときの値を表すことになる。1歳での黒い回帰直線の値と、0歳での赤い回帰直線の値は同じなので、要するに中心化した変数を利用した回帰分析の切片は1歳のときの値を表すことになる。
+
+```{r}
+library(tidyverse)
+library(broom)
+library(patchwork)
+library(nlme)
+library(DT)
+# library(MASS) mvrnorm()だけなので名前空間つきで呼ぶMASS::mvrnorm()
+
+set.seed(3)
+X <- 1:5
+Y <- 10 + 3 * X + rnorm(5, sd = 0.5)
+X_c <- X - 1
+DF <- tibble(Y, X, X_c)
+
+plot(Y ~ X, xlim = c(-1, 7), ylim = c(10, 25), xlab = "X or X_c", xaxt = "n")
+axis(1, at = seq(-2, 6, 1))
+par(new = TRUE) 
+plot(Y ~ X_c, xlim = c(-1, 7), ylim = c(10, 25), xlab = "", pch = 2, col = "red")
+
+legend("bottomright", pch = 1:2, col = 1:2, legend = c("Y ~ X", "Y ~ X_c"))
+LM <- lm(Y ~ X)
+LM_c <- lm(Y ~ X_c)
+abline(LM)
+abline(LM_c, col = "red", lty=2)
+segments(0, -2, 0, 30)
+segments(x0 = -2, x1 = 6, y0 = LM$fitted.values[[1]], y1 = LM$fitted.values[[1]])
+```
+この書籍では私が誤っていない限り、中心化した変数で回帰直線を計算し、可視化のために元の変数を利用して表示しているケースがある。第2章では、11歳から15歳の範囲を取る年齢の変数に対して、そのまま回帰するのではなく、11を引く(`age_center = age-11`)ことで中心化し、切片が11歳時点での値を表すようにしている。そして、可視化の際は中心化した変数ではなく、11歳から15歳の範囲を取るオリジナルの年齢を利用している。
+
+## データ生成
+
+この章で参照されている下記の研究は、研究の都合上、サンプルデータが提供されていない。
+
+- [Burchinal(1997)Early intervention and mediating processes in cognitive performance of children of low-income African American families.](https://psycnet.apa.org/record/1997-43389-014)
+
+そのため、ここでは書籍内(p67)に記述されているモデルの情報をもとに、確率分布を用いて再現した疑似データセットを利用する。マルチレベルモデルが確率分布を必要としているので、設定情報がわかれば、各個人の値を再現するのは不可能でも、全体の結果としては同じようになるデータセットは作成できる。
+
+このデータは、アフリカ系アメリカ人の低所得世帯の103人(`n`)の幼児が対象で、認知能力(`cog`)の追跡を行ったデータ。生後6ヶ月時点(`age`)で、認知能力を促進するための集中的な早期介入プログラム(`program`)に無作為に58人が参加し、残りの45人は何も介入されないまま追跡された。6ヶ月から96ヶ月までの計12回に渡って認知能力が評価された。ここでは、生後12,18,24ヶ月の計3回の検査によって測定された認知能力の変化へのプログラムの効果をみている。
+
+書籍で想定しているモデルは下記の通りなので、このデータ生成過程をもとに再現する。
+
+$$
+\begin{eqnarray}
+Cog_{ij} &=& \pi_{0i} + \pi_{1i} (Age_{ij}-1) + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} Program_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{11} Program_{i} + \zeta_{1i} \\
+\begin{bmatrix}
+\zeta_{0i} \\
+\zeta_{1i}
+\end{bmatrix} &\sim& N 
+\begin{bmatrix}
+\sigma_{0}^{2} & \sigma_{01} \\
+\sigma_{10} & \sigma_{1}^{2}
+\end{bmatrix},\quad  \epsilon_{ij} \sim N(0, \sigma_{\epsilon}^{2}) 
+\end{eqnarray}
+$$
+
+まずはデータを生成する前にパラメタを設定する。
+
+```{r}
+# parameters
+n <- 103
+program_intervation <- 58
+s2_epsilon <- 74.24
+# mean vector
+mu <- c(0, 0)
+
+# variance/covariance matrix
+sigma2_00 <- 124.64
+sigma2_11 <- 12.29
+sigma_01 <- sigma_10 <- -36.41
+sigma2 <- matrix(c(sigma2_00, sigma_10, sigma_01, sigma2_11), ncol = 2)
+
+# coefficient parameter
+gamma_00 <- 107.84
+gamma_01 <- 6.85
+gamma_10 <- -21.13
+gamma_11 <- 5.27
+
+# simulation
+set.seed(3)
+mnorm <- MASS::mvrnorm(n = n, mu = mu, Sigma = sigma2)
+zeta <- tibble(zeta_0 = mnorm[,1], zeta_1 = mnorm[,2])
+gamma <- tibble(id = 1:n, gamma_00, gamma_01, gamma_10, gamma_11)
+program <- tibble(program = rep(c(1,0), times = c(program_intervation, n - program_intervation)))
+
+list(
+  zeta = zeta,
+  gamma = gamma
+  )
+```
+
+`gamma`の各行が同じなのは、固定効果を意味しているためである。次に、この書籍のデータでは、3回の観測回数があるので、各行を3回分増幅させる。そして、$\zeta$と$\gamma$から$\pi$を計算してレベル2の値を計算する。最後に、レベル1の計算を行うために、さきほど計算した値と$\epsilon$を使って$Y(=Cog)$を再現する。
+
+```{r}
+set.seed(7)
+
+earlyint_simulated <-
+  dplyr::bind_cols(gamma, zeta, program) %>%
+  tidyr::expand(
+    nesting(id, gamma_00, gamma_01, gamma_10, gamma_11, zeta_0, zeta_1, program),
+    age_center = c(0, 0.5, 1)
+  ) %>%
+  dplyr::mutate(
+    epsilon = rnorm(n(), mean = 0, sd = sqrt(s2_epsilon)),
+    pi_0 = gamma_00 + (gamma_01 * program) + zeta_0,
+    pi_1 = gamma_10 + (gamma_11 * program) + zeta_1,
+    y = pi_0 + pi_1 * age_center + epsilon,
+    cog = round(y, digits = 0),
+    age = age_center + 1
+  ) %>%
+  dplyr::select(id, age, age_center, y, cog, program, gamma_00, gamma_01, gamma_10, gamma_11, zeta_0, zeta_1, pi_0, pi_1)
+
+datatable(earlyint_simulated %>% mutate_if(is.numeric, round, digit = 2))
+```
+
+最後にパラメタを除外した疑似的な再現データに整える。中心化した`age_center`
+
+```{r}
+early.int <- earlyint_simulated %>%
+  dplyr::select(id, age, age_center, cog, program)
+
+head(early.int)
+```
+
+加えて、p47を参考に書籍のプロットを再現するために、下記を読み込んでおく。
+
+```{r}
+early.int_plt <-
+  tibble(id  = rep(c(68, 70:72, 902, 904, 906, 908), each = 3),
+         age = rep(c(1, 1.5, 2), times = 8),
+         cog = c(103, 119, 96, 106, 107, 96, 112, 86, 73, 100, 93, 87, 
+                 119, 93, 99, 112, 98, 79, 89, 66, 81, 117, 90, 76),
+         program = rep(1:0, each = 12))
+
+print(early.int_plt)
+```
+
+## マルチレベルモデルとは
+
+変化に関するマルチレベルモデルとは、
+
+- レベル1サブモデル：時間経過とともに個人がどのように変化するのか
+- レベル2サブモデル：これらの変化の軌跡は何らかの変数によって違ってくるのか
+
+これら2つのレベルを含んでいるモデルのこと。
+
+## レベル1サブモデル
+
+レベル1サブモデルは、各個人の変化を表すモデルで、個人成長モデルとも呼ばれる。下記のプロットは、各個人の認知能力の変化を表しており、緩やかに認知能力は低下していることがわかる。
+
+```{r}
+ggplot(early.int_plt, aes(age, cog)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", formula = "y ~ x", se = FALSE, colour = "tomato", size = 1) + 
+  scale_x_continuous(breaks = c(1, 1.5, 2)) + 
+  ylim(50, 150) + 
+  facet_wrap( ~ id, scales = "free", nrow = 2) + 
+  theme_bw()
+```
+
+認知能力の変化が`age`の1次関数となる個人成長モデルを仮定すると、レベル1サブモデルは下記のように表現できる。各個人の測定回数が異なる場合でも問題なく、この式は子ども$i(1-103)$の時点$j(1-3)$における$Y_{ij}$は、その時の子どもの$Age_{ij}$の1次関数となる。つまり、回帰直線が各個人の経年変化を表し、直線から外れる部分はランダム誤差は$\epsilon_{ij}$により生成されることを仮定する。
+
+$$
+\begin{eqnarray}
+Cog_{ij} &=& \pi_{0i} + \pi_{1i} (Age_{ij}-1) + \epsilon_{ij}
+\end{eqnarray}
+$$
+
+$\pi_{0i} + \pi_{1i} (Age_{ij}-1)$は構造的な部分、$\epsilon_{ij}$は確率的な部分として扱う。
+
+レベル1サブモデルの構造的な部分は、$i$番目の子どもの奇跡のカタチを特徴づけている個人成長パラメーター$\pi_{0i}$と$\pi_{1i}$があるため、各個人の真の経年変化の軌跡に関する仮説を具体化している。
+
+$i$番目の子どもの個人成長モデルは下記の図のようになる。中心化している`age`を利用しているため、レベル1サブモデルの切片$\pi_{0i}$は1歳時点の真の認知能力を表し、$\pi_{1i}$は変化の軌跡の傾きを表している。傾きなので、このパラメタがマイナスであれば右肩さがり、プラスであれば右肩上がりということになる。
+
+パラメタ$\pi_{0i}$と$\pi_{1i}$には$i$が含まれていることからもわかる通り、各個人が異なる切片と異なる傾きを持つことを仮定している。つまり、$\pi_{0,1}, \pi_{1,1}$や$\pi_{0,2}, \pi_{1,2}$、$\pi_{0,103}, \pi_{1,103}$のように、各個人が切片と傾きを持っている。
+
+```{r}
+# 定規で計算すると1mmで2.5ポイントくらいなので、それをもとにデータを作成する
+age <-  c(1, 1.5, 2)
+cog <-  c(95, 100, 135)
+pred <- lm(cog ~ age)$fitted
+df_plt <- tibble(age, cog, pred)
+path_df <- tibble(x = c(1, 2, 2), y = c(90, 90, 130))
+df_text <- tibble(
+  x = c(1, 1.5, 2, 1, 2.05),
+  y = c(98, 98, 137, 86, 110),
+  label = c("epsilon[italic(i)][1]", "epsilon[italic(i)][2]", "epsilon[italic(i)][3]",
+            "pi[0][italic(i)]", "pi[1][italic(i)]")
+  )
+ggplot() +
+  geom_point(data = df_plt, aes(x = age, y = cog), col = "tomato", size = 2) +
+  geom_point(data = df_plt, aes(x = age, y = pred), col = "black") +
+  geom_line(data = df_plt, aes(x = age, y = pred), col = "black") +
+  geom_path(data = path_df, aes(x = x, y = y), col = "gray", linetype = 2, size = 0.5) +
+  geom_segment(data = df_plt, aes(x = age, xend = age, y = cog, yend = pred), col = "gray", linetype = 2, size = 0.5) +
+  geom_text(data = df_text, aes(x = x, y = y, label = label), size = 7, parse = T) +
+  scale_x_continuous(breaks = c(1, 1.5, 2)) +
+  ylim(75, 150) +
+  theme_bw()
+```
+
+レベル1サブモデルの構造的な部分は、各個人の切片と傾きを決める部分のことである一方で、確率的な部分とは$\epsilon_{ij}$のこと。$\epsilon_{ij}$は個人$i$の時点$j$に関係しており、レベル1の誤差として、各時点に現れ、変化の軌跡には、誤差が含まれることを意味している。
+
+
+$$
+\begin{eqnarray}
+\epsilon_{ij} \sim N(0, \sigma_{\epsilon}^{2}) 
+\end{eqnarray}
+$$
+
+つまり、真の変化の軌跡と測定された変化の軌跡の違いを表している。これをレベル1残差と呼ばれる。レベル1残差には古典的な回帰直線と同様に正規分布に従うことを仮定する。残差分散パラメタ$\sigma_{\epsilon}^{2}$は、各個人の真の変化の軌跡の周りのばらつきの大きさを表現する。
+
+古典的な回帰モデルの仮定では残差の分散不均一、自己相関が発生すると、回帰係数の分散が正確に計算できなくなり、有効性が失われてしまう。その点に関して、マルチレベルがどのように扱っているかは、別の機会にまとめる。
+
+ここまでの話をまとめると、$i=1$で具体的に考えるとレベル1サブモデルは下記の分解できる。$\color{red}{i}$は赤文字、$\color{blue}{j}$は青文字で表現してみた。
+
+$$
+\begin{eqnarray}
+i&=&1, j=1,2,3 \\
+Cog_{\color{red}{1}\color{blue}{1}} &=& \pi_{0\color{red}{1}} + \pi_{1\color{red}{1}} (Age_{\color{red}{1}\color{blue}{1}}-1) + \epsilon_{\color{red}{1}\color{blue}{1}} \\
+Cog_{\color{red}{1}\color{blue}{2}} &=& \pi_{0\color{red}{1}} + \pi_{1\color{red}{1}} (Age_{\color{red}{1}\color{blue}{2}}-1) + \epsilon_{\color{red}{1}\color{blue}{2}} \\
+Cog_{\color{red}{1}\color{blue}{3}} &=& \pi_{0\color{red}{1}} + \pi_{1\color{red}{1}} (Age_{\color{red}{1}\color{blue}{3}}-1) + \epsilon_{\color{red}{1}\color{blue}{3}} \\
+\end{eqnarray}
+$$
+
+## レベル1サブモデルの探索
+
+一枚のプロットに103人分の回帰モデルを書き込むことでモデルを解釈しやすくなる。今回のデータであれば、1歳時点での認知能力は110あたりで、1年が経過することでマイナス15ほど傾きが低下することがわかる。
+
+```{r}
+# age_centerを使って回帰して、表示はageを利用している
+ggplot(early.int, aes(x = age_center, y = cog)) +
+  geom_line(aes(group = id),   stat="smooth", method = "lm", formula = y ~ x, alpha = 0.3) +
+  geom_line(aes(group = NULL), stat="smooth", method = "lm", formula = y ~ x, col = "tomato", size = 1) + 
+  scale_x_continuous(breaks = c(0, 0.5, 1), label = c("1", "1.5", "2")) +
+  scale_y_continuous(breaks = seq(50, 150, 10), limits = c(50,150)) +
+  xlab("age") + 
+  theme_bw()
+```
+
+実際の数値を計算しておく。`for-loop`でもよいが、ここでは`map`で計算する。
+
+```{r}
+df_fit_by_id <- early.int %>% 
+  group_by(id) %>% 
+  nest() %>% 
+  mutate(
+    model = map(.x = data, .f = function(x){lm(cog ~ age_center, data = x)}),
+    tidy  = map(.x = model, .f = function(x){tidy(x)}),
+    glance = map(.x = model, .f = function(x){glance(x)})
+  )
+df_fit_by_id
+```
+
+まずは、切片の値を可視化する。さきほどのプロットの切片の値の分布である。
+
+```{r}
+df_estimate_intercept <- df_fit_by_id %>% 
+  unnest(tidy) %>% 
+  filter(term == "(Intercept)")
+
+dens <- density(df_estimate_intercept$estimate)
+bw <- diff(range(df_estimate_intercept$estimate))/20
+
+ggplot(df_estimate_intercept, aes(estimate)) + 
+  geom_histogram(aes(y=..density..), binwidth = bw, fill = "gray", color = "black") +
+  geom_density(fill = "black", alpha = 0.3) + 
+  scale_x_continuous(breaks = seq(50,150,10), limits = range(dens$x)) + 
+  ggtitle("Intercept") + 
+  theme_bw()
+```
+
+次は、傾きの値を可視化する。さきほどのプロットの傾きの値の分布である。
+
+```{r}
+df_estimate_slope <- df_fit_by_id %>% 
+  unnest(tidy) %>% 
+  filter(term == "age_center")
+
+dens <- density(df_estimate_slope$estimate)
+bw <- diff(range(df_estimate_slope$estimate))/20
+
+ggplot(df_estimate_slope, aes(estimate)) + 
+  geom_histogram(aes(y=..density..), binwidth = bw, fill = "gray", color = "black") +
+  geom_density(fill = "black", alpha = 0.3) + 
+  scale_x_continuous(breaks = seq(-60,20,10), limits = range(dens$x)) + 
+  ggtitle("slope") + 
+  theme_bw()
+```
+
+最後は、残差の値を可視化する。残差の標準誤差は`sigma`が該当する。
+
+```{r}
+# 残差の標準誤差
+df_fit_by_id %>% 
+  filter(id == 1) %>% 
+  unnest(glance)
+```
+
+残差の標準誤差は、モデルの予測値と観測値の差の平方和をパラメタの数で割って平方根をとったものである。実際にモデルから計算した数値と一致する。
+
+```{r}
+df_resid <- df_fit_by_id$data[[1]]
+fit_resid <- lm(cog ~ age_center, data = df_resid)
+# √(Σ(y-yhat)^2/df)
+# df: samplesize(3) - num of params({α,β}=2)
+sqrt(sum((df_resid$cog - fit_resid$fitted.values)^2)/1)
+```
+
+残差の標準誤差の値を可視化する。残差の標準誤差が大きければ、各モデルの当てはまりが悪いことがわかる。
+
+```{r}
+df_estimate_sigma <- df_fit_by_id %>% 
+  unnest(glance)
+
+dens <- density(df_estimate_sigma$sigma)
+bw <- diff(range(df_estimate_sigma$sigma))/20
+
+ggplot(df_estimate_sigma, aes(sigma)) + 
+  geom_histogram(aes(y=..density..), binwidth = bw, fill = "gray", color = "black") +
+  geom_density(fill = "black", alpha = 0.3) + 
+  scale_x_continuous(breaks = seq(0,50,10), limits = range(dens$x)) + 
+  ggtitle("Residual standard error") + 
+  theme_bw()
+```
+
+## レベル2サブモデル
+
+レベル1サブモデルは個人に関するものだった。レベル2サブモデルは、変化の個人差、時不変な個人の特徴との関係を表現するモデル。レベル2サブモデルを使って、この関係を定式化できるのは、各個人に同じレベル1サブモデルを当てはめることで、各個人の成長パラメタ$\pi_{0i}$、$\pi_{1i}$の値のみに違いを集約できるからである。
+
+プログラム参加者ごとに分けてモデリングした結果が下記である。プログラム参加者は1歳時点ですでに認知能力は120ほどあり、プログラム非参加者と比べると15ほど異なります。また、傾きに関しても、プログラム参加者のほうが緩やかに低下することがわかります。プログラム参加者全員が非参加者よりも切片が大きいというわけでもなく、平均的に大きい点には注意が必要。
+
+```{r}
+# age_centerを使って回帰して、表示はageを利用している
+ggplot(early.int, aes(age_center, cog)) + 
+  geom_line(aes(group = id),   stat="smooth", method = "lm", formula = y ~ x, alpha = 0.3) +
+  geom_line(aes(group = NULL), stat="smooth", method = "lm", formula = y ~ x, col = "tomato", size = 2) + 
+  geom_point(color = "gray", alpha = 0.3) + 
+　scale_x_continuous(breaks = c(0, 0.5, 1), label = c("1", "1.5", "2")) +
+  scale_y_continuous(breaks = seq(50, 150, 10), limits = c(50,150)) +
+  xlab("age") + 
+  facet_wrap( ~ program) + 
+  theme_bw()
+```
+
+レベル2サブモデルの役割は、全体的なパターン(切片と傾きのグループ間の差)と、グループ内の個人間の差を同時に説明できるモデルとなる。レベル2サブモデルの特徴は下記の通り。
+
+- レベル2サブモデルのアウトカムは$\pi_{0i},\pi_{1i}$である。
+- レベル2サブモデルは、成長パラメタごとに存在する。
+- 個人ごとの$\pi_{0i},\pi_{1i}$と予測変数`program`の関係を表現する。つまり個人ごとの$\pi_{0i},\pi_{1i}$の違いの原因は、`program`にあることを意味する。
+- レベル2サブモデルにおいても成長パラメタ$\pi_{0i},\pi_{1i}$は確率的にばらつきが存在する。
+
+以上を定式化すると、下記のモデルが出来上がる。このモデルには、回帰係数のパラメタが4つ、残差分散パラメタ、残差共分散パラメタの3つ、合計7つのパラメタを持つ。
+
+$$
+\begin{eqnarray}
+Cog_{ij} &=& \pi_{0i} + \pi_{1i} (Age_{ij}-1) + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} Program_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{11} Program_{i} + \zeta_{1i} \\
+\end{eqnarray}
+$$
+
+レベル2サブモデルには、$\gamma_{00}, \gamma_{01}, \gamma_{10}, \gamma_{11}$の4つの部分が構造的な部分で、固定効果(fixed effect)と呼ばれる。固定効果は、レベル2の予測変数(ここでは`program`)の値ごとの個人間の変化の軌跡の系統的な差異を表現する。$\gamma_{01}, \gamma_{10}$は、成長パラメタ$\pi_{0i},\pi_{1i}$に対する`program`の影響を表現しており、レベル1サブモデルの個人の成長パラメタのばらつきを表現している。
+
+レベル2サブモデルを解釈するためにベターな方法は典型的な個人を考えること。プログラム参加者(`program=1`)であれば、
+
+$$
+\begin{eqnarray}
+\pi_{0i} &=& \gamma_{00} + \gamma_{01}\cdot 1 + \zeta_{0i} = (\gamma_{00} + \gamma_{01}) + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{11}\cdot 1 + \zeta_{1i} = (\gamma_{10} + \gamma_{11}) + \zeta_{1i}\\
+\end{eqnarray}
+$$
+
+であり、プログラム非参加者(`program=0`)であれば、
+
+$$
+\begin{eqnarray}
+\pi_{0i} &=& \gamma_{00} + \gamma_{01}\cdot 0 + \zeta_{0i} = (\gamma_{00}) + \zeta_{0i}\\
+\pi_{1i} &=& \gamma_{10} + \gamma_{11}\cdot 0 + \zeta_{1i} = (\gamma_{10}) + \zeta_{1i}\\
+\end{eqnarray}
+$$
+
+である。つまり、プログラム参加者(`program=1`)であれば、$\pi_{0i}$には$\gamma_{01}$が加えられ、$\pi_{1i}$には$\gamma_{11}$が加えられることになる。$\gamma_{01}$は平均的な真の初期値の関するグループ間の仮定されている違いを表現し、$\gamma_{11}$は真の変化率に関するグループ間の仮定されている違いを表現する。可視化するとよりわかりやすい。
+
+```{r}
+age_center <- seq(from = 0, to = 1, length.out = 50)
+
+df_ribbon <- df_fit_by_id %>% 
+  mutate(
+    predict = map(.x = model, .f = function(x){predict(x, newdata = tibble(age_center))})
+    ) %>% 
+  unnest(predict) %>% 
+  mutate(age_center = age_center) %>% 
+  left_join(., early.int %>% distinct(id, program), by = c("id" = "id")) %>% 
+  group_by(program, age_center) %>% 
+  summarise(min = min(predict), max = max(predict), .groups = "drop")
+
+df_formula <-
+  tibble(x = 0.25, y = 90, program = c(0, 1),
+         text  = c("gamma[0][0] + gamma[10](italic(age) - 1)", 
+                   "(gamma[0][0] + gamma[10]) + (gamma[10] + gamma[11]) (italic(age) - 1)")
+  )
+
+ggplot() +
+  geom_line(data = early.int, aes(x = age_center, y = cog, col = as.character(program)), stat="smooth", method = "lm", formula = y ~ x) + 
+  geom_ribbon(data = df_ribbon, aes(x = age_center, ymin = min, ymax = max, fill = as.character(program)), alpha = 0.3) +
+  geom_text(data = df_formula, aes(x = x, y = y, group = as.character(program), label = text), hjust = 0, parse = TRUE, size = 4) +
+　scale_x_continuous(breaks = c(0, 0.5, 1), label = c("1", "1.5", "2")) +
+  scale_y_continuous(breaks = seq(50, 150, 10), limits = c(50,150)) +
+  xlab("age") + 
+  guides(fill = "none", col = "none") + 
+  facet_wrap( ~ program) + 
+  theme_bw()
+```
+
+レベル2サブモデルには、$\zeta_{0i}, \zeta_{1i}$の2つが確率的な部分として存在している。
+
+$$
+\begin{eqnarray}
+Cog_{ij} &=& \pi_{0i} + \pi_{1i} (Age_{ij}-1) + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} Program_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{11} Program_{i} + \zeta_{1i} \\
+\begin{bmatrix}
+\zeta_{0i} \\
+\zeta_{1i}
+\end{bmatrix} &\sim& N 
+\begin{bmatrix}
+\sigma_{0}^{2} & \sigma_{01} \\
+\sigma_{10} & \sigma_{1}^{2}
+\end{bmatrix},\quad  \epsilon_{ij} \sim N(0, \sigma_{\epsilon}^{2}) 
+\end{eqnarray}
+$$
+
+これにより各個人の成長パラメタは、母平均の周りに散らばることなり、レベル2の説明できない部分を表す。例えば、プログラム非参加者の場合、先程の赤色の左図になるが、影になっている部分は、$\gamma_{00} + \zeta_{0i}, \gamma_{10} + \zeta_{1i}$の取りうる組み合わせによって描かれており、影になっている部分に各個人の回帰直線が存在する。
+
+レベル2の残差は個人ごとの成長パラメタ$\pi_{0i},\pi_{1i}$と、それぞれのパラメタの母平均との差を表現しているので、その分散$\sigma_{0}^{2}$と$\sigma_{1}^{2}$は、個人ごとの真の切片と傾きの平均値周りのばらつきを表現している。これらの分散は、切片と傾きのうちのモデルの予測変数によって説明できなかった部分を表しており、条件付き残差分散とも呼ばれる。
+
+レベル2サブモデルは個人ごとの切片(初期値)と傾き(変化率)の間に関係をもつことを許容している。つまり、切片が小さければ、傾きも小さいという関係やその逆の関係もしかりである。これを表現しているのが$\sigma_{01}$である。これらすべての分散をまとめて、レベル2の誤差共分散行列と呼ぶ。また、レベル1の残差分散とレベル2の誤差共分散行列をまとめて合成成分と呼ぶ。
+
+## マルチレベルモデルの実践
+
+ここでは`nlme`パッケージの`lme`関数を利用してマルチレベルモデルを使ってパラメタを推定する。`lme`関数は少し記述方法が特殊なので、わかりにくいが、下記のサイトで`lme4`パッケージの`lmer`関数と対比しながら説明されているので、非常にわかりやすい。
+
+- [Using R and lme/lmer to fit different two- and three-level longitudinal models](https://rpsychologist.com/r-guide-longitudinal-lme-lmer#conditional-growth-model)
+
+モデル式として、交互作用を記述することになるが、これはレベル1とレベル2を1つにまとめると理解できる。表記のために$Age_{ij}-1)$を$AgeC_{ij}$と表記する。
+
+$$
+\begin{eqnarray}
+Cog_{ij} &=& (\gamma_{00} + \gamma_{01} Program_{i}) + (\gamma_{10} + \gamma_{11} Program_{i}) \cdot AgeC_{ij} \\
+&=& \gamma_{00} + \color{green}{\gamma_{01} Program_{i}} + \color{blue}{\gamma_{10} \cdot AgeC_{ij}} + \color{red}{\gamma_{11} Program_{i} \cdot AgeC_{ij}}
+\end{eqnarray}
+$$
+
+```{r}
+# https://stats.stackexchange.com/questions/64226/lme-and-lmer-comparison
+# https://rstudy.info/lmer%E3%80%81glm%E3%80%81lme%E3%81%AB%E3%81%8A%E3%81%91%E3%82%8Bna%E3%81%AE%E3%83%87%E3%83%95%E3%82%A9%E3%83%AB%E3%83%88%E8%A8%AD%E5%AE%9A/
+# lmer(cog ~ age_center * program + (age_center | id), data = early.int)
+
+fit_ml <- lme(
+  fixed = cog ~ age_center * program, 
+  random = ~ age_center | id, 
+  data = early.int, 
+  method = "ML") # Default REML
+summary(fit_ml)
+```
+
+推定された固定効果を解釈するといっても、通常の回帰分析とは異なるので、注意が必要。レベル2サブモデルの固定効果が表現しているのは、レベル1サブモデルの個人ごとの成長パラメタである切片と傾きになる。整理すると下記の表の通り。
+
+|内容|パラメタ|推定値|
+|:---:|:---:|:---:|
+|$\pi_{0i}$|切片$\gamma_{00}$|106.351|
+|$\pi_{0i}$|`program`$\color{green}{\gamma_{01}}$|11.60504|
+|$\pi_{1i}$|切片$\color{blue}{\gamma_{10}}$|-21.977|
+|$\pi_{1i}$|`program`$\color{red}{\gamma_{11}}$|4.09847|
+
+
+実際に数式に当てはめるとわかりやすい。上の式は`program`から初期状態への影響を表現しており、下の式は`program`から変化率への影響を表現している。
+
+$$
+\begin{eqnarray}
+\hat{\pi}_{0i} &=& 106.351 + 11.605 \cdot Program_{i}  \\
+\hat{\pi}_{1i} &=& -21.977 + 4.098  \cdot  Program_{i}  \\
+\end{eqnarray}
+$$
+
+1歳時点の初期値については、プログラム不参加の個人の平均的な値は106点で、プログラム参加の個人は106点に加えて11点、つまり平均的に117点(=106+11)になる。変化率については、プログラム不参加の個人の平均的な値は-21で、プログラム参加の個人は-21に加えて4、つまり平均的に-17(=-21+4)になる。プログラムに参加しても、参加しなくても、認知能力は低下するが、プログラムに参加している方が低下具合が緩やかになる。
+
+$$
+\begin{eqnarray}
+\hat{\pi}_{0i} &=& 106.351 + 11.605 \cdot Program_{i}  \\
+\hat{\pi}_{1i} &=& -21.977 + 4.098  \cdot Program_{i}  \\
+\end{eqnarray}
+$$
+
+
+この関係を可視化してみるとより固定効果の意味がわかりやすい。例えば、下記の図の左上の点は、`age=0, program=1`なので、
+
+$$
+\begin{eqnarray}
+\hat{\pi}_{0i} &=& 106.351 + 11.605 \cdot 1 = 117.956 \\
+\hat{\pi}_{1i} &=& -21.977 + 4.098  \cdot 1 = -17.879 \\
+Cog_{ij} &=& 117.956 -17.879 \cdot 0 = 117.956
+\end{eqnarray}
+$$
+
+である。これを計算して可視化すれば、プログラムに参加した個人は、1歳時点の認知能力が高く、認知能力は低下するものの、プログラムに参加している方が低下具合が緩やかになる。
+
+```{r}
+df_fit_plt <- 
+expand_grid(age_center = 0:1, program = 0:1) %>% 
+  mutate(cog = fit_ml$coefficients$fixed[[1]] + 
+           fit_ml$coefficients$fixed[[2]] * age_center + 
+           fit_ml$coefficients$fixed[[3]] * program + 
+           fit_ml$coefficients$fixed[[4]] * age_center * program
+         )
+ggplot(df_fit_plt, aes(age_center, cog, col = as.character(program))) + 
+  geom_path(size = 1) +
+  geom_text(aes(y = cog + 2, label = round(cog,2))) +
+  scale_x_continuous(breaks = c(0, 0.5, 1), label = c("1", "1.5", "2")) +
+  scale_color_discrete(name = "Program") + 
+  scale_y_continuous(breaks = seq(50, 150, 10), limits = c(80, 130)) +
+  xlab("age") + 
+  theme_bw()
+```
+
+今回のモデルに対しては外挿になるので、あまりよろしくないが、緩やかに低下する具合をよりイメージしやすくするために、年齢を少しだけ伸ばしておく。
+
+```{r}
+df_fit_plt <- 
+  expand_grid(age_center = 0:3, program = 0:1) %>% 
+  mutate(cog = fit_ml$coefficients$fixed[[1]] + 
+           fit_ml$coefficients$fixed[[2]] * age_center + 
+           fit_ml$coefficients$fixed[[3]] * program + 
+           fit_ml$coefficients$fixed[[4]] * age_center * program
+  )
+ggplot(df_fit_plt, aes(age_center, cog, col = as.character(program))) + 
+  geom_path(size = 1) +
+  geom_text(aes(y = cog + 2, label = round(cog,2))) +
+  scale_x_continuous(breaks = c(0, 0.5, 1, 1.5, 2, 2.5, 3), label = c("1", "1.5", "2", "2.5", "3", "3.5", "4")) +
+  scale_color_discrete(name = "Program") + 
+  scale_y_continuous(breaks = seq(20, 150, 10), limits = c(30, 130)) +
+  xlab("age") + 
+  theme_bw()
+```
+
+## パラメタのまとめ
+
+
+|                                   |                                        定義                                         |                                     説明                                     |
+| :-------------------------------: | :---------------------------------------------------------------------------------: | :--------------------------------------------------------------------------: |
+|            $\pi_{0i}$             |                             母集団における個人$i$の切片                             |                       1 歳時点の個人$i$の$Cog$の初期値                       |
+|            $\pi_{1i}$             |                             母集団における個人$i$の傾き                             |                            個人$i$の$Cog$の変化率                            |
+|      $\sigma_{\epsilon}^{2}$      |                  母集団における個人$i$の全ての測定時点を通した残差                  |             個人$i$の変化の軌跡周辺に観察されたデータの散らばり              |
+|           $\gamma_{00}$           |      レベル 2 の説明変数の値が 0 である個人のレベル 1 の切片$\pi_{0i}$の母平均      |                      プログラム不参加者の初期値の母平均                      |
+|           $\gamma_{01}$           | レベル 2 の説明変数の値が 1 単位変化したときのレベル 1 の切片$\pi_{0i}$の母平均の差 |                プログラム参加者と不参加者の初期値の母平均の差                |
+|           $\gamma_{10}$           |      レベル 2 の説明変数の値が 0 である個人のレベル 1 の切片$\pi_{1i}$の母平均      |                      プログラム不参加者の変化率の母平均                      |
+|           $\gamma_{11}$           | レベル 2 の説明変数の値が 1 単位変化したときのレベル 1 の切片$\pi_{1i}$の母平均の差 |                プログラム参加者と不参加者の変化率の母平均の差                |
+|         $\sigma_{0}^{2}$          |                  母集団全体の切片 $\pi_{0i}$のレベル 2 の残差分散                   |      プログラムへの参加を統制した上での、母集団における初期値の残差分散      |
+|         $\sigma_{1}^{2}$          |                  母集団全体の傾き $\pi_{1i}$のレベル 2 の残差分散                   |      プログラムへの参加を統制した上での、母集団における変化率の残差分散      |
+| $\sigma_{01}^{2},\sigma_{10}^{2}$ |         母集団全体の切片 $\pi_{0i}$と傾き$\pi_{1i}$のレベル 2 の残差共分散          | プログラムへの参加を統制した上での、母集団における初期値と変化率の残差共分散 |
+
+## 参考文献
+
+- [縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)
+- [Applied Longitudinal Data Analysis: Modeling Change and Event Occurrence](https://www.amazon.com/Applied-Longitudinal-Data-Analysis-Occurrence/dp/B017YBZFW0)
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+- [Chapter 9 Mixed Effects Models](https://glennwilliams.me/r4psych/mixed-effects-models.html)
+- [Applied longitudinal data analysis in brms and the tidyverse](https://bookdown.org/content/4253/index.html)
+

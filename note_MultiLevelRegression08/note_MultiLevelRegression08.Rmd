@@ -1,0 +1,540 @@
+---
+title: "マルチレベルモデリングChapter5:時変な予測変数を扱う"
+pagetitle: "マルチレベルモデリングChapter5:時変な予測変数を扱う"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)を利用してマルチレベルモデリングの勉強内容をまとめたもの。下記のサポートサイトにサンプルデータなどが保存されている。
+
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+
+ここでの目的は、時変の予測変数を扱うマルチレベルモデルについてまとめておく。
+
+## 時変の予測変数
+
+時変の予測変数とは、時不変な変数とは異なり、名前の通り、観測タイミングによって値が変わる変数のこと。ここでは、失業が抑うつ症状に与える影響を調べた研究のデータを利用する。
+
+今回のデータは、254人の調査対象(`id`)がおり、失業後すぐの0-2ヶ月後(`months`)、3-8ヶ月後、10−16ヶ月後に面接を行うことにより、うつ病自己評価尺度(`cesd`)を観測している。うつ病自己評価尺度は0から80までの範囲で値を取り、面接時点で失業しているかどうかは、失業時を`unemp=1`として管理され、最初の面接時点では失業(`unemp=1`)となる。
+
+```{r}
+library(tidyverse)
+library(broom)
+library(nlme)
+library(DT)
+library(patchwork)
+library(stargazer)
+
+unemployment <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/unemployment_pp.txt", header=T, sep=",")%>% 
+  mutate(interview = case_when(
+    months < 3 ~ 1,
+    months < 8 ~ 2,
+    TRUE ~ 3)
+    )
+
+datatable(unemployment %>% mutate_if(is.numeric, round, 2))
+```
+
+このデータの特徴は、測定回数や測定間隔も異なれば、その時点での失業状態もバラバラという点である。下記は、測定回数と失業状態の組み合わせを計算したもので、`[1-0-0]`は最初は失業していて、仕事を得ている状態を表す。
+
+```{r}
+df_tmp <- unemployment %>%
+  select(-months, -cesd) %>%
+  mutate(interview = str_c("interview_", interview)) %>%
+  pivot_wider(id_cols = id, names_from = interview, values_from = unemp)
+
+df_stat <- df_tmp %>% 
+  group_by(interview_1, interview_2, interview_3) %>%
+  count() %>% 
+  ungroup()
+
+df_stat
+```
+
+緑は失業状態、赤は就業状態、グレーはNULLを表す。このように時変な変数は、測定タイミングに応じて、異なる値をとっている。
+
+```{r}
+df_stat %>% 
+  select(-n) %>% 
+  mutate(rowid = row_number()) %>% 
+  pivot_longer(cols = interview_1:interview_3,
+               names_to = "interview",
+               values_to = "value") %>% 
+  mutate(value = as.character(value)) %>% 
+  ggplot(., aes(interview, rowid, fill = value)) + 
+  geom_tile() + 
+  theme_bw()
+```
+
+もう少し調べると、132人は全ての面接時点で失業しており、62人は最初の面接後は就業している(`[1-0-0],[1-0-NA],[1-NA-0],[NA-1-0]`)。このように就業パターンが多様であることがわかる。
+
+```{r}
+df_stat %>% 
+  rowwise() %>% 
+  mutate(min = min(interview_1, interview_2, interview_3, na.rm = TRUE),
+         max = max(interview_1, interview_2, interview_3, na.rm = TRUE),
+         all_unemp = min == max) %>% 
+  group_by(all_unemp) %>% 
+  summarise(total = sum(n))
+```
+
+さらに理解を深めるために、各パターンに応じた個人成長プロットも可視化しておく。
+
+```{r}
+unemployment %>% 
+  left_join(., 
+            df_tmp %>% 
+              mutate_at(vars(matches("interview")), as.character) %>% 
+              mutate(pattern = paste0(interview_1, "-", interview_2, "-", interview_3)) %>% 
+              select(id, pattern),
+            by = c("id" = "id")
+  ) %>% 
+  mutate(id = factor(id)) %>% 
+  ggplot(., aes(months, cesd, group = id)) + 
+  geom_point(size = 1) + 
+  geom_line(size = 1, alpha = 0.1) + 
+  scale_x_continuous(breaks = seq(0, 16, 1)) + 
+  ylim(0, 80) + 
+  facet_wrap( ~ pattern, nrow = 4) + 
+  theme_bw() + 
+  theme(legend.position = "none")
+```
+
+
+## 時変な変数を扱うモデル
+
+まずは無条件成長モデルを当てはめてから時変変数を扱うマルチレベルモデルを当てはめていく。各モデルの誤差項は記載を省略したいので、ここでまとめておく。
+
+$$
+\begin{eqnarray}
+\begin{bmatrix}
+\zeta_{0i} \\
+\zeta_{1i}
+\end{bmatrix} &\sim& N 
+\begin{bmatrix}
+\sigma_{0}^{2} & \sigma_{01} \\
+\sigma_{10} & \sigma_{1}^{2}
+\end{bmatrix},\quad  \epsilon_{ij} \sim N(0, \sigma_{\epsilon}^{2}) 
+\end{eqnarray}
+$$
+
+無条件成長モデルは下記のモデル。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + \gamma_{10}  TIME_{ij} + [\zeta_{0i} + \zeta_{1i} TIME_{ij} + \epsilon_{ij}]
+\end{eqnarray}
+$$
+
+このモデルを当てはめた結果、失業初日(`time=0`)だと`cesd`は17.6点をとり、変化率は`-0.42`なので、時間経過とともに減少していくことがわかる。分散成分は有意であることからも、説明されていない部分が大きく、改善の余地があることがわかる。
+
+```{r}
+model.a <- lme(cesd ~ months, 
+               data = unemployment, 
+               random = ~ months|id, 
+               method = "ML")
+list(
+  summary(model.a),
+  VarCorr(model.a)
+)
+```
+
+## 時変変数を追加したモデル
+
+時変変数を追加してモデルを改善しようと思っても、ここで問題になるのが、時変の予測変数`unemp`はどのレベルに組み込めばよいかわからないということ。これを手助けをしてくれるのが合成モデル。`unemp`は時変な予測変数なので添字$i,j$を取れるため、主効果として投入してみると、合成モデルは下記のとおりとなる。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + \gamma_{10}  TIME_{ij}+ \gamma_{20}  \color{red}{UNEMP_{ij}} + [\zeta_{0i} + \zeta_{1i} TIME_{ij} + \epsilon_{ij}] \\
+\pi_{0i} &=& \gamma_{00} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \zeta_{1i} \\
+\pi_{2i} &=& \gamma_{20}
+\end{eqnarray}
+$$
+
+この合成モデルの`cesd`は、失業後の月数`months`と雇用状態`unemp`に影響を受けて、残差$\zeta_{0i}, \zeta_{1i},  \epsilon_{ij}$が加わることで決定されると考えている。
+
+- $\gamma_{00}$は、論理的には不可能な値。失業初日(`time=0`)で雇用されている(`unemp=0`)であるため。
+- $\gamma_{10}$は、`unemp`で統制した変化率の効果
+- $\gamma_{20}$は、`months`で統制した雇用(`unemp`)の効果
+
+ただ`unemp`は時変の予測変数なので、時変のパターンが存在する。典型的なパターンとしては、
+
+- 常に失業中の`1-1-1`
+- すぐ仕事が見つかる`1-0-0`
+- しばらくして仕事が見つかる`1-1-0`
+- 再度失業するパターン`1-0-1`
+
+が考えられる。
+
+モデルBは`unemp`の主効果を固定効果として追加した下記のモデルをあてはめる。
+
+```{r}
+model.b <- lme(cesd ~ months + unemp, 
+               data = unemployment, 
+               random = ~ months|id, 
+               method = "ML")
+list(
+  summary(model.b),
+  VarCorr(model.b)
+)
+```
+
+常に失業中の`1-1-1`の場合、`unemp`の効果はないので、線形で減少することになる。これは典型的なパターンを可視化しているので、実際は個人ごとに切片と変化はランダムにばらつくことになる。残りは非連続なパターンなので、`unemp`の効果は各タイミングによって作用することになる。ここでは典型的な軌跡を描くために、5ヶ月と10ヶ月のタイミングを設定している。このモデルでは、`unemp`の効果は定数として現れるので、ギャップが`5.1`程度存在する。
+
+```{r}
+fixef.b <- fixef(model.b)
+df_fit_plt_p1 <- 
+  tibble(unemp = 1, months = seq(from = 0, to = 14, by = 1)) %>% 
+  mutate(cesd = 
+           fixef.b[[1]] + 
+           fixef.b[[2]] * months + 
+           fixef.b[[3]] * unemp
+  )
+
+p1 <- ggplot(df_fit_plt_p1, aes(months, cesd)) + 
+  geom_path(size = 1) +
+  geom_text(aes(y = cesd + 0.5, label = round(cesd, 0))) +
+  scale_x_continuous(breaks = seq(0, 14, 1)) +
+  scale_y_continuous(breaks = seq(0, 20, 1), limits = c(5, 20)) +
+  xlab("months") + 
+  ggtitle("Unemployment Pattern 1-1-1")
+
+
+df_fit_plt_p2 <- 
+  tibble(unemp  = rep(1:0, times = c(6, 10)),
+         months = c(seq(0, 5, 1), seq(5, 14, 1))) %>%
+  mutate(cesd = 
+           fixef.b[[1]] +
+           fixef.b[[2]] * months +
+           fixef.b[[3]] * unemp)
+
+p2 <- ggplot(df_fit_plt_p2, aes(months, cesd)) + 
+  geom_path(size = 1) +
+  geom_text(aes(y = cesd + 0.5, label = round(cesd, 0))) +
+  scale_x_continuous(breaks = seq(0, 14, 1)) +
+  scale_y_continuous(breaks = seq(0, 20, 1), limits = c(5, 20)) +
+  xlab("months") + 
+  ggtitle("Unemployment Pattern 1-0-0")
+
+
+df_fit_plt_p3 <- 
+  tibble(unemp  = rep(1:0, times = c(11, 5)),
+         months = c(seq(0, 10, 1), seq(10, 14, 1))) %>%
+  mutate(cesd = 
+           fixef.b[[1]] +
+           fixef.b[[2]] * months +
+           fixef.b[[3]] * unemp)
+
+p3 <- ggplot(df_fit_plt_p3, aes(months, cesd)) + 
+  geom_path(size = 1) +
+  geom_text(aes(y = cesd + 0.5, label = round(cesd, 0))) +
+  scale_x_continuous(breaks = seq(0, 14, 1)) +
+  scale_y_continuous(breaks = seq(0, 20, 1), limits = c(5, 20)) +
+  xlab("months") + 
+  ggtitle("Unemployment Pattern 1-1-0")
+
+
+df_fit_plt_p4 <- 
+  tibble(unemp  = rep(c(1, 0, 1), times = c(6, 6, 5)),
+         months = c(seq(0, 5, 1), seq(5, 10, 1), seq(10, 14, 1))) %>%
+  mutate(cesd = 
+           fixef.b[[1]] +
+           fixef.b[[2]] * months +
+           fixef.b[[3]] * unemp)
+
+p4 <- ggplot(df_fit_plt_p4, aes(months, cesd)) + 
+  geom_path(size = 1) +
+  geom_text(aes(y = cesd + 0.5, label = round(cesd, 0))) +
+  scale_x_continuous(breaks = seq(0, 14, 1)) +
+  scale_y_continuous(breaks = seq(0, 20, 1), limits = c(5, 20)) +
+  xlab("months") + 
+  ggtitle("Unemployment Pattern 1-0-1") 
+  
+
+(p1 | p2) / (p3 | p4) & theme_bw()
+```
+
+
+モデルAとモデルBを比べると、`months`の効果は0.42から0.20と小さくなり、`unemp`によって調整されていることがわかる。モデル指標や分散もモデルBのほうが良くなっていることがわかる。モデルBを使って極端は対比パターンを可視化すると、よりモデルへの理解が深まる。極端なパターンとして、ここでは常に雇用されなかった個人と、4ヶ月目から雇用された個人を可視化している。個人は、雇用状況の各タイミングによって、2本の線を上下することになる。
+
+職を得て面接可能になるのは3.5ヶ月目からであるため、書籍ではこれ以前の部分を点線で可視化しているが、ここでは点線で可視化していない、また、3.5ヶ月目ではなく、4ヶ月目として変更している。
+
+```{r}
+tibble(unemp = rep(c(1,0), times = c(15, 11)), 
+       months = c(seq(0, 14, 1), seq(4, 14, 1))) %>%
+  mutate(type = paste0("unemp=", unemp),
+         cesd = 
+           fixef.b[[1]] + 
+           fixef.b[[2]] * months + 
+           fixef.b[[3]] * unemp
+         ) %>% 
+  ggplot(., aes(months, cesd, col = type)) + 
+  geom_path(size = 1) +
+  geom_text(aes(y = cesd + 0.5, label = round(cesd,1))) +
+  scale_x_continuous(breaks = seq(0, 14, 1)) +
+  scale_y_continuous(breaks = seq(0, 20, 1), limits = c(5, 20)) +
+  xlab("months") + 
+  ggtitle("Main effects of unemp and time, Unemployment Pattern 1-1-1 vs. x-0-0") + 
+  theme_bw()
+```
+
+現状、このモデルBの`unemp`のレベル2サブモデルには残差がなく固定されているが、
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + \gamma_{10}  TIME_{ij}+ \gamma_{20} \color{red}{UNEMP_{ij}} + [\zeta_{0i} + \zeta_{1i} TIME_{ij} + \epsilon_{ij}] \\
+\pi_{0i} &=& \gamma_{00} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \zeta_{1i} \\
+\pi_{2i} &=& \gamma_{20}
+\end{eqnarray}
+$$
+下記のとおり、残差を追加することで、`unemp`の効果を個人でばらつかせることも可能である。
+
+$$
+\begin{eqnarray}
+\pi_{2i} &=& \gamma_{20} + \zeta_{2i} \\
+\begin{bmatrix}
+\zeta_{0i} \\
+\zeta_{1i} \\
+\zeta_{2i} 
+\end{bmatrix} &\sim& N \left(
+\begin{bmatrix}
+0 \\
+0 \\
+0 
+\end{bmatrix},
+\begin{bmatrix}
+\sigma_{0}^{2} & \sigma_{01} & \sigma_{02} \\
+\sigma_{10} & \sigma_{1}^{2} & \sigma_{12} \\
+\sigma_{20} & \sigma_{21}^{2} & \sigma_{2}^{2}
+\end{bmatrix}
+\right)
+,\quad  \epsilon_{ij} \sim N(0, \sigma_{\epsilon}^{2}) 
+\end{eqnarray}
+$$
+
+ただ、追加できるからといって、追加するべきかどうかは理論的に妥当であるかどうかによる。つまり、`unemp`の効果が`cesd`に与える効果が個人でランダムに変化するかどうか、である。また、個人で3回の観測しかないと、分散を推定するのに十分とは言えないため、境界制約を含めパラメタの推定ができなくなる可能性もある。そのため、時変な予測変数をレベル2サブモデルでランダムに変動させることは推奨されない。
+
+## 交互作用を追加したモデル
+
+ここでは`unemp`と`months`の主効果のみを含むモデルBを改良して、モデルCでは`unemp`と線形な`months`の交互作用を追加した下記のモデルをあてはめる。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + \gamma_{10} TIME_{ij} + \gamma_{20} UNEMP_{ij} + \gamma_{30} UNEMP_{ij} × TIME_{ij} + [\zeta_{0i} + \zeta_{1i} TIME_{ij} + \epsilon_{ij}]
+\end{eqnarray}
+$$
+
+モデルを当てはめた結果を見ると、交互作用の`months:unemp`は-0.46で有意であった。つまり、失業状態がスコアに与える影響が時間経過とともに変動し、時間経過に伴うスコアへの変化が失業状態によって異なる、ということになる。
+
+```{r}
+model.c <- lme(cesd ~ months*unemp, 
+               data = unemployment, 
+               random = ~ months|id, 
+               method = "ML")
+list(
+  summary(model.c),
+  VarCorr(model.c)
+)
+```
+
+言葉では理解しにくいので可視化してみると、予期していないパターンの直線となっていることがわかる。つまり、雇用されている場合(`unemp=0`)においては、`cesd`が上昇する可能性があることをモデルは示している。`months`の効果は0.16で有意ではなく、この場合、0である可能性もありうる。この結果より、再雇用者の直線の傾きを0にし、再雇用者は時間経過とともに変化しないと制約をかけることが望ましいとも考えられる。
+
+書籍では、このように再雇用者の`cesd`の上昇は望ましくないと考えているが、実際、雇用されたらされたらで、`cesd`が上昇することは有り得そうな話である。仕事をしていることで、様々な要因(特に人間関係や職務評価など)によって、うつ病に追い込まれるケースは多そうなので。
+
+```{r}
+fixef.c <- fixef(model.c)
+tibble(unemp = rep(c(1,0), times = c(15, 11)), 
+       months = c(seq(0, 14, 1), seq(4, 14, 1))) %>%
+  mutate(type = paste0("unemp=", unemp),
+         cesd = 
+           fixef.c[[1]] + 
+           fixef.c[[2]] * months + 
+           fixef.c[[3]] * unemp + 
+           fixef.c[[4]] * unemp*months 
+  ) %>%   ggplot(., aes(months, cesd, col = type)) + 
+  geom_path(size = 1) +
+  geom_text(aes(y = cesd + 0.5, label = round(cesd,1))) +
+  scale_x_continuous(breaks = seq(0, 14, 1)) +
+  scale_y_continuous(breaks = seq(0, 20, 1), limits = c(5, 20)) +
+  xlab("months") + 
+  ggtitle("Main effects of unemp and time, Unemployment Pattern 1-1-1 vs. x-0-0") + 
+  theme_bw()
+```
+
+モデルに雇用されている場合(`unemp=0`)に、傾きが水平になる制約を入れたいのであれば、$\gamma_{10} TIME_{ij}$をモデルから抜けば良いように見えるが、つまり、雇用されている場合(`unemp=0`)には、`unemp`の効果しか作用しなくなるが、これは構造的な部分と確率的な部分が一致しておらず、モデルとして成立していないので、当てはめることができない。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + \gamma_{20} UNEMP_{ij} + \gamma_{30} UNEMP_{ij} × TIME_{ij} + [\zeta_{0i} + \zeta_{1i} TIME_{ij} + \epsilon_{ij}]
+\end{eqnarray}
+$$
+
+$TIME_{ij}$のランダム効果$\zeta_{1i}$が含まれるが主効果$\gamma_{10}$は含まない、交互作用$\gamma_{30}$を含む一方で対応するランダム効果$\zeta_{3i}$は含まないため、モデルとして成立していない。そのため、モデルを当てはまえるためには、下記のように効果とランダム要素を整える必要がある。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + \gamma_{20} UNEMP_{ij} + \gamma_{30} UNEMP_{ij} × TIME_{ij} + [\zeta_{0i} + \zeta_{3i} UNEMP_{ij} × TIME_{ij} + \epsilon_{ij}]
+\end{eqnarray}
+$$
+
+ただ、このモデルは雇用されている個人の傾きを成約するために作ったモデルでした。$\zeta_{0i}$を含めることで、雇用された個人の軌跡がランダムにばらつくことを認めながら、$\zeta_{2i}$がないので、雇用されていない個人の切片の増分$\gamma_{20}$がランダムにばらつくことを許していない。つまり、再雇用者の水平の水準がランダムに変動することを認めながら、この水準の増加がランダムにばらつくことは許さない、という非常に厳しい制約を課していることになる。そのため、このモデルの当てはまりは非常に悪くなってしまう。
+
+## 制約つき交互作用を追加したモデル
+
+これを検証するためにモデルDを考える。モデルDは`unemp`が固定効果とランダム効果を持ち、各固定効果にランダム効果を持つことを許容している。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + \gamma_{20} UNEMP_{ij} + \gamma_{30} UNEMP_{ij} × TIME_{ij} + [\zeta_{0i} + \zeta_{2i} UNEMP_{ij}+ \zeta_{3i} UNEMP_{ij} × TIME_{ij} + \epsilon_{ij}]
+\end{eqnarray}
+$$
+
+モデルDは、サポートサイトのコードでは収束しないため、少し調整する必要がある。ただ、この設定では不要な調整も含まれている可能性がある。
+
+```{r, cache=TRUE}
+# https://groups.google.com/g/davis-rug/c/sbcjeMalCgc?pli=1
+# 調整しないと収束しない 
+# Error in lme.formula(cesd ~ unemp + unemp:months, unemployment, random = ~unemp +  : 
+#   nlminb problem, convergence error code = 1
+#   message = iteration limit reached without convergence (10)
+
+control.list <-
+  lmeControl(
+    maxIter = 500,
+    msMaxIter = 500,
+    msMaxEval = 500,
+    tolerance = 0.1,
+    msTol = 0.1,
+    sing.tol = 1e-20
+  )
+
+model.d <-
+  lme(
+    cesd ~ unemp + unemp:months,
+    random =  ~ unemp + unemp:months | id,
+    data = unemployment,
+    control = control.list
+  )
+
+list(
+  summary(model.d),
+  VarCorr(model.d)
+)
+```
+
+職を失った直後(`month=0`)では、失業者の`cesd`は18.12(=11.20 + 6.92)で、月ごとに-0.30ポイントづつ低下していき、再び雇用されると	6.92ポイント下がることになる。
+
+```{r}
+fixef.d <- fixef(model.d)
+tibble(unemp = rep(c(1,0), times = c(15, 11)), 
+       months = c(seq(0, 14, 1), seq(4, 14, 1))) %>%
+  mutate(type = paste0("unemp=", unemp),
+         cesd = 
+           fixef.d[[1]] + 
+           fixef.d[[2]] * unemp + 
+           fixef.d[[3]] * unemp*months 
+  ) %>% 
+  ggplot(., aes(months, cesd, col = type)) + 
+  geom_path(size = 1) +
+  geom_text(aes(y = cesd + 0.5, label = round(cesd,1))) +
+  scale_x_continuous(breaks = seq(0, 14, 1)) +
+  scale_y_continuous(breaks = seq(0, 20, 1), limits = c(5, 20)) +
+  xlab("months") + 
+  ggtitle("Constraining the effects time among the re-employed,\nUnemployment Pattern 1-1-1 vs. x-0-0") + 
+  theme_bw()
+```
+
+このモデルDは、モデルCと比べて、AIC、BICもあまり変わらないため、研究者らの仮説をより良く表現されている。ここまでに当てはめたモデルのサマリを下記にまとめておく。
+
+```{r, include=FALSE}
+stargazer::stargazer(
+  model.a,
+  model.b,
+  model.c,
+  model.d,
+  type = "html")
+```
+
+
+<table style="text-align:center"><tr><td colspan="5" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"></td><td colspan="4"><em>Dependent variable:</em></td></tr>
+<tr><td></td><td colspan="4" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left"></td><td colspan="4">cesd</td></tr>
+<tr><td style="text-align:left"></td><td>ModelA</td><td>ModelB</td><td>ModelC</td><td>ModelD</td></tr>
+<tr><td colspan="5" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left">Constant$\gamma_{00}$</td><td>17.669<sup>***</sup></td><td>12.666<sup>***</sup></td><td>9.617<sup>***</sup></td><td>11.19<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.777)</td><td>(1.245)</td><td>(1.895)</td><td>(0.792)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td></tr>
+
+<tr><td style="text-align:left">months$\gamma_{10}$</td><td>-0.422<sup>***</sup></td><td>-0.202<sup>**</sup></td><td>0.162</td><td></td></tr>
+<tr><td style="text-align:left"></td><td>(0.083)</td><td>(0.094)</td><td>(0.194)</td><td></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+
+<tr><td style="text-align:left">unemp$\gamma_{20}$</td><td></td><td>5.111<sup>***</sup></td><td>8.529<sup>***</sup></td><td>6.92<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.991)</td><td>(1.883)</td><td>(0.932)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td></tr>
+
+<tr><td style="text-align:left">months:unemp$\gamma_{30}$</td><td></td><td></td><td>-0.465<sup>**</sup></td><td>-0.30<sup>**</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td>(0.218)</td><td>(0.112)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td></tr>
+
+<tr><td style="text-align:left">個人内$\sigma^{2}_{\epsilon}$</td><td>68.85</td><td>62.39</td><td>62.03</td><td>59.12</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td></tr>
+
+<tr><td style="text-align:left">切片$\sigma^{2}_{0}$</td><td>86.85</td><td>93.52</td><td>93.71</td><td>45.75</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td></tr>
+
+<tr><td style="text-align:left">変化率$\sigma^{2}_{1}$</td><td>0.36</td><td>0.46</td><td>0.45</td><td></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td></tr>
+
+<tr><td style="text-align:left">UNEMP$\sigma^{2}_{2}$</td><td></td><td></td><td></td><td>45.63</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td></tr>
+
+<tr><td style="text-align:left">UNEMP:TIME$\sigma^{2}_{3}$</td><td></td><td></td><td></td><td>0.76</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td></tr>
+
+<tr><td colspan="5" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Observations</td><td>674</td><td>674</td><td>674</td><td>674</td></tr>
+<tr><td style="text-align:left">Log Likelihood</td><td>-2,566</td><td>-2,553</td><td>-2,551</td><td>-2,547</td></tr>
+<tr><td style="text-align:left">Akaike Inf. Crit.</td><td>5,145</td><td>5,121</td><td>5,119</td><td>5,115</td></tr>
+<tr><td style="text-align:left">Bayesian Inf. Crit.</td><td>5,172</td><td>5,153</td><td>5,155</td><td>5,160</td></tr>
+<tr><td colspan="5" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"><em>Note:</em></td><td colspan="5" style="text-align:right"><sup>*</sup>p<0.1; <sup>**</sup>p<0.05; <sup>***</sup>p<0.01</td></tr>
+</table>
+
+## 参考文献
+
+- [縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)
+- [Applied Longitudinal Data Analysis: Modeling Change and Event Occurrence](https://www.amazon.com/Applied-Longitudinal-Data-Analysis-Occurrence/dp/B017YBZFW0)
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+- [Chapter 9 Mixed Effects Models](https://glennwilliams.me/r4psych/mixed-effects-models.html)
+- [Applied longitudinal data analysis in brms and the tidyverse](https://bookdown.org/content/4253/index.html)
+
+
+
+

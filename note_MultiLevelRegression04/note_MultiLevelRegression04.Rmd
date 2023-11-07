@@ -1,0 +1,315 @@
+---
+title: "マルチレベルモデリングChapter4:モデルの比較方法"
+pagetitle: "マルチレベルモデリングChapter4:モデルの比較方法"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)を利用してマルチレベルモデリングの勉強内容をまとめたもの。下記のサポートサイトにサンプルデータなどが保存されている。
+
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+
+## 分析内容について
+分析内容は、前回に引き続き、青年期のアルコール摂取量の変化に関する分析。[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)のp75に詳細は書いてあるとおり、青年期のアルコール摂取量の変化に関する分析をここでもお借りする。82人(`n`)を対象に14歳,15歳,16歳の3回(`age`)の計測タイミングがある。`alcuse`はアルコール摂取に関する頻度の合成スコアで、予測変数として、友達の飲酒割合に関する`peer`と親がアルコール依存症かを表す`coa`が用意されている。
+
+この分析の目的は、親がアルコール依存症であったり、自分の周囲の友だちが飲酒していれば、自分のアルコール摂取量も14歳,15歳,16歳の時間経過とともに、アルコール摂取量が増加していくのではないか、という仮説を検証すること。
+
+```{r}
+library(tidyverse)
+library(nlme)
+library(DT)
+
+alcohol1 <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/alcohol1_pp.txt", header=T, sep=",")
+alcohol1 <- alcohol1 %>% mutate(
+  mean_peer = mean(peer), 
+  flg_peer = ifelse(peer < mean_peer, "low peer", "high peer"),
+  flg_peer = factor(flg_peer, levels = c("low peer", "high peer"))
+  )
+#Model A B
+model.a <- lme(alcuse ~ 1, alcohol1, random = ~1 |id, method = "ML")
+model.b <- lme(alcuse ~ age_14 , data = alcohol1, random= ~ age_14 | id, method = "ML")
+
+datatable(alcohol1 %>% mutate_if(is.numeric, round, digit = 2))
+```
+
+
+## モデルC
+
+この分析の主たる目的は、親のアルコール依存症(`COA`)の影響であり、周囲の飲酒環境(`PEER`)は統制変数である。このモデルは初期値と変化率の予測変数として、親のアルコール依存症(`COA`)が含まれているモデル。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} COA_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{11} COA_{i} + \zeta_{1i} \\
+\\
+Y_{ij} &=& \gamma_{00} + \gamma_{01} COA_{i} + \gamma_{10} TIME_{ij} + \gamma_{11} COA_{i} × TIME_{ij} + (\epsilon_{ij} + \zeta_{0i} + \zeta_{1i} × TIME_{ij})
+\end{eqnarray}
+$$
+
+```{r}
+model.c <- lme(
+  fixed  = alcuse ~ coa*age_14, 
+  random = ~ age_14 | id, 
+  data = alcohol1, 
+  method = "ML")
+summary(model.c)
+```
+
+- 親がアルコール依存症ではない個人の初期値$\gamma_{00}$は`r round(fixef(model.c)[[1]], 2)`
+- 親がアルコール依存症ではない個人とそうではない個人の初期値の差$\gamma_{01}$は`r round(fixef(model.c)[[2]], 2)`
+- 親がアルコール依存症ではない個人の変化率$\gamma_{10}$は`r round(fixef(model.c)[[3]], 2)`
+- 親がアルコール依存症ではない個人とそうではない個人の変化率の差$\gamma_{11}$は`r round(fixef(model.c)[[4]], 2)`。ただ0の可能性がある。
+
+**モデルCからわかることは、親がアルコール依存症の個人は、そうではない個人よりも初期値は高いが、経年変化率については差がない、と解釈できる。**また、$\hat{\sigma}_{0}^{2}$は前回のモデルBと比較して21％減少している。つまり、`COA`は有効な変数であったことがわかる。
+
+```{r}
+list(
+  modelB = VarCorr(model.b), 
+  modelC = VarCorr(model.c)
+)
+```
+
+## モデルD
+
+このモデルは初期値と変化率の予測変数として、親のアルコール依存症(`COA`)と周囲の飲酒環境(`PEER`)が含まれているモデル。つまり、初期値と変化率への`COA`の影響を推定するものの、`PEER`で統制されている`COA`の影響を推定している。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} COA_{i} + \gamma_{02} PEER_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{11} COA_{i} + \gamma_{12} PEER_{i} + \zeta_{1i} \\
+\\
+Y_{ij} &=& \gamma_{00} + \gamma_{01} COA_{i} + \gamma_{02} PEER_{i} + \gamma_{10} TIME_{ij} + \gamma_{11} COA_{i} × TIME_{ij} + \gamma_{12} PEER_{i} × TIME_{ij} + (\epsilon_{ij} + \zeta_{0i} + \zeta_{1i} × TIME_{ij})
+\end{eqnarray}
+$$
+
+```{r}
+model.d <- lme(
+  fixed  = alcuse ~ coa * age_14 + peer * age_14, 
+  random = ~ age_14 | id, 
+  data = alcohol1, 
+  method = "ML")
+summary(model.d)
+```
+
+パラメタの係数解釈が少し複雑なので注意が必要。$\hat{\gamma}_{00}$、$\hat{\gamma}_{10}$は、親がアルコール依存症ではない個人の初期値と変化率ではなく、親がアルコール依存症ではない個人の一部、`PEER`の値も0の子どもの初期値と変化率。つまり、`COA=0,PEER=0`のときの初期値と変化率が$\hat{\gamma}_{00}$、$\hat{\gamma}_{10}$となる。$\hat{\gamma}_{01}$、$\hat{\gamma}_{11}$は、`PEER`で統制した後の`COR`の影響と解釈できる。
+
+`COA=0,PEER=0`のときの初期値は負になることから、**親がアルコール依存症ではなく、周囲の友人がアルコールを摂取しない個人は0ではない量のアルコールを摂取している**、とは解釈できなくないが、`alcuse`は0以下を取らないので解釈には注意が必要。
+
+**モデルDは、`PEER`の効果を統制した上で、親がアルコール依存症ではない個人とそうではない個人の初期値の推定された差は0.579で、親がアルコール依存症ではない個人とそうではない個人の変化率の差は0(-0.014)かもしれない**、と解釈できる。残差に関しても、$\hat{\sigma}_{0}^{2}$、$\hat{\sigma}_{1}^{2}$の両方が減少しており、`PEER`が有効な変数であることがわかる。
+
+```{r}
+list(
+  modelC = VarCorr(model.c), 
+  modelD = VarCorr(model.d)
+)
+```
+
+## モデルE
+
+このモデルは初期値と変化率の予測変数として、親のアルコール依存症(`COA`)と周囲の飲酒環境(`PEER`)が含まれているモデル。ただ、初期値には`PEER`と`COA`が含まれる一方で、変化率には`PEER`のみで`COA`は含まれていない。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} COA_{i} + \gamma_{02} PEER_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{12} PEER_{i} + \zeta_{1i} \\
+\\
+Y_{ij} &=& \gamma_{00} + \gamma_{01} COA_{i} + \gamma_{02} PEER_{i} + \gamma_{10} TIME_{ij} + \gamma_{12} PEER_{i} × TIME_{ij} + (\epsilon_{ij} + \zeta_{0i} + \zeta_{1i} × TIME_{ij})
+\end{eqnarray}
+$$
+
+```{r}
+model.e <- lme(
+  fixed  = alcuse ~ coa + peer * age_14, 
+  random = ~ age_14 | id, 
+  data = alcohol1, 
+  method = "ML")
+summary(model.e)
+```
+
+`PEER`の影響を統制した`COA`、つまり、親がアルコール依存症ではない個人とそうではない個人の初期値は`r round(fixef(model.e)[[2]],2)`で、`COA`の影響を統制した`PEER`の1ポイントの差は`r round(fixef(model.e)[[3]],3)`高くなる。平均的な変化率は`r round(fixef(model.e)[[5]],3)`低くなる。
+
+**モデルEは、`PEER`の効果を統制した上で、親がアルコール依存症の個人は、そうではない個人よりも初期値が高いが、経年変化率については差がない**、と解釈できる。残差に関しても、$\hat{\sigma}_{0}^{2}, \hat{\sigma}_{1}^{2}, \hat{\sigma}_{\epsilon}^{2}$は、あまり変化しておらず、変化率に対する`COA`はあってもなくても同じということがわかる。
+
+```{r}
+list(
+  modelD = VarCorr(model.d), 
+  modelE = VarCorr(model.e)
+)
+```
+
+## モデルサマリー
+
+```{r, include=FALSE}
+# 一部手で修正
+model.f <- lme(fixed  = alcuse ~ coa + cpeer * age_14 , random = ~ age_14 | id, data = alcohol1, method = "ML")
+model.g <- lme(fixed  = alcuse ~ ccoa + cpeer * age_14, random = ~ age_14 | id, data = alcohol1, method = "ML")
+
+stargazer::stargazer(
+  model.a,
+  model.b,
+  model.c,
+  model.d,
+  model.e,
+  model.f,
+  model.g,
+  type = "html")
+```
+
+
+<table style="text-align:center" cellpadding="20">
+<tr><td colspan="8" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"></td><td colspan="7"><em>Dependent variable:</em></td></tr>
+<tr><td></td><td colspan="7" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left"></td><td colspan="7">alcuse</td></tr>
+<tr><td style="text-align:left"></td><td>A</td><td>B</td><td>C</td><td>D</td><td>E</td><td>F_c</td><td>G_c</td></tr>
+<tr><td colspan="8" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Intercept($\pi_{0i},\gamma_{00}$)</td><td>0.922<sup>***</sup></td><td>0.651<sup>***</sup></td><td>0.316<sup>**</sup></td><td>-0.317<sup>**</sup></td><td>-0.314<sup>**</sup></td><td>0.394<sup>***</sup></td><td>0.651<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.096)</td><td>(0.106)</td><td>(0.132)</td><td>(0.150)</td><td>(0.148)</td><td>(0.105)</td><td>(0.081)</td></tr>
+<tr><td style="text-align:left">coa($\pi_{0i},\gamma_{01}$)</td><td></td><td></td><td>0.743<sup>***</sup></td><td>0.579<sup>***</sup></td><td>0.571<sup>***</sup></td><td>0.571<sup>***</sup></td><td>0.571<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td>(0.196)</td><td>(0.165)</td><td>(0.148)</td><td>(0.148)</td><td>(0.148)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">peer($\pi_{0i},\gamma_{02}$)</td><td></td><td></td><td></td><td>0.694<sup>***</sup></td><td>0.695<sup>***</sup></td><td>0.695<sup>***</sup></td><td>0.695<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td>(0.113)</td><td>(0.112)</td><td>(0.112)</td><td>(0.112)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">age_14($\pi_{1i},\gamma_{10}$)</td><td></td><td>0.271<sup>***</sup></td><td>0.293<sup>***</sup></td><td>0.429<sup>***</sup></td><td>0.425<sup>***</sup></td><td>0.271<sup>***</sup></td><td>0.271<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.063)</td><td>(0.085)</td><td>(0.115)</td><td>(0.107)</td><td>(0.062)</td><td>(0.062)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">coa:age_14($\pi_{1i},\gamma_{11}$)</td><td></td><td></td><td>-0.049</td><td>-0.014</td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td>(0.126)</td><td>(0.126)</td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">peer:age_14($\pi_{1i},\gamma_{12}$)</td><td></td><td></td><td></td><td>-0.150<sup>*</sup></td><td>-0.151<sup>*</sup></td><td>-0.151<sup>*</sup></td><td>-0.151<sup>*</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td>(0.087)</td><td>(0.085)</td><td>(0.085)</td><td>(0.085)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td colspan="8" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Observations</td><td>246</td><td>246</td><td>246</td><td>246</td><td>246</td><td>246</td><td>246</td></tr>
+<tr><td style="text-align:left">Log Likelihood</td><td>-335</td><td>-318</td><td>-310</td><td>-294</td><td>-294</td><td>-294</td><td>-294</td></tr>
+<tr><td style="text-align:left">Akaike Inf. Crit.</td><td>676</td><td>648</td><td>637</td><td>608</td><td>606</td><td>606</td><td>606</td></tr>
+<tr><td style="text-align:left">Bayesian Inf. Crit.</td><td>686</td><td>669</td><td>665</td><td>643</td><td>638</td><td>638</td><td>638</td></tr>
+<tr><td colspan="8" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"><em>Note:</em></td><td colspan="7" style="text-align:right"><sup>*</sup>p<0.1; <sup>**</sup>p<0.05; <sup>***</sup>p<0.01</td></tr>
+</table>
+
+## モデルの可視化
+
+書籍に従って、モデルCを可視化しておく。前回のノートに可視化の方法をまとめているので細かい話はそちらを参照のこと。このモデルは、親がアルコール依存症でない平均的な個人は、初期値が0.316、変化率が0.293の変化の軌跡を持ち、親がアルコール依存症の平均的な個人は、初期値が1.059、変化率が0.244の変化の軌跡を持つ。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} COA_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{11} COA_{i} + \zeta_{1i} \\
+\\
+Y_{ij} &=& \gamma_{00} + \gamma_{01} COA_{i} + \gamma_{10} TIME_{ij} + \gamma_{11} COA_{i} × TIME_{ij} + (\epsilon_{ij} + \zeta_{0i} + \zeta_{1i} × TIME_{ij}) \\
+&=& 0.315 +	0.743 COA_{i} + 0.292 TIME_{ij} -0.049 COA_{i} × TIME_{ij}
+\end{eqnarray}
+$$
+
+初期値の高さに違いはあるものの、変化率に関してはあまり差はない。
+
+```{r}
+fixef.c <- fixef(model.c)
+df_fit_plt_c <- 
+  expand_grid(age_14 = 0:2, coa = 0:1) %>% 
+  arrange(coa) %>% 
+  mutate(alcuse = 
+           fixef.c[[1]] + 
+           fixef.c[[2]] * coa + 
+           fixef.c[[3]] * age_14 + 
+           fixef.c[[4]] * age_14 * coa
+  )
+
+ggplot(df_fit_plt_c, aes(age_14, alcuse, col = as.character(coa))) + 
+  geom_path(size = 1) +
+  geom_text(aes(y = alcuse + 0.1, label = round(alcuse,2))) +
+  scale_x_continuous(breaks = c(0, 1, 2), label = c("14", "15", "16")) +
+  scale_color_discrete(name = "coa") + 
+  scale_y_continuous(breaks = seq(0, 2, 0.5), limits = c(0, 2)) +
+  xlab("age") + 
+  ggtitle("Model C for the effects of COA") +
+  theme_bw()
+```
+
+モデルEも可視化するが、モデルEの`PEER`は連続変数なので、典型的な個人を考える必要がある。取りうる全ての`PEER`で可視化することはもちろん可能ではあるが、線が大ぎて傾向がわからないため、典型的な個人の値を考えてモデルを可視化することが一般的。連続変数の典型的な値のとり方は下記の通り。
+
+- 興味のある値を設定する
+- パーセタイルを利用する
+- 平均値に集約する
+- 平均値±標準偏差×0.5(or 1)の値を利用する
+
+ここでも書籍に従い、`PEER`は平均値±標準偏差×0.5の値を採用することにする。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} COA_{i} + \gamma_{02} PEER_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{12} PEER_{i} + \zeta_{1i} \\
+\\
+Y_{ij} &=& \gamma_{00} + \gamma_{01} COA_{i} + \gamma_{02} PEER_{i} + \gamma_{10} TIME_{ij} + \gamma_{12} PEER_{i} × TIME_{ij} + (\epsilon_{ij} + \zeta_{0i} + \zeta_{1i} × TIME_{ij}) \\
+ &=& -0.313 + 	0.571 COA_{i} + 0.695 PEER_{i} + 0.424 TIME_{ij} + -0.151 PEER_{i} × TIME_{ij}
+\end{eqnarray}
+$$
+
+
+
+
+```{r}
+fixef.e <- fixef(model.e)
+peer_prototype <- mean(alcohol1$peer) + c(-1,1) * sd(alcohol1$peer)/2
+df_fit_plt_e <- 
+  expand_grid(age_14 = 0:2, coa = 0:1, peer = peer_prototype) %>% 
+  mutate(peer_flg = rep(c("LowPeer", "HighPeer"), times = n()/2),
+         type = paste0("coa=",coa," & ",peer_flg)) %>% 
+  mutate(alcuse = 
+           fixef.e[[1]] + 
+           fixef.e[[2]] * coa + 
+           fixef.e[[3]] * peer + 
+           fixef.e[[4]] * age_14 + 
+           fixef.e[[5]] * age_14 * peer
+  )
+
+ggplot(df_fit_plt_e, aes(age_14, alcuse, col = as.character(type))) + 
+  geom_path(size = 1) +
+  geom_text(aes(y = alcuse + 0.1, label = round(alcuse,2))) +
+  scale_x_continuous(breaks = c(0, 1, 2), label = c("14", "15", "16")) +
+  scale_color_manual(values = c("#ec6d71", "#a22041", "#a0d8ef", "#19448e"), name = "coa") +
+  scale_y_continuous(breaks = seq(0, 2, 0.5), limits = c(0, 2)) +
+  xlab("age") + 
+  ggtitle("Model E for the controlled effects of COA") +
+  theme_bw()
+```
+
+親がアルコール依存症である初期値は一貫して高い位置にあり、`HighPeer`だと時間経過の変化が緩やかである一方、`LowPeer`だと時間経過の変化が`HighPeer`に比べるときつい。組み合わせて解釈すると、初期値において、親がアルコール依存症ではなく、周囲の友人がアルコールを摂取するケース`coa=0 & HighPeer`と親がアルコール依存症で、周囲の友人がアルコールを摂取しないケース`coa=1 & LowPeer`を比べると、そこまで大きな違いはないことがわかる。
+
+## 参考文献
+
+- [縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)
+- [Applied Longitudinal Data Analysis: Modeling Change and Event Occurrence](https://www.amazon.com/Applied-Longitudinal-Data-Analysis-Occurrence/dp/B017YBZFW0)
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+- [Chapter 9 Mixed Effects Models](https://glennwilliams.me/r4psych/mixed-effects-models.html)
+- [Applied longitudinal data analysis in brms and the tidyverse](https://bookdown.org/content/4253/index.html)
+

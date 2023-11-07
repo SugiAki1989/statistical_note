@@ -1,0 +1,604 @@
+---
+title: "WebアプリでABテストを実践する"
+pagetitle: "WebアプリでABテストを実践する"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは、Udemyで提供されている[A/B Testing in Python](https://www.udemy.com/course/ab-testing-in-python/)コースのPythonスクリプトをRスクリプトに変換したものをまとめているノート。
+
+## メトリクスの計算
+
+2種類のユーザーアクティビティデータセットを使用する。
+
+- `userid`: ユーザーID
+- `dt`: アプリの起動日
+- `activity_level`: 1日にアプリを起動した回数
+- `ctr`: ユーザーがクリックした広告数 / そのユーザーが1日に接触した広告総数
+
+`activity_level`は、ユーザーがアプリ内でアクティブになった回数を意味する。つまり、アプリを開いた回数を指す。
+
+```{r}
+library(tidyverse)
+library(scales)
+activity_pretest <- read_csv('~/Desktop/activity_pretest.csv')
+head(activity_pretest, 10)
+```
+
+それぞれの`activity_level`ごとに何件のレコードがあるかを調べる。`activity_level`は0から20までのレベルがあることがわかる。
+
+```{r}
+activity_pretest %>% 
+  group_by(activity_level) %>% 
+  count() %>% 
+  arrange(n)
+```
+`dt, activity_level`ごとに、`activity_level`が0より大きいレコードを対象に、レコード数をカウントする。
+`activity_level`が1から19はほぼ均等に分布しており、ユーザーがおおよそ1600人いることがわかる。一方で、`activity_level`が20の場合、1日におおよそ800人のユーザーがいる。このようになっている背景はわからないが、このデータは19より大きいものは全て20として扱っているのかもしれないし、ボットなどの可能性もある。
+
+```{r}
+# activity_pretest %>% 
+#   group_by(activity_level) %>% 
+#   summarise(
+#     count = n(),
+#     unique = n_distinct(userid)
+#   ) 
+
+activity_pretest %>%
+  filter(activity_level > 0) %>%
+  group_by(dt, activity_level) %>%
+  count() %>% 
+  ggplot(., aes(dt, n, col = as.factor(activity_level))) +
+  geom_line() +
+  scale_x_date(
+    labels = date_format("%Y/%m/%d"),
+    breaks = "1 day",
+    minor_breaks = "1 day"
+  )  + labs(
+    title = "Counts per activity_level",
+    x = "date",
+    y = "number of users",
+    col = "activity_level"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(
+      angle = 75,
+      vjust = 0.2,
+      hjust = 0.2
+    ),
+    legend.position = 'top',
+  )
+```
+
+メトリクスを計算する段階に移る。日次アクティブユーザーを計算する。`userid`が1日の`activity_level`が0でない場合に、日次アクティブユーザーとしてカウントされるとする。
+
+```{r}
+activity <- activity_pretest %>%
+  filter(activity_level > 0) %>%
+  group_by(dt) %>%
+  count() %>% 
+  ungroup()
+activity
+```
+
+1か月分のデータがあり、日次アクティブユーザーの平均が約30673人。標準偏差は約90で、最小値は約30490人、最大値は約30900人。
+
+```{r}
+activity %>% 
+  summarise(
+    count = n(),
+    mean = mean(n),
+    std = sd(n),
+    min = min(n),
+    `q25%` = quantile(n, 0.25),
+    `q50%` = quantile(n, 0.50),
+    `q75%` = quantile(n, 0.75),
+    max = max(n)
+  )
+```
+
+可視化すると、10月の初めから終わりまで、安定して日次アクティブユーザーが存在していることがわかる。
+
+```{r}
+activity %>%
+  ggplot(., aes(dt, n)) +
+  geom_line() +
+  scale_x_date(
+    labels = date_format("%Y/%m/%d"),
+    breaks = "1 day",
+    minor_breaks = "1 day"
+  )  + labs(
+    title = "Daily Active Users",
+    x = "date",
+    y = "number of users"
+    ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(
+    angle = 75,
+    vjust = 0.2,
+    hjust = 0.2
+  ))
+```
+次に、クリックスルーレートを計算する。
+
+```{r}
+ctr_pretest <- read_csv('~/Desktop/ctr_pretest.csv')
+head(ctr_pretest, 10)
+```
+
+ここでのクリックスルーレートは、ユーザーが1日に特定の数の広告を見て、そのうち33%をクリックしたことを意味する。標準偏差も非常に小さいため、クリックスルーレートデータは非常に安定している。最小値は30%で、最大値は36%。
+
+```{r}
+ctr_pretest %>% 
+  summarise(
+    count = n(),
+    mean = mean(ctr),
+    std = sd(ctr),
+    min = min(ctr),
+    `q25%` = quantile(ctr, 0.25),
+    `q50%` = quantile(ctr, 0.50),
+    `q75%` = quantile(ctr, 0.75),
+    max = max(ctr)
+  )
+```
+
+同じデータセットを使用して、クリックスルーレートの日次平均を計算して可視化する。
+
+```{r}
+ctr <- ctr_pretest %>% 
+  group_by(dt) %>% 
+  summarise(ctr = mean(ctr)) %>% 
+  ungroup()
+
+ctr %>%
+  ggplot(., aes(dt, ctr)) +
+  geom_line() +
+  scale_x_date(
+    labels = date_format("%Y/%m/%d"),
+    breaks = "1 day",
+    minor_breaks = "1 day"
+  )  + labs(
+    title = "Average Daily CTR",
+    x = "date",
+    y = "ctr"
+    ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(
+    angle = 75,
+    vjust = 0.2,
+    hjust = 0.2
+  ))
+```
+
+## 実験の計画
+
+正しいテスト対象のアイデアを見つける方法は何か？これは定量的および定性的分析を行い、共通感覚とビジネス領域を知ることを通じて行われます。
+
+まず第一に、テストが影響する規模を確認することが非常に重要。導入しようとしている機能または製品の領域の変更についてｍ既に持っているデータを分析し、テストの影響を推定する。たとえば、製品のメインページに変更を加えたい場合、ほとんどのユーザーがメインページに移動するため、変更は非常に大きな影響を与える。一方で、小さなエリアに変更を加えたい場合、一部のユーザーがアクセスできず、ユーザーにはあまり使用されないかもしれない。そのため、テストの影響は低く、その種の機能をテストする意欲が低い。
+
+次に、変更したい振る舞いの要因を調査することが重要。基本的には、ユーザーが特定のページを離れる理由を理解できるようにする。ユーザーリサーチ、つまり質的分析、アンケート、ユーザーインタビュー、またはアプリと対話するユーザーを観察する方法を通じて行われる。また、どのようなアクションをユーザーがページを離れる前に実際に行うかを示すことができる定量的分析を通じても行われる。
+
+また、適切な仮説を定義することも重要。基本的に、仮説は、新しい機能または製品への変更を導入した場合に何が起こるかを予想する。「変更した場合、テストで何が起こると予想しますか？」という形で表現される。これは具体的かつ測定可能であるべきで、テストのために変更および制御する独立変数を識別し、テストの影響を示す従属変数を示す必要がある。
+
+つまり、仮説テストのために何かを導入したことによって、メトリクスの変更を見ることができるはず。私たちの仮説は、ユーザーがカスタマイズされた広告を持つと、広告がより関連性があがるため、広告をクリックする可能性が高まり、製品を購入する可能性が高まり、これによりユーザー満足度が向上し、会社のアフィリエイト収益が向上するはず。
+
+したがって、この場合、基本仮説、すなわち仮説の1つは、カスタマイズされた広告を導入することで、広告がより関連性があがるため、ユーザーが広告をクリックしやすくなり、したがってクリック率がユーザーあたりに増加する。
+
+1つの興味のあるメトリクスのほかに、いわゆるガードレールメトリクスを定義することも一般的。ポジティブな方法でいくつかのメトリクスを変更するだけでなく、ビジネスにとって重要ないくつかのクリティカルなビジネスメトリクスが負の影響を受けないようにすることを確認する。これらの重要なメトリクスについて、どのくらい影響を与えた場合に、テストを成功とみなすことができるかを定義する必要がある。通常、リテンションやエンゲージメントメトリクス、エラー数やクラッシュ数などのより技術的なメトリクスがガードレールメトリクスとして使用されることが一般的で、ユーザーアクティビティに関しては、リテンション、週間アクティブユーザー、月間アクティブユーザー、エラーレート、クラッシュレートなどがガードレールメトリクスとして考えられる。
+
+## ABテストの設定
+
+テストをいつ開始し、どれくらい実行するか、そしてテストの各ポイントでどれくらいのユーザーが露出するかを決定する必要がある。これらに影響を与える多くの要因があり、非常に頻繁に、100％原則どおりに実行できないことがある。
+
+たとえば、特定の日付で実行中または開始されるマーケティングキャンペーンがあるかもしれない。そのため、新機能を持たないコントロールグループが非常に少ない場合がある。また、同時に実行されているABテストがあるかもしれないため、いくつかが終了するのを待たなければならないかもしれない。
+
+テストの期間、コントロールグループのサイズ、新機能を持つテストグループまたは異なるバリエーションを持つ複数のテストグループのサイズを決定するために、最小検出可能効果(MDE: Minimum Detectable Effect)を知る必要がある。一定の確実性をもって検出したいリフトの最小値を見積もることで、テストにどれだけのトラフィックや時間を投資するかをシミュレーションする。
+
+利用可能なデータに基づいて、最小検出可能効果(MDE)を定義できる。最小検出可能効果(MDE)は、データ分析、統計、ビジネスの組み合わせであり、しばしば精度と実用性の間にトレードオフがあり、ユーザー規模の制約を考慮しながら最小限の検出可能効果を望まれる。
+
+たとえば、クリックスルー率が30％の場合、MetaやFacebookのように数百万のユーザーを持っている場合、クリックスル率を0.01％でも向上させると、広告をクリックするユーザーが何百万人も増え、収益も何百万ドルも増える。しかし、ユーザー規模が小さな小さな会社の場合、トップライン収益への影響を確認するにはより大幅な変更が必要。
+
+したがって、この場合、クリックスルー率を大幅に増加させたいかもしれません。利用可能なデータに基づいて、最小検出可能効果(MDE)を決定する。最小検出可能効果(MDE)または標準偏差がクリックスルー率の相対的な変化を決定するために使えるようにする。
+
+実際のデータでは、デイリーアクティブユーザーについて、平均は1日に30673人のユーザーで、標準偏差は約90。これは、少なくとも90人のデイリーアクティブユーザーの違いを特定したいことを意味する。したがって、テストとコントロールグループの間の絶対差は、約0.33％(≒90/30673)増加することを意味する。したがって、テストグループとコントロールグループの間の0.33％の相対差を特定できる必要がある。
+
+クリックスルー率の場合、数字は少し異なる。平均は33％で、標準偏差は1.73。したがって、テストとコントロールグループの間で少なくとも1.8％の差を特定したい。これは約5.5％(≒1.7/33)の増加を意味する相対的な差となる。
+
+これらのデータを知っていると、統計的な有意性を持つためにテストに露出する必要のあるユーザー数を決定するのに役立つ。
+
+## 統計的有意性
+
+統計的有意性は、テスト結果が再現されることをどのように確認できるかという質問に答えるのに役立つ。通常、αは1％から10％の間であり、αが5％であることが一般的。これは、αが5％でテストを100回実行すると、100回のうち5回は偽陽性(False Positive)の結果が得られることを意味ただし、新しい薬をテストする場合、可能な限り高い統計的有意性が必要かもしれない。たとえば、1％または0.1％。これらの場合、偽陽性の量を最小限に抑えることが非常に重要。なぜなら誰かの生命がそれにかかっているから。
+
+|-|CTR diff is < 5.5%(no change)|CTR diff is > 5.5%(positive change)|
+|:---:|:---:|:---:|
+|We decide that test is not successful|Correct. True Negative(1-α)|Type 2 Error(β). False Negative|
+|We decide that test is successful|Type 1 Error(α). False Positive|Correct. True Positive(1-β)|
+
+成功したテストを拒否しないようにするために、パワー(1-β)を導入する必要がある。まず、差があると予想されるときに差がないと考える、いわゆる偽陰性(False Negative)を考える。通常、βは10％から20％の間で、βが20％となることが一般的。これは、テストを100回実行すると、100回のうち80回は偽陰性(False Negative)の結果が得られることを意味する。したがって、βが20の場合、テストのパワーは80％。
+
+|-|Null Hypothesis is true|Null Hypothesis is false|
+|:---:|:---:|:---:|
+|We accept the Null Hypothesis|Correct. True Negative(1-α)|Type 2 Error(β). False Negative|
+|We reject the Null Hypothesis|Type 1 Error(α). False Positive|Correct. True Positive(1-β)|
+
+## ABテストのサンプルサイズを計算する
+
+sアンプルサイズの計算式は下記が詳しい。
+
+- [AB Testing 101 | Fmr. Google Data Scientist Explains How to Calculate the Sample Size
+](https://www.youtube.com/watch?v=KC1nwY7YCUE&list=LL&index=4&t=988s)
+
+最小検出効果MDEは絶対値で表すほうがよく、この場合、最小検出効果は0.02とする。つまり2％がMDEであって、P=0.34の2%ポイントアップのp=0.3468(=34 * (1+2/100)=34.68)ではない。必要なサンプルサイズは切り上げて各グループに8797人となる。
+
+- $Z_{1-\alpha/2}$=1.96
+- $Z_{1-\beta}$=0.84
+- mde=0.02(=2%)
+- p=0.34
+
+$$
+\begin{eqnarray}
+N &=& 2 * p * (1-p) * \frac{(Z_{1-\alpha/2} + Z_{1-\beta})^2}{mde^2} \\
+&=& 2 * 0.34 * 0.66 * \frac{(1.96+0.84)^2}{0.02^2} \\
+&=& 8796.48
+\end{eqnarray}
+$$
+
+Rの組み込み関数でも計算できる。小数点とかpの数値の分、少しずれる。
+
+```{r}
+power.prop.test(
+  n = NULL,
+  p1 = 0.34,
+  p2 = 0.36,
+  sig.level = 0.05,
+  power = 0.8,
+  alternative = 'two.sided'
+)
+```
+
+```{r}
+binomial_sample_size <- function(metric, mde, alpha, beta){
+  Z_alpha <- qnorm(p = 1-alpha/2, mean = 0, sd = 1)
+  Z_beta <- qnorm(p = 1-beta, mean = 0, sd = 1)
+  p <- (metric + (metric + mde)) / 2
+  N <- 2 * p * (1 - p) * ((Z_alpha + Z_beta)^2 / mde^2)
+  return(
+    list(
+      Z_alpha = Z_alpha,
+      Z_beta = Z_beta,
+      p = p,
+      N = N
+    )
+  )
+}
+
+binomial_sample_size(metric = 0.34, mde = 0.02, alpha = 0.05, beta = 0.2)
+```
+
+連続メトリクスに対するサンプルサイズを計算する場合。
+
+```{r}
+mde <- 300
+delta <- (30673+mde) - 30673 
+power.t.test(
+  n = NULL,
+  delta = delta,
+  sd = 91,
+  sig.level = 0.05,
+  power = 0.8,
+  alternative = 'two.sided'
+)
+```
+
+## ABテストの開始と分析
+
+分析プロセスにおける手順をまとめる。最初に、割り当てを調べる。各テストケースおよびコントロールケースに正しいユーザー数が割り当てられていることを確認する必要がある。また、日次割り当ておよび週次割り当てが期待通りのパターンに従っていることを確認する必要がある。
+
+次に、成功メトリクスと非劣性メトリクスのための事前テスト期間を確認する必要がある。テストグループとコントロールグループ内のグループおよび異なるユーザータイプが、異なるメトリクスに均等に分布していることを確認する必要がある。
+
+次に、重要なパフォーマンスメトリクスを調べる。たとえば、これらはUXの重要なメトリクス、クラッシュ数、サービスの可用性などのユーザーエクスペリエンスメトリクスであることがあります。
+
+その後、成功メトリクスと非劣性マージンの結果の有意性を計算。次に、メトリクスへの時間的な影響を観察。たとえば、新規性の影響が見られるかもしれない。成功メトリクスをどれくらいの期間測定し、どの期間で有意性と影響を計算し、新規性の影響があった場合、テストが成功したと仮定できるかどうかを決定する必要がある。
+
+その後、結果を非技術的な方法で理解可能に要約し、分析に使用された方法と前提条件を確認できるようにするそして、次のステップまたはテストおよび追加の研究の提案を要約。最後に、結果を関係者および会社内のデータサイエンスコミュニティと共有。
+
+ユーザーID、割り当てのタイムスタンプ、テストまたはコントロールグループのグループIDが含まれている。一般的にコントロールグループにはグループ0を使用し、テストグループには1からテストグループの数だけのIDが使用される。
+
+```{r}
+assignments <- read_csv("~/Desktop/assignments.csv")
+head(assignments)
+```
+
+これは、課題の取り組みの一環として、データを分析しやすくするために、タイムスタンプの代わりに日付を持つようにデータを変更する。
+
+```{r}
+assignments <- assignments %>% 
+  mutate(dt = as.Date(ts))
+head(assignments)
+```
+
+データは60,000 件のレコードがあり、グループごとに分割されている。
+
+```{r}
+dim(assignments)
+```
+
+
+グループ0にはおおよそ30,000人、グループ1にもおおよそ30,000人のユーザーが割り当てられていることが分かる。ほぼ均等に分かれている。
+
+```{r}
+assignments %>% 
+  group_by(groupid) %>% 
+  count()
+```
+
+次に、データを日次で分析し、各日に各グループに割り当てられたユーザー数を計算する。割り当てがどのように分布しているかを視覚的に把握するために、これらの割り当てを視覚的に表現することは非常に有用。割り当てが均等に分布していると、テストが進行中のすべての日にわたって割り当てられており、これは一般的な状況ではない。通常、割り当ては、多くのユーザーが最初の数日に割り当てられ、その後は長いテールの割り当てが続くことがよくある。
+
+```{r}
+assignments %>% 
+  group_by(groupid, dt) %>% 
+  count() %>% 
+  ggplot(., aes(dt, n, col = as.factor(groupid))) + 
+  geom_line() +
+  scale_x_date(
+    labels = date_format("%Y/%m/%d"),
+    breaks = "1 day",
+    minor_breaks = "1 day"
+  )  + labs(
+    title = "Users",
+    x = "date",
+    y = "users",
+    col = "groupid"
+    ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(
+    angle = 75,
+    vjust = 0.2,
+    hjust = 0.2
+  ))
+```
+
+次に、事前テストメトリクスを調べてみましょう。ユーザーアクティビティのファイルがあり、それを読み込んで調べる。各ユーザーについて、各日におけるグループIDとアクティビティレベルが記録されている。
+
+```{r}
+activity_all <- read_csv("~/Desktop/activity_all.csv")
+head(activity_all)
+```
+
+ユーザーの平均アクティビティレベルに関して、コントロールグループとテストグループの間に大きな違いがあることが分かる。
+
+```{r}
+activity_all %>% 
+  group_by(groupid, dt) %>% 
+    summarise(
+    count = n(),
+    mean = mean(activity_level),
+    std = sd(activity_level),
+    min = min(activity_level),
+    `q25%` = quantile(activity_level, 0.25),
+    `q50%` = quantile(activity_level, 0.50),
+    `q75%` = quantile(activity_level, 0.75),
+    max = max(activity_level)
+  )
+
+```
+
+次に、ユーザーアクティビティを異なる視点から見る。ユーザーが1日に何回アクティブであるかではなく、その日に少なくとも1回アプリケーションにアクセスしたユーザーの数を調べる。このために、その日に少なくとも1回アクティブだったユーザーの数を計算する。
+
+```{r}
+activity_all %>% 
+  filter(activity_level > 0) %>% 
+  group_by(dt, groupid) %>% 
+  summarise(
+    users = n_distinct(userid)
+  )
+```
+
+この計算結果から、テスト開始から11月1日までの間で、テストグループの方がはるかにアクティブであることが分かります。テストグループでは、少なくとも1回はアクティブなユーザーが約29,000人で、一方、コントロールグループでは事前のレベルを保持していることが分かる。
+
+```{r}
+activity_all %>% 
+  filter(activity_level > 0) %>% 
+  group_by(dt, groupid) %>% 
+  summarise(
+    users = n_distinct(userid)
+  ) %>% 
+  ggplot(., aes(dt, users, col = as.factor(groupid))) + 
+  geom_line() +
+  scale_x_date(
+    labels = date_format("%Y/%m/%d"),
+    breaks = "1 day",
+    minor_breaks = "1 day"
+  )  + labs(
+    title = "Users",
+    x = "date",
+    y = "users",
+    col = "groupid"
+    ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(
+    angle = 75,
+    vjust = 0.2,
+    hjust = 0.2
+  ))
+
+```
+
+```{r}
+activity_all %>% 
+  filter(activity_level > 0 & dt >= '2021-11-01') %>% 
+  group_by(groupid, dt) %>% 
+  summarise(users = n_distinct(userid))  %>% 
+  group_by(groupid) %>% 
+  summarise(
+    count = n(), 
+    mean = mean(users),
+    std = sd(users),
+    min = min(users),
+    `q25%` = quantile(users, 0.25),
+    `q50%` = quantile(users, 0.50),
+    `q75%` = quantile(users, 0.75),
+    max = max(users)
+  )
+```
+
+次に、ユーザーが平均で1日中にアクティブだった回数を調べる。平均して、テスト開始後、コントロールグループでは1日に平均して約5回アクティブであり
+
+```{r}
+activity_all %>% 
+  filter(dt < '2021-11-01') %>% 
+  group_by(groupid) %>% 
+  summarise(
+    count = n(), 
+    mean = mean(activity_level),
+    std = sd(activity_level),
+    min = min(activity_level),
+    `q25%` = quantile(activity_level, 0.25),
+    `q50%` = quantile(activity_level, 0.50),
+    `q75%` = quantile(activity_level, 0.75),
+    max = max(activity_level)
+  )
+```
+
+施策実施後のテストグループでは1日に平均して9回または10回アクティブであることが分かる。テスト開始前の時点では、テストグループとコントロールグループでこれらの数字は非常に類似している。したがって、事前テストバイアスはなく、グループは実際に比較可能であることが分かる。違いは実際にABテストから生じている。
+
+```{r}
+activity_all %>% 
+  filter(dt >= '2021-11-01') %>% 
+  group_by(groupid) %>% 
+  summarise(
+    count = n(), 
+    mean = mean(activity_level),
+    std = sd(activity_level),
+    min = min(activity_level),
+    `q25%` = quantile(activity_level, 0.25),
+    `q50%` = quantile(activity_level, 0.50),
+    `q75%` = quantile(activity_level, 0.75),
+    max = max(activity_level)
+  )
+```
+
+施策期間前のグループ間のアクティビティを比較し、統計的有意性とp値を計算するためにt検定を使用する。
+
+```{r}
+before <- activity_all %>% filter(dt <  '2021-11-01')
+after  <- activity_all %>% filter(dt >= '2021-11-01')
+
+before %>% 
+  group_by(groupid) %>% 
+  summarise(mean_activity_level = mean(activity_level))
+
+```
+
+t検定の結果は下記の通り。
+
+```{r}
+data_group0 <- before %>% filter(groupid == 0) %>% pull(activity_level)
+data_group1 <- before %>% filter(groupid == 1) %>% pull(activity_level)
+  
+result <- t.test(data_group0, data_group1)
+print(result)
+```
+
+施策期間中のt検定の結果は下記の通りで、`activity_level`が平均して4回ほど多い。
+
+```{r}
+data_group0 <- after %>% filter(groupid == 0) %>% pull(activity_level)
+data_group1 <- after %>% filter(groupid == 1) %>% pull(activity_level)
+  
+result <- t.test(data_group0, data_group1)
+print(result)
+```
+
+クリックスルー率の結果も確認する。
+
+```{r}
+data_ctr <- read_csv("~/Desktop/ctr_all.csv")
+data_ctr
+```
+
+可視化すると、明らかに施策の効果が見て取れる。
+
+```{r}
+data_ctr %>% 
+  group_by(dt, groupid) %>% 
+  summarise(
+    mean_ctr = mean(ctr)
+  ) %>% 
+  ggplot(., aes(dt, mean_ctr, col = as.factor(groupid))) + 
+  geom_line() +
+  scale_x_date(
+    labels = date_format("%Y/%m/%d"),
+    breaks = "1 day",
+    minor_breaks = "1 day"
+  )  + labs(
+    title = "Users",
+    x = "date",
+    y = "ctr",
+    col = "groupid"
+    ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(
+    angle = 75,
+    vjust = 0.2,
+    hjust = 0.2
+  ))
+
+```
+
+アクティビティデータと同様に、テスト開始前とテスト後のクリックスルー率を調査する。テスト開始前のデータはクリックスルー率がほぼ同じであることを示しています。テスト開始後、クリックスルー率におおよそ 5%の違いがあることが分かる。標準偏差にはともに1.7%。検定するまでもなく、クリックスルー率は5%の増加を示しており、テストは成功したといえる。
+
+```{r}
+pre <- data_ctr %>% 
+  filter(dt < '2021-11-01') %>% 
+  group_by(groupid) %>% 
+  summarise(
+    mean = mean(ctr),
+    std = sd(ctr)
+  ) %>% 
+  mutate(term = 'pre')
+
+post <- data_ctr %>% 
+  filter(dt >= '2021-11-01') %>% 
+  group_by(groupid) %>% 
+  summarise(
+    mean = mean(ctr),
+    std = sd(ctr)
+  ) %>% 
+  mutate(term = 'post') 
+
+pre %>% 
+  bind_rows(post)
+```
+
+
+
+## 参考文献
+
+- [A/B Testing in Python](https://www.udemy.com/course/ab-testing-in-python/)
+

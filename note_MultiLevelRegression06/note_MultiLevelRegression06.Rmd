@@ -1,0 +1,231 @@
+---
+title: "マルチレベルモデリングChapter4:モデルの妥当性"
+pagetitle: "マルチレベルモデリングChapter4:モデルの妥当性"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)を利用してマルチレベルモデリングの勉強内容をまとめたもの。下記のサポートサイトにサンプルデータなどが保存されている。
+
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+
+## 分析内容について
+
+分析内容は、前回に引き続き、青年期のアルコール摂取量の変化に関する分析。[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)のp75に詳細は書いてあるとおり、青年期のアルコール摂取量の変化に関する分析をここでもお借りする。82人(`n`)を対象に14歳,15歳,16歳の3回(`age`)の計測タイミングがある。`alcuse`はアルコール摂取に関する頻度の合成スコアで、予測変数として、友達の飲酒割合に関する`peer`と親がアルコール依存症かを表す`coa`が用意されている。
+
+この分析の目的は、親がアルコール依存症であったり、自分の周囲の友だちが飲酒していれば、自分のアルコール摂取量も14歳,15歳,16歳の時間経過とともに、アルコール摂取量が増加していくのではないか、という仮説を検証すること。
+
+```{r}
+library(tidyverse)
+library(broom)
+library(nlme)
+library(DT)
+library(patchwork)
+
+alcohol1 <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/alcohol1_pp.txt", header=T, sep=",")
+alcohol1 <- alcohol1 %>% mutate(
+  mean_peer = mean(peer), 
+  flg_peer = ifelse(peer < mean_peer, "low peer", "high peer"),
+  flg_peer = factor(flg_peer, levels = c("low peer", "high peer"))
+  )
+#Models
+model.a <- lme(alcuse ~ 1, alcohol1, random = ~1 |id, method = "ML")
+model.b <- lme(alcuse ~ age_14 , data = alcohol1, random= ~ age_14 | id, method = "ML")
+model.c <- lme(fixed  = alcuse ~ coa*age_14, random = ~ age_14 | id, data = alcohol1, method = "ML")
+model.d <- lme(fixed  = alcuse ~ coa * age_14 + peer * age_14, random = ~ age_14 | id, data = alcohol1, method = "ML")
+model.e <- lme(fixed  = alcuse ~ coa + peer * age_14, random = ~ age_14 | id, data = alcohol1, method = "ML")
+model.f <- lme(fixed = alcuse ~ coa  + cpeer * age_14, random = ~ age_14 | id, data = alcohol1, method = "ML")
+model.g <- lme(fixed = alcuse ~ ccoa + cpeer * age_14, random = ~ age_14 | id, data = alcohol1, method = "ML")
+datatable(alcohol1 %>% mutate_if(is.numeric, round, digit = 2))
+```
+
+ここでの目的は、モデルの妥当性であったりモデルの比較方法をまとめること。
+
+## 情報量基準
+
+マルチレベルモデルではパラメタを最尤法で推定する際に、対数尤度を計算する。一般的に、同じデータを使って複数のモデルを構築した際に、対数尤度が大きいモデルのほうが当てはまりが良くなる。仮に、対数尤度がマイナスであれば、0に近いほうが良い。よく使われる指標として、AIC、BICをここではおさらいしておく。
+
+AICは、`-2`を対数尤度にかけ、パラメタの数で罰則をつけた指標。対数尤度が大きくなると、AICは小さくなるので、AICでは小さいモデル(AICが負であればマイナスに大きいモデル)のほうが、よりよい予測性能があるとわかる。真のモデルという話ではない。AICは、モデルに不要な変数を追加することで増加する対数尤度にペナルティをつける。パラメタを増やせば増やすほど、データへの当てはまりはよくなるが、モデルとしては使えないので、そのあたりを勘定してよいモデルを選ぶのにAICが使われる。BICは更にサンプルサイズ(`=246`)の大きさも考慮している。下記は、各モデルの対数尤度、AIC、BICを抜粋した表である。
+
+　
+<table style="text-align:center" cellpadding="20">
+<tr><td></td><td colspan="7" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left"></td><td colspan="7">alcuse</td></tr>
+<tr><td style="text-align:left"></td><td>A</td><td>B</td><td>C</td><td>D</td><td>E</td><td>F_c</td><td>G_c</td></tr>
+<tr><td colspan="8" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Observations</td><td>246</td><td>246</td><td>246</td><td>246</td><td>246</td><td>246</td><td>246</td></tr>
+<tr><td style="text-align:left">Log Likelihood</td><td>-335</td><td>-318</td><td>-310</td><td>-294</td><td>-294</td><td>-294</td><td>-294</td></tr>
+<tr><td style="text-align:left">Akaike Inf. Crit.</td><td>676</td><td>648</td><td>637</td><td>608</td><td>606</td><td>606</td><td>606</td></tr>
+<tr><td style="text-align:left">Bayesian Inf. Crit.</td><td>686</td><td>669</td><td>665</td><td>643</td><td>638</td><td>638</td><td>638</td></tr>
+</table>
+
+
+AIC基準でモデル選択を行うと、モデルE、F、GはAICが同じで、他のモデルよりもAICが小さいため、より良いモデルAと考えられる。モデルBを例に具体的な算出方法を確認しておく。
+
+$$
+\begin{eqnarray}
+AIC &=& (-2) lnL + 2(k) \\
+&=& (-2)(-318) + 2(6) \\
+&=& 648 \\
+\\
+BIC &=& (-2) lnL + 2(ln(n)/2) k \\
+&=& (-2) (-318) + 2(ln(246)/2)6\\
+&=& 663 \end{eqnarray}
+$$
+
+
+
+## モデルの仮定
+
+回帰分析で最尤法を利用するのであれば、誤差が独立に同じ分散の正規分布に従うことを仮定するのと同じく、マルチレベルモデルでも構造的、確率的な部分に仮定を必要とする。構造的な部分では、レベル1では個人の変化の軌跡が線形なのか、非線形なのか、レベル2では、成長パラメタと時不変な予測変数との関係が定式化されている。確率的な部分は誤差の分布に対して正規分布、2変量正規分布を仮定している。つまり、このように仮定している限り、仮定を満たしているのかを調べることで、モデルに対する理解を深められる。通常の回帰分析と同じく、真のパラメタはわからないので、当てはめられた残差を調べることになる。
+
+## 関数形の検証
+
+まずは関数形の検証を行う。これはいくつかの個人に対して経験的プロットを可視化することで、レベル1の仮定された関数形が適切かどうかを調べることができる。これらのサンプルを見る限り、そこまで大きく線形の仮定が外れているとは考えられないため、ここでは線形の仮定は満たせているとする。
+
+```{r}
+ggplot(alcohol1 %>% filter(id %in% c(4, 14, 23, 32, 41, 56, 65, 82)), aes(age_14, alcuse)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", formula = "y ~ x", se = FALSE, colour = "tomato", size = 1) + 
+  scale_x_continuous(breaks = c(14, 15, 16)) + 
+  scale_x_continuous(breaks = c(0, 1, 2), label = c("14", "15", "16")) +
+  ylim(-1, 5) + 
+  facet_wrap( ~ id, scales = "free", nrow = 2) + 
+  theme_bw()
+```
+
+レベル2の仮定に関しては、個人の成長パラメタの推定値とレベル2の予測変数との関係を可視化する。`coa`に関しては、親がアルコール依存症の個人の場合、初期値が高くなる傾向があることがわかる。また、`peer`に対しては、周囲の友人がアルコールを摂取する頻度が大きくなると、比例して初期値が大きくなる傾向があり、弱い関係ではあるが、変化率に対は、周囲の友人がアルコールを摂取する頻度が大きくなると、変化率は緩やかになることがわかる。つまり、使用している予測変数が初期値と変化率に関係があることがわかる。
+
+
+```{r}
+df_fit <- alcohol1 %>% 
+  group_by(id) %>% 
+  nest() %>% 
+  mutate(
+    fit_lm = map(.x = data, .f = function(x){lm(alcuse ~ age_14, data = x)}),
+    tidy_lm = map(.x = fit_lm, .f = function(x){tidy(x)}),
+    glance_lm = map(.x = fit_lm, .f = function(x){glance(x)})
+  ) %>% 
+  unnest(tidy_lm) %>% 
+  select(term, estimate, std.error) %>% 
+  pivot_wider(names_from = term, values_from = c(estimate, std.error)) %>% 
+  set_names(c("id", "inercept_coef", "slope_coef", "inercept_std", "slope_std")) %>% 
+  select(id, inercept_coef, inercept_std, slope_coef, slope_std) %>% 
+  ungroup() %>% 
+  left_join(., alcohol1 %>% distinct(id, coa, peer), by = c("id" = "id"))
+
+
+l1 <- ggplot(df_fit, aes(coa, inercept_coef)) + geom_jitter(width = 0.1) + geom_smooth(method = "lm", col = "tomato", se = FALSE) +  xlim(-0.5, 1.5)
+l2 <- ggplot(df_fit, aes(coa, slope_coef))    + geom_jitter(width = 0.1) + geom_smooth(method = "lm", col = "tomato", se = FALSE) +  xlim(-0.5, 1.5)
+r1 <- ggplot(df_fit, aes(peer, inercept_coef)) + geom_point() + geom_smooth(method = "lm", col = "tomato", se = FALSE) +  xlim(0, 3)
+r2 <- ggplot(df_fit, aes(peer, slope_coef))    + geom_point() + geom_smooth(method = "lm", col = "tomato", se = FALSE) +  xlim(0, 3)
+
+((l1 | r1) / (l2 | r2)) & theme_bw() 
+```
+
+## 正規性の検証
+
+正規性の検証は素残差$\hat{\epsilon}_{ij}, \hat{\zeta}_{0j}, \hat{\zeta}_{1j}$についていつもどおり行えばよい。まずはモデルから残差を抜き出しておく。
+
+```{r}
+resid_eps <- as.numeric(residuals(model.f))
+resid_eps_std <- resid_eps/sd(resid_eps)
+zeta0 <- random.effects(model.f)[[1]]
+zeta0_std <- zeta0/sd(zeta0)
+zeta1 <- random.effects(model.f)[[2]]
+zeta1_std <- zeta1/sd(zeta1)
+
+df_eps <- tibble(
+  id = alcohol1$id,
+  age = alcohol1$age,
+  resid_eps,
+  resid_eps_std)
+
+df_zeta <- tibble(
+  id = unique(alcohol1$id),
+  coa = alcohol1 %>% filter(age == 14) %>% pull(coa),
+  peer = alcohol1 %>% filter(age == 14) %>% pull(peer),
+  zeta0, 
+  zeta0_std,
+  zeta1,
+  zeta1_std
+)
+
+list(df_eps, df_zeta)
+```
+
+正規性の検証であれば、QQプロットを利用して、プロットで線形の関係が確認できるかを調べる。標準化残差を利用した可視化方法で調べるのであれば、残差が正規分布ならばプラス・マイナス2シグマ以内に収まっているかを調べる。QQプロットだと、$\hat{\epsilon}_{ij}, \hat{\zeta}_{1j}$は少し外れているようにも見える一方で、$\hat{\zeta}_{0j}$は正規分布に従ってそうです。また、標準化残差プロットを見る限り、正規分布からの大きな逸脱はなさそうです。
+
+```{r}
+l1 <- ggplot(df_eps,aes(sample = resid_eps)) + stat_qq() + stat_qq_line() + ggtitle("Normal Q-Q plot of epsilon") 
+l2 <- ggplot(df_zeta, aes(sample = zeta0)) + stat_qq() + stat_qq_line() + ggtitle("Normal Q-Q plot of zeta0") 
+l3 <- ggplot(df_zeta, aes(sample = zeta1)) + stat_qq() + stat_qq_line() + ggtitle("Normal Q-Q plot of zeta1") 
+
+r1 <- ggplot(df_eps, aes(id, resid_eps_std)) + geom_point() + 
+  geom_hline(yintercept = c(-2,2), linetype = "dotted", col = "tomato") + 
+  ylim(-3, 3) + 
+  ggtitle("Standardized residual plot of epsilon")
+
+r2 <- ggplot(df_zeta, aes(id, zeta0_std)) + geom_point() + 
+  geom_hline(yintercept = c(-2,2), linetype = "dotted", col = "tomato") + 
+  ylim(-3, 3) + 
+  ggtitle("Standardized residual plot of zeta0")
+
+r3 <- ggplot(df_zeta, aes(id, zeta1_std)) + geom_point() + 
+  geom_hline(yintercept = c(-2,2), linetype = "dotted", col = "tomato") + 
+  ylim(-3, 3) + 
+  ggtitle("Standardized residual plot of zeta1")
+
+
+((l1 | r1) / (l2 | r2) / (l3 | r3)) & theme_bw() 
+```
+
+## 等分散性の検証
+
+予測変数と残差をプロットすることで等分散性の検証ができる。残差のサンプルサイズはレベル1とレベル2で異なるので、そのあたりは注意が必要。仮定が満たされるのであれば、予測変数の残差の変動は、おおよそ等しくなることが期待できる。
+
+レベル1の`age`は上下の範囲が等しく、レベル2の`coa`、`peer`でも問題なさそうに見える。気になる点としては、`Zeta1 & Peer`の右下のグラフにおいて、`peer`が2以上の右端の部分においては、変動が小さくなっており、この部分では等分散性が満たされていないかもしれない。
+
+```{r}
+l <- ggplot(df_eps, aes(age, resid_eps)) + geom_jitter(width = 0.1) + geom_hline(yintercept = 0, linetype = "dotted", col = "tomato") + ggtitle("Epsilon & Age")
+l1 <- ggplot(df_zeta, aes(coa , zeta0)) + geom_jitter(width = 0.1) + geom_hline(yintercept = 0, linetype = "dotted", col = "tomato") + ggtitle("Zeta0 & Coa")
+r1 <- ggplot(df_zeta, aes(peer, zeta0)) + geom_point() + geom_hline(yintercept = 0, linetype = "dotted", col = "tomato") + ggtitle("Zeta0 & Peer")
+l2 <- ggplot(df_zeta, aes(coa , zeta1)) + geom_jitter(width = 0.1) + geom_hline(yintercept = 0, linetype = "dotted", col = "tomato") + ggtitle("Zeta1 & Coa")
+r2 <- ggplot(df_zeta, aes(peer, zeta1)) + geom_point() + geom_hline(yintercept = 0, linetype = "dotted", col = "tomato") + ggtitle("Zeta1 & Peer")
+
+(l / (l1 | r1) / (l2 | r2)) & theme_bw() 
+```
+
+## 参考文献
+
+- [縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)
+- [Applied Longitudinal Data Analysis: Modeling Change and Event Occurrence](https://www.amazon.com/Applied-Longitudinal-Data-Analysis-Occurrence/dp/B017YBZFW0)
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+- [Chapter 9 Mixed Effects Models](https://glennwilliams.me/r4psych/mixed-effects-models.html)
+- [Applied longitudinal data analysis in brms and the tidyverse](https://bookdown.org/content/4253/index.html)
+

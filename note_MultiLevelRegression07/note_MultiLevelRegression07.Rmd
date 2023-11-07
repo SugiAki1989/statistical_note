@@ -1,0 +1,406 @@
+---
+title: "マルチレベルモデリングChapter5:測定回数や測定頻度が異なるデータを扱う"
+pagetitle: "マルチレベルモデリングChapter5:測定回数や測定頻度が異なるデータを扱う"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)を利用してマルチレベルモデリングの勉強内容をまとめたもの。下記のサポートサイトにサンプルデータなどが保存されている。
+
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+
+ここでの目的は、データの測定回数や時間が異なるデータに対するマルチレベルモデルについてまとめておく。
+
+## 測定タイミングの異なる場合
+
+これまで扱ってきたデータは、測定間隔が同じで、測定回数も同じ構造化されたデータを扱ってきたが、ここでは、測定回数が個人で異なり、個人の測定間隔もバラバラなデータを扱う。
+
+今回のデータは、89人のアフリカ系アメリカ人の子どもの読む能力テスト(PIAT: Peabody Individual Achievement Teat)の得点に関するデータで、測定回数は3回。1986年(6歳)、1988年(8歳)、1990年(10歳)のときに測定が行われている。
+
+このデータの特徴は、時間に関する変数が下記の通り3つも存在していること。
+
+- `wave`: 測定回数を表す
+- `agegrp`: 検査が期待される年齢のグループを表す
+- `age`: テスト受験時の実際の年齢を表す
+
+```{r}
+library(tidyverse)
+library(broom)
+library(nlme)
+library(DT)
+library(patchwork)
+library(stargazer)
+
+reading_pp <- read_csv("~/Desktop//reading_pp.csv") %>% 
+  mutate(agegrp_c = agegrp - 6.5,
+         age_c    = age    - 6.5)
+datatable(reading_pp %>% mutate_if(is.numeric, round, 2))
+```
+
+これらの変数の関係を可視化するとわかりやすい。1回目の測定は必ず6歳に行われているわけではなく、7歳ギリギリの子どももいる。2回目には8歳のはずが10歳近くで検査しており、3回目は10歳の予定が、平均的には11歳で検査を受けている。つまり、測定の感覚がバラバラなデータであることがわかる。この現象を測定間隔のずれ(Occasion Creep)と呼ぶ。
+
+```{r}
+reading_pp %>% 
+  ggplot(aes(x = wave, y = age)) +
+  geom_jitter(alpha = .5, height = 0, width = 0.1) +
+  scale_y_continuous(breaks = seq(6, 12, 1)) +
+  scale_x_continuous(breaks = 1:3) + 
+  theme_bw()
+```
+
+このようなケースでは、`wave`、`age`、`agegrp`のどれを使用するべきなのだろうか。より正確な情報という点では`age`であるが、等間隔で解釈しやすいのは`agegrp`である。個人成長プロットを`age`、`agegrp`で可視化しても、どちらも似たような傾向を可視化しているので、可視化からでは判断しがたい。
+
+```{r}
+reading_pp %>% 
+  select(-wave) %>% 
+  filter(id %in% c(4, 27, 31, 33, 41, 49, 69, 77, 87)) %>% 
+  pivot_longer(cols = c(agegrp, age), names_to = "type", values_to = "x") %>% 
+  ggplot(., aes(x, piat, col = type)) + 
+  geom_point() + 
+  stat_smooth(method = "lm", se = FALSE) +
+  scale_x_continuous(breaks = seq(6, 12, 1)) + 
+  # scale_x_continuous(breaks = c(0, 1, 2), label = c("14", "15", "16")) +
+  ylim(0, 80) + 
+  facet_wrap( ~ id, scales = "free", nrow = 3) + 
+  theme_bw()
+                
+```
+
+可視化だけでは判断し難いため、実際にモデルに利用することでどのような違いが現れるのか、確認する。
+
+## 無条件成長モデル
+
+ここでは、無条件成長モデルをもとに`TIME`に`age`、`agegrp`を利用することで、モデルにどのような違いが現れるのか、確認する。いつもどおり、`6.5`を引いて中心化すると、`agegrp`を使ったモデルでは、$\gamma_{00}$は6.5歳時点の初期値を表し、$\gamma_{10}$は6.5歳時点の変化率を表すことになる。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \zeta_{1i} \\
+\begin{bmatrix}
+\zeta_{0i} \\
+\zeta_{1i}
+\end{bmatrix} &\sim& N 
+\begin{bmatrix}
+\sigma_{0}^{2} & \sigma_{01} \\
+\sigma_{10} & \sigma_{1}^{2}
+\end{bmatrix},\quad  \epsilon_{ij} \sim N(0, \sigma_{\epsilon}^{2}) 
+\end{eqnarray}
+$$
+
+
+下記のとおり`agegrp`を使ったモデルを推定する。
+
+```{r}
+lme.agegrp <- lme(piat ~ agegrp_c, reading_pp, random= ~ agegrp | id, method = "ML")
+lme.age <- lme(piat ~ age_c, reading_pp, random= ~ age | id, method = "ML")
+
+list(
+  agegrp = summary(lme.agegrp),
+  age = summary(lme.age)
+)
+
+```
+
+パラメタの分散はこの通り。
+
+```{r}
+list(
+       agegrp = VarCorr(lme.agegrp),
+       age = VarCorr(lme.age)
+    )
+```
+
+モデルの情報を比較する。$\gamma_{0i}$はどちらも`21`あたりであり大きな違いは見られない。また、子供の個人内のばらつき$\sigma_{\epsilon}^{2}$も`27`であたりであり大きな違いは見られない。変化率を表す$\gamma_{1i}$には、0.5ポイントくらいの差が出ている。これは2年ごとに、1ポイント差がでるため、研究の4年間では2ポイントの差に積み上がってしまう。
+
+今回のデータであれば、`agegrp`実際のは`age`の観測タイミングよりも早い値になるため、固定効果であるす$\gamma_{1i}$が大きくなってしまいやすい。また、分散成分も大きくなってしまいやすい。
+
+```{r, include=FALSE}
+stargazer::stargazer(
+  lme.agegrp,
+  lme.age,
+  type = "html")
+```
+
+<table style="text-align:center"><tr><td colspan="3" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"></td><td colspan="2"><em>Dependent variable:</em></td></tr>
+<tr><td></td><td colspan="2" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left"></td><td colspan="2">piat</td></tr>
+<tr><td style="text-align:left"></td><td>agegrp_c</td><td>age_c</td></tr>
+<tr><td colspan="3" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Constant$\gamma_{0i}$</td><td>21.163<sup>***</sup></td><td>21.061<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.617)</td><td>(0.561)</td></tr>
+<tr><td style="text-align:left">time$\gamma_{1i}$</td><td>5.031<sup>***</sup></td><td>4.540<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.297)</td><td>(0.262)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td></tr>
+<tr><td colspan="3" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Level1 $\sigma_{\epsilon}^{2}$</td><td>27.04</td><td>27.44</td></tr>
+<tr><td style="text-align:left">Level2 $\sigma_{0}^{2}$</td><td>175.42</td><td>113.82</td></tr>
+<tr><td style="text-align:left">Level2 $\sigma_{1}^{2}$</td><td>4.39</td><td>3.30</td></tr>
+<tr><td colspan="3" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Observations</td><td>267</td><td>267</td></tr>
+<tr><td style="text-align:left">Log Likelihood</td><td>-909</td><td>-901</td></tr>
+<tr><td style="text-align:left">Akaike Inf. Crit.</td><td>1,831</td><td>1,815</td></tr>
+<tr><td style="text-align:left">Bayesian Inf. Crit.</td><td>1,853</td><td>1,837</td></tr>
+<tr><td colspan="3" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"><em>Note:</em></td><td colspan="2" style="text-align:right"><sup>*</sup>p<0.1; <sup>**</sup>p<0.05; <sup>***</sup>p<0.01</td></tr>
+</table>
+
+そのため、時間構造化されていないデータ(`age`)を時間構造化されたもの(`agegrp`)として扱うのはよくなく、実際の観測タイミングでの値を利用するほうがよい。
+
+## 測定時点の異なる場合
+
+男子高校生の中退者の労働市場経験と賃金の関係を追跡したデータを測定時点の異なる場合の例とする。このデータは下記の特徴を持っている。
+
+- 最初の時点で年齢が14歳から17歳までばらついている
+- 測定の間隔が1年後であったり、2年後の場合もある
+- 調査月もバラバラな状態
+- 面接調査のときに2つ以上の仕事に回答できる
+- 異なる時期に退学して、異なる時期に就職して、異なる時期に転職できる
+
+
+```{r}
+wages_pp <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/wages_pp.txt", header=T, sep=",") %>% 
+  select(id, exper, lnw, black, hgc, uerate, hgc.9)
+datatable(wages_pp %>% filter(id %in% c(206, 332, 1028)))
+```
+
+`lnw`は自然対数変換された賃金で、$e^{2.03}=7.6$ドルとなる。`exper`は時間的な変数であり`lnw`の観測値と関連付けられた特定の時点を表す。例えば、`id=206`は3回の測定回数をもっており、`1.87, 2.81, 4.31`年経過後を意味している。転職すると、調査があって、レコードが生成されるというイメージ。
+
+各個人の測定回数の分布を可視化すると、9回観測されている個人が多く、最小1回、最大13回の個人が存在している。
+
+```{r}
+wages_pp %>% 
+  group_by(id) %>% count() %>% 
+  group_by(n)  %>% count() %>% 
+  ggplot(., aes(x = n, y = nn)) +
+  geom_bar(stat = "identity") + 
+  scale_x_continuous(breaks = seq(0, 15, 1)) + 
+  theme_bw()
+```
+
+さらに可視化すると、このデータの測定回数や測定間隔がいかにばらついているものなのかがわかる。
+
+```{r}
+wages_pp %>% 
+  filter(id %in% c(134, 173, 206, 332, 537)) %>% 
+  mutate(id = factor(id)) %>% 
+  ggplot(aes(x = exper, y = lnw, color = id)) +
+  geom_point() +
+  geom_line() +
+  theme_bw()
+```
+
+測定回数や測定間隔がばらついているからといって、マルチレベルモデルでパラメタを推定できない、ということはない。
+
+## モデルの比較
+
+測定間隔や測定回数が異なるからと言って、パラメタを推定する場合に、特別な処理が必要というわけではない。ここでは、いくつかのモデルを構築した結果を解釈する。
+
+まずは無条件成長モデルであるモデルAの結果をみると、`exper`の係数$\hat{\gamma}_{10}$が有意であることから、時間の経過とともに上昇していることがわかる。ただ、自然対数変換を行っているので、片対数モデルであり、xが1変化したときに$100(e^{0.0457}-1)=4.7$となるため、平均的に年間で4.7％上昇していることがわかる。
+
+```{r}
+model.a <- lme(lnw ~ exper,
+               random = ~ exper | id,
+               data = wages_pp,
+               method = "ML")
+summary(model.a)
+```
+
+モデルBには高校中退者の人種`black`と中退までに修了した学年を中心化した`hgc.9`がモデルに取り込まれている。`hgc`は6年(小学6年)から12年(高校3年)までの値をとり、平均は8.8なので、9をひくことで、平均値に近い意味のある値の周辺に中心化されている。つまり、平均的な値を表すことで、モデルを解釈しやすいようにしている。
+
+初期状態に関する`hgc.9`の$\hat{\gamma}_{01}$は`0.034`で有意である。つまり、終了した年数が大きいほうが、初期時点での賃金が高い。また、変化率に関する`exper:black`の$\hat{\gamma}_{12}$は`-0.018`であるため、アフリカ系であると賃金の上昇傾向が緩やかになる。
+
+```{r}
+model.b <- lme(lnw ~ exper * hgc.9 + exper * black,
+               random = ~ exper | id,
+               data = wages_pp,
+               method = "ML")
+summary(model.b)
+```
+
+モデルCはレベル2サブモデルの切片に`hgc9`が含まれ、変化率に`black`が含まれているモデル。これも、`hgc9`が大きいほうが初期時点での賃金の値が高く、アフリカ系であると変化率が緩やかになることがわかる。
+
+```{r}
+model.c <- lme(lnw ~ exper + exper:black + hgc.9,
+               random = ~ exper | id,
+               data = wages_pp,
+               method = "ML")
+summary(model.c)
+```
+
+各モデルの結果をまとめると、下記の通りとなる。
+
+```{r, include=FALSE}
+stargazer::stargazer(
+  model.a,
+  model.b,
+  model.c,
+  type = "html")
+```
+
+
+<table style="text-align:center"><tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"></td><td colspan="3"><em>Dependent variable:</em></td></tr>
+<tr><td></td><td colspan="3" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left"></td><td colspan="3">lnw</td></tr>
+<tr><td style="text-align:left"></td><td>modelA</td><td>modelB</td><td>modelC</td></tr>
+<tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left">Constant$\gamma_{00}$</td><td>1.716<sup>***</sup></td><td>1.717<sup>***</sup></td><td>1.721<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.011)</td><td>(0.013)</td><td>(0.011)</td></tr>
+<tr><td style="text-align:left">hgc.9$\gamma_{01}$</td><td></td><td>0.035<sup>***</sup></td><td>0.038<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.008)</td><td>(0.006)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">black$\gamma_{02}$</td><td></td><td>0.015</td><td></td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.024)</td><td></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">exper$\gamma_{10}$</td><td>0.046<sup>***</sup></td><td>0.049<sup>***</sup></td><td>0.049<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.002)</td><td>(0.003)</td><td>(0.003)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">exper:hgc.9$\gamma_{11}$</td><td></td><td>0.001</td><td></td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.002)</td><td></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">exper:black$\gamma_{12}$</td><td></td><td>-0.018<sup>***</sup></td><td>-0.016<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.006)</td><td>(0.005)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Observations</td><td>6,402</td><td>6,402</td><td>6,402</td></tr>
+<tr><td style="text-align:left">Log Likelihood</td><td>-2,460.697</td><td>-2,436.876</td><td>-2,437.352</td></tr>
+<tr><td style="text-align:left">Akaike Inf. Crit.</td><td>4,933.394</td><td>4,893.751</td><td>4,890.704</td></tr>
+<tr><td style="text-align:left">Bayesian Inf. Crit.</td><td>4,973.980</td><td>4,961.395</td><td>4,944.818</td></tr>
+<tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"><em>Note:</em></td><td colspan="3" style="text-align:right"><sup>*</sup>p<0.1; <sup>**</sup>p<0.05; <sup>***</sup>p<0.01</td></tr>
+</table>
+
+
+モデルの理解を深めるために下記の典型的な4人を可視化する。`black`は`0 or 1`で、`hgc.9`は9を引いて中心化しているので、`0`は9年生、`3`は12年生を表す。
+
+- 白人ラテン系(`black=0`)で9年生(`hgc.9=0`)で中退
+- 白人ラテン系(`black=0`)で12年生(`hgc.9=3`)で中退
+- アフリカ系(`black=1`)で9年生(`hgc.9=0`)で中退
+- アフリカ系(`black=1`)で12年生(`hgc.9=3`)で中退
+
+モデルの係数解釈通り、修了年数が大きいほうが初期時点で賃金が高く、アフリカ系であると変化率が緩やかになるため、「アフリカ系の12年生で中退した個人」は、最初は「白人ラテン系の12年生で中退した個人」と同じ賃金であるが、年数が経過するにつれて、「白人ラテン系の9年生で中退した個人」のほうが、「アフリカ系の12年生で中退した個人」よりも賃金が高くなっていることがわかる。
+
+```{r}
+fixef.c <- fixef(model.c)
+df_fit_plt_c <- expand_grid(black = 0:1, 
+            hgc.9 = c(0, 3), 
+            exper = seq(from = 0, to = 12, length.out = 2)) %>% 
+  mutate(lnwage = fixef.c[[1]] + 
+           fixef.c[[2]] * exper + 
+           fixef.c[[3]] * hgc.9 + 
+           fixef.c[[4]] * exper * black,
+         type = paste0("black=", black, " & hgc.9=", hgc.9))
+
+ggplot(df_fit_plt_c, aes(exper, lnwage, col = as.character(type))) + 
+  geom_path(size = 1) +
+  geom_text(aes(y = lnwage + 0.02, label = round(lnwage, 2))) +
+  scale_x_continuous(breaks = seq(0, 12, 1)) +
+  scale_color_manual(values = c("#a0d8ef", "#19448e", "#ec6d71", "#a22041"), name = "type") +
+  xlab("exper") + 
+  ggtitle("Model C for the effects of balck & hgc9") +
+  theme_bw()
+```
+
+## モデルの問題点
+
+各個人の観測回数が少ないデータでモデルを当てはめると、繰り返し計算のアルゴリズムが収束せず、分散成分が計算できない場合がある。無条件成長モデルを使って考えてみる。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + \gamma_{10} Time_{ij} + [\zeta_{0i} + \zeta_{1i}Time_{ij} + \epsilon_{ij}] \\
+&=& \gamma_{00} + \gamma_{10} Time_{ij} + \epsilon^{*}_{ij} \\
+\begin{bmatrix}
+\zeta_{0i} \\
+\zeta_{1i}
+\end{bmatrix} &\sim& N \left(
+\begin{bmatrix}
+0 \\
+0 
+\end{bmatrix},
+\begin{bmatrix}
+\sigma_{0}^{2} & \sigma_{01} \\
+\sigma_{10} & \sigma_{1}^{2}
+\end{bmatrix}\right),\quad  \epsilon_{ij} \sim N(0, \sigma_{\epsilon}^{2}) 
+\end{eqnarray}
+$$
+
+普通の回帰モデルに似ているが、大きな違いは残差が合成されている残差であること。これまでどおり、レベル1サブモデルの残差は正規分布に従い、レベル2サブモデルは2変量正規分布に従う。
+
+例えばこのモデルにおいて、$\epsilon^{*}_{ij} \sim N(0, \sigma_{\epsilon^{*}}^{2})$だとすると、レベル２の残差$\zeta_{0i},\zeta_{1i}$は0ということになる。つまり、$\sigma_{0}^{2},\sigma_{1}^{2}$も0となる。$\sigma_{0}^{2},\sigma_{1}^{2}$が0であるということは、初期値や変化率が個人間で同じで一定となる。
+
+このような場合に、モデルに必要なのは$Time_{ij}$が十分であること。極端な話で厳密さにかけるが、2点しかないのであれば、点と線を結んでいるようなものなので、残差が0で分散が計算できない。
+
+```{r}
+summary(lm(c(10,20) ~ c(1,2)))
+```
+
+少なくとも2時点のデータで$Y_{ij}$がばらついているのであれば、残差も計算できる。3時点のデータで$Y_{ij}$がばらついているのであれば、各地点の縦縞に直線が通る。測定回数や頻度が異なるデータは、観測地点で観測が行われず、各地点の近辺に値がばらつくので、縦縞にはならず、横に広がったような関係になり、推定されやすくなる。
+
+また、理論的に取りうることがないような値を制約するパラメタ境界制約という問題もある。例えば分散はマイナスにならないはずである。ただ、場合によってはマルチレベルモデルのパラメタ推定において、繰り返し計算を行っていると0やありえない値を推定することがある。つまり、分散が0になっている場合には、境界制約の問題に出くわしている可能性が高い。
+
+意図的にサイズを小さくして問題が起こるようにしたデータセットを利用して実際に分散が0になるかを確認しておく。このデータの個人は3回以下の観測しか持たない。
+
+```{r}
+wages.small <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/wages_small_pp.txt", header=T, sep=",")
+wages.small %>% 
+  group_by(id) %>% count() %>% 
+  group_by(n)  %>% count() %>% 
+  ggplot(., aes(x = n, y = nn)) +
+  geom_bar(stat = "identity") + 
+  scale_x_continuous(breaks = seq(0, 15, 1)) + 
+  theme_bw()
+```
+
+さらに可視化すると、このデータの測定回数や測定間隔がいかにばらついているものなのかがわかる。
+
+```{r}
+wages.small %>%
+  group_by(id) %>% 
+  mutate(id = factor(id),
+         g = n()) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = exper, y = lnw, color = id)) +
+  geom_point() +
+  geom_line() +
+  facet_grid(black ~ g) + 
+  theme_bw() + 
+  theme(legend.position = "none")
+```
+
+このデータに対して、先程のモデルCを当てはめると、`exper`の分散$\sigma^{2}_{1}$がほとんど0になっていることがわかる。
+
+```{r}
+model_small <- lme(lnw~exper+hcg.9+exper:black, wages.small, random= ~exper|id, method = "ML")
+# exper: 3.703446e-10 = 0.0000000003703446
+VarCorr(model_small)
+```
+
+## 参考文献
+
+- [縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)
+- [Applied Longitudinal Data Analysis: Modeling Change and Event Occurrence](https://www.amazon.com/Applied-Longitudinal-Data-Analysis-Occurrence/dp/B017YBZFW0)
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+- [Chapter 9 Mixed Effects Models](https://glennwilliams.me/r4psych/mixed-effects-models.html)
+- [Applied longitudinal data analysis in brms and the tidyverse](https://bookdown.org/content/4253/index.html)
+

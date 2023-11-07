@@ -1,0 +1,338 @@
+---
+title: "マルチレベルモデリングChapter5:時変な予測変数の中心化"
+pagetitle: "マルチレベルモデリングChapter5:時変な予測変数の中心化"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)を利用してマルチレベルモデリングの勉強内容をまとめたもの。下記のサポートサイトにサンプルデータなどが保存されている。
+
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+
+ここでの目的は、時変の予測変数の中心化についてまとめておく。
+
+## 時変の予測変数の中心化
+
+男子高校生の中退者の労働市場経験と賃金の関係を追跡したデータを測定時点の異なる場合の例とする。このデータは下記の特徴を持っている。
+
+- 最初の時点で年齢が14歳から17歳までばらついている
+- 測定の間隔が1年後であったり、2年後の場合もある
+- 調査月もバラバラな状態
+- 面接調査のときに2つ以上の仕事に回答できる
+- 異なる時期に退学して、異なる時期に就職して、異なる時期に転職できる
+
+`lnw`は自然対数変換された賃金で、$e^{2.03}=7.6$ドルとなる。`exper`は時間的な変数であり`lnw`の観測値と関連付けられた特定の時点を表す。例えば、`id=206`は3回の測定回数をもっており、`1.87, 2.81, 4.31`年経過後を意味している。転職すると、調査があって、レコードが生成されるというイメージ。
+
+アフリカ系を表す`black` 、中退までに修了した学年を中心化した`hgc`、`hgc`は6年(小学6年)から12年(高校3年)までの値をとり、平均は8.8なので、9をひくことで、平均値に近い意味のある値の周辺に中心化(`hgc.9`)されている。`uerate`はその地域での失業率を時変な変数。
+
+```{r}
+library(tidyverse)
+library(broom)
+library(nlme)
+library(DT)
+library(patchwork)
+library(stargazer)
+wages_pp <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/wages_pp.txt", header=T, sep=",")
+datatable(wages_pp %>% filter(id %in% c(206, 332, 1028)) %>%  mutate_if(is.numeric, round, 2))
+```
+
+`uerate`が時変の変数で、この変数は地元地域の失業率を表す。この変数をモデルに組み込んで予測変数の中心化することの理解を深めていく。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + \gamma_{10} Time_{ij} + \gamma_{01} (HGC_{i}-9) + \gamma_{12} BLACK_{i}×TIME_{ij} + \gamma_{20}UERATE_{ij} + 
+[\zeta_{0i} + \zeta_{1i}Time_{ij} + \epsilon_{ij}] \\
+\end{eqnarray}
+$$
+
+この変数をモデルに入れる際に、そのまま利用することもできるし、全平均7から引くことで中心化する方法や特定の定数を使って中心化することもできる。例えば定数7を引いた場合のモデルの$\gamma_{00}$の解釈は、失業率が7%の地域に住む人の平均的な対数賃金を表す。そのため、地域の失業率の1%の変化は、賃金の1.2％の減少を表す。
+
+```{r}
+# 7で中心化
+model.a <- lme(
+  lnw ~ hgc.9 + ue.7 + exper + exper:black,
+  random = ~exper|id,
+  data = wages_pp, 
+  method = "ML")
+```
+
+個人の平均で中心化する方法もある。下記のモデル式をみると違和感があるが、時変の予測変数を1つの変数で表すのではなく、成分を分解することで、パラメタの解釈を柔軟にできる。下記は個人内中心化法で、個人の時変変数の平均値を使って中心化する。この場合、モデルには個人の平均値と偏差を投入する。
+
+```{r}
+datatable(wages_pp %>% filter(id %in% c(206, 332, 1028)) %>% mutate_if(is.numeric, round, 2) %>% select(id, lnw, exper, uerate, ue.mean, ue.person.cen)) 
+```
+
+個人内中心化では、個人の平均は時不変、偏差は時変ということになる。その結果、このモデルでは、
+
+- 平均的な失業率が低いほど対数賃金も低い
+- 偏差は、各個人平均と比較した各時点での相対的な大きさを表す。パラメタまマイナスなので、相対的に大きくなれば対数賃金も低くなり、相対的に小さくなれば偏差はマイナスなので、対数賃金は増加する。(という解釈であっているはず。)
+
+という2つの側面との関連を明らかにする。
+
+```{r}
+# 個人平均で中心化
+model.b <- lme(
+  lnw ~ hgc.9 + ue.mean + ue.person.cen + exper + exper:black,
+  random = ~exper|id,
+  data = wages_pp, 
+  method = "ML")
+summary(model.b)
+```
+
+モデルCでは時点1で中心化されているため、モデルの変数は、中退者が最初に労働市場に入ったときの初期値、この初期を基準として増加分、減少分を表していることになる。
+
+```{r}
+# 時点1で中心化
+model.c <- lme(
+  lnw ~ hgc.9 + ue1 + ue.centert1 + exper + exper:black,
+  random = ~exper|id,
+  data = wages_pp, 
+  method = "ML")
+```
+
+このように予測変数の中心化方法はいくつかあるが、必ずしも理解しやすくなるわけでもない。そのため、盲目的に中心化する、中心化しない、ではなく、目的に応じて、適切な中心化方法を選択する必要がある。各モデルの結果を下記にまとめておく。
+
+```{r, include=FALSE}
+stargazer::stargazer(
+  model.a,
+  model.b,
+  model.c,
+  type = "html")
+```
+
+
+<table style="text-align:center"><tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"></td><td colspan="3"><em>Dependent variable:</em></td></tr>
+<tr><td></td><td colspan="3" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left"></td><td colspan="3">lnw</td></tr>
+<tr><td style="text-align:left"></td><td>(7で中心化)</td><td>(個人内で中心化)</td><td>(時点1で中心化)</td></tr>
+<tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left">Constant$\gamma_{00}$</td><td>1.749<sup>***</sup></td><td>1.874<sup>***</sup></td><td>1.869<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.011)</td><td>(0.030)</td><td>(0.026)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">(hgc-9)$\gamma_{01}$</td><td>0.040<sup>***</sup></td><td>0.040<sup>***</sup></td><td>0.040<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.006)</td><td>(0.006)</td><td>(0.006)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">uerate$\gamma_{20}$</td><td>-0.012<sup>***</sup></td><td>-0.018<sup>***</sup></td><td>-0.016<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.002)</td><td>(0.004)</td><td>(0.003)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">(中心値からのUERATEの偏差)$\gamma_{30}$</td><td></td><td>-0.010<sup>***</sup></td><td>-0.010<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td></td><td>(0.002)</td><td>(0.002)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">exper$\gamma_{10}$</td><td>0.044<sup>***</sup></td><td>0.045<sup>***</sup></td><td>0.045<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.003)</td><td>(0.003)</td><td>(0.003)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td style="text-align:left">exper:black$\gamma_{12}$</td><td>-0.018<sup>***</sup></td><td>-0.019<sup>***</sup></td><td>-0.018<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(0.004)</td><td>(0.004)</td><td>(0.004)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+<tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Observations</td><td>6,402</td><td>6,402</td><td>6,402</td></tr>
+<tr><td style="text-align:left">Log Likelihood</td><td>-2,415</td><td>-2,413</td><td>-2,412</td></tr>
+<tr><td style="text-align:left">Akaike Inf. Crit.</td><td>4,848</td><td>4,846</td><td>4,845</td></tr>
+<tr><td style="text-align:left">Bayesian Inf. Crit.</td><td>4,909</td><td>4,914</td><td>4,913</td></tr>
+<tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"><em>Note:</em></td><td colspan="3" style="text-align:right"><sup>*</sup>p<0.1; <sup>**</sup>p<0.05; <sup>***</sup>p<0.01</td></tr>
+</table>
+
+## TIMEの中心化(その2)
+
+ここでは、TIME変数の中心化について考える。まずはサンプルデータを紹介する。このデータはうつ病患者への薬の効果を調査した研究のデータで、毎日1周間、8時、15時、22時に気分を回答したことで経時的なデータとなっている。ただ、最大で個人は21回の回答を行うことができるが、全員が必ずしもちゃんと回答しているわけではない。データの変数の意味は下記の通り。
+
+- `wave`は回数の連番で、1習慣を概念的に21に分割している
+- `day`は何日目かを表す
+- `time.of.day`は1日の各時点を0から1の範囲で表す
+- `time`は`time.of.day`を7日まで累積したもので、ここでは尤もらしいTIME変数で0から6.67までの範囲を持つ。下記の中心化変数と比べるために表記を揃えるにおであれば、0を引いて中心化したとも考えることができる。
+- `time333`は研究の中心時点である3.33という時点で中心化したもの
+- `time667`は研究の最終時点である6.67という時点で中心化したもの
+
+```{r}
+medication <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/medication_pp.txt", header=T, sep=",")
+datatable(medication[c(1:6, 11, 16:21), c(1:8)] %>%  mutate_if(is.numeric, round, 2))
+```
+
+ここでは下記のモデルを使って、TIME変数を中心化したことによる解釈の違いを考えていく。$C$は中心化に利用した定数を表す。時間を中心化することで、変化率に関する$\gamma_{10},\gamma_{11}$は変化せず、切片に関する$\gamma_{00},\gamma_{01}$の値が変化する事になり、切片を評価する位置が変化することになる。つまり、初期時点、中間時点、最終時点のどのポイントで切片を評価するのかを、時間を中心化した定数によって変更できる。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i}(Time_{ij} - C) + \epsilon_{0i} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} TREAT_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{11} TREAT_{i} + \zeta_{1i} \\
+\\
+Y_{ij} &=& \gamma_{00} + \gamma_{01} TREAT_{i} + \gamma_{10}(Time_{ij} - C)  + \gamma_{11} TREAT_{i}×(Time_{ij} - C) + [\zeta_{0i} + \zeta_{1i}(Time_{ij} - C)+ \epsilon_{0i}] \\
+\end{eqnarray}
+$$
+
+モデルAは、時間経過とともに気分が下がる傾向(`-2.41`)があるが有意ではなく、初期値はランダム割付が行われているため違いがない(`-3.1`)。交互作用の`treat:time`は、線形変化に有意な影響があるため、変化の軌跡の傾きは異なる。つまり、`treat=1`の処置群では気分が時間経過とともに上がるが、`treat=1` の対照群では気分が時間経過とともに下がる。
+
+```{r}
+#Using time (Model A)
+model.a <- lme(
+  pos ~ treat*time, 
+  random= ~ time|id, 
+  data = medication,
+  method = "ML")
+
+summary(model.a)
+```
+
+このモデルを可視化すると、下記のようになる。時間を中心化することで、どの時点で切片を評価するかをコントロールできる。
+
+```{r}
+fixef.a <- fixef(model.a)
+expand_grid(treat = c(0,1),
+            time = seq(from = 0, to = 7, length.out = 21)) %>%
+  mutate(type = paste0("treat=", treat),
+         pos = 
+           fixef.a[[1]] + 
+           fixef.a[[2]] * treat + 
+           fixef.a[[3]] * time + 
+           fixef.a[[4]] * time*treat 
+  ) %>%   ggplot(., aes(time, pos, col = type)) + 
+  geom_path(size = 1) +
+  geom_text(aes(y = pos + 1, label = round(pos,1))) +
+  geom_vline(xintercept = c(0, 3.33, 6.67)) + 
+  scale_x_continuous(breaks = seq(0, 21, 1)) +
+  scale_y_continuous(breaks = seq(0, 200, 10)) +
+  xlab("time") + 
+  theme_bw()
+```
+
+モデルBは切片を中間時点で評価することになるが、各線との差分を表す`treat`は、この時点では`treat=15.34`で有意ではない。
+
+```{r}
+#Using time - 3.33 (Model B)
+model.b <- lme(
+  pos ~ treat * time333,
+  random= ~ time|id, 
+  data = medication,
+  method = "ML")
+
+summary(model.b)
+```
+
+モデルCは切片を最終時点で評価することになるが、最終時点では`treat=33.80`で有意となる。これは先程、可視化した図より明らかである。
+
+```{r}
+#Using time - 6.67 (Model C)
+model.c <- lme(
+  pos ~ treat * time667,
+  random= ~ time|id, 
+  data = medication,
+  method = "ML")
+
+summary(model.c)
+```
+
+各モデルのサマリを下記の通り、まとめておく。
+
+```{r, include=FALSE}
+stargazer::stargazer(
+  model.a,
+  model.b,
+  model.c,
+  type = "html")
+```
+
+<table style="text-align:center"><tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"></td><td colspan="3"><em>Dependent variable:</em></td></tr>
+<tr><td></td><td colspan="3" style="border-bottom: 1px solid black"></td></tr>
+<tr><td style="text-align:left"></td><td colspan="3">pos</td></tr>
+<tr><td style="text-align:left"></td><td>(ModelA)</td><td>(ModelB_time333)</td><td>(ModelC_time667)</td></tr>
+
+<tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Constant$\gamma_{00}$</td><td>167.463<sup>***</sup></td><td>159.403<sup>***</sup></td><td>151.343<sup>***</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(9.341)</td><td>(8.779)</td><td>(11.561)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+
+<tr><td style="text-align:left">treat$\gamma_{01}$</td><td>-3.109</td><td>15.347</td><td>33.803<sup>**</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(12.352)</td><td>(11.563)</td><td>(15.183)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+
+<tr><td style="text-align:left">time$\gamma_{10}$</td><td>-2.418</td><td>-2.418</td><td>-2.418</td></tr>
+<tr><td style="text-align:left"></td><td>(1.734)</td><td>(1.734)</td><td>(1.734)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+
+<tr><td style="text-align:left">treat:time$\gamma_{11}$</td><td>5.537<sup>**</sup></td><td>5.537<sup>**</sup></td><td>5.537<sup>**</sup></td></tr>
+<tr><td style="text-align:left"></td><td>(2.282)</td><td>(2.282)</td><td>(2.282)</td></tr>
+<tr><td style="text-align:left"></td><td></td><td></td><td></td></tr>
+
+<tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left">Observations</td><td>1,242</td><td>1,242</td><td>1,242</td></tr>
+<tr><td style="text-align:left">Log Likelihood</td><td>-6,340.226</td><td>-6,340.226</td><td>-6,340.226</td></tr>
+<tr><td style="text-align:left">Akaike Inf. Crit.</td><td>12,696.450</td><td>12,696.450</td><td>12,696.450</td></tr>
+<tr><td style="text-align:left">Bayesian Inf. Crit.</td><td>12,737.450</td><td>12,737.450</td><td>12,737.450</td></tr>
+<tr><td colspan="4" style="border-bottom: 1px solid black"></td></tr><tr><td style="text-align:left"><em>Note:</em></td><td colspan="3" style="text-align:right"><sup>*</sup>p<0.1; <sup>**</sup>p<0.05; <sup>***</sup>p<0.01</td></tr>
+</table>
+
+## TIMEの中心化(その2)
+
+この他にも、時間を中心化する方法は他にもある。最小最大変換に似ている変換を施すことで、`time=0`のときは初期値を表し、`time=6.67`のときは最終時点を表すようなモデルを作ることもできる。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} \left( \frac{max(TIME) - TIME_{ij}}{max(TIME) - min(TIME)} \right) +  \pi_{1i} \left( \frac{TIME_{ij} - min(TIME)}{max(TIME) - min(TIME)} \right) + \epsilon_{ij} \\
+&=& \pi_{0i} \left( \frac{6.67 - TIME_{ij}}{6.67 - 0} \right) +  \pi_{1i} \left( \frac{TIME_{ij} - 0}{6.67 - 0} \right) + \epsilon_{ij} \\
+&=& \pi_{0i} \left( \frac{6.67 - TIME_{ij}}{6.67} \right) +  \pi_{1i} \left( \frac{TIME_{ij}}{6.67} \right) + \epsilon_{ij}
+\end{eqnarray}
+$$
+
+これはレベル2サブモデルとしても表現することができ、
+
+$$
+\begin{eqnarray}
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} TREAT_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{11} TREAT_{i} + \zeta_{1i} \\
+\end{eqnarray}
+$$
+
+モデルを実行すると下記が得られる。対照群の初期値を`167.46`と推定し、初期時点での差分を`- 3.11`と推定する。これはモデルAの推定結果と同じであり、最終時点では、対照群の切片を`151.34`と推定し、差分を`33.80`と推定するが、これはモデルCの推定結果と同じである。
+
+$$
+\begin{eqnarray}
+\pi_{0i} &=& 167.46 - 3.11 × TREAT_{i} \\
+\pi_{1i} &=& 151.34 + 33.80 × TREAT_{i} \\
+\end{eqnarray}
+$$
+
+サポートサイトにはRでの実装はのっていないが、モデルは下記の通り実行できる。
+
+```{r}
+# モデル式はこれであっているのか
+model.d <- lme(
+  pos ~ 0 + initial + final + initial:treat + final:treat,
+  random= ~ 0 + initial + final|id, 
+  data = medication,
+  method = "ML")
+
+summary(model.d)
+```
+
+
+## 参考文献
+
+- [縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)
+- [Applied Longitudinal Data Analysis: Modeling Change and Event Occurrence](https://www.amazon.com/Applied-Longitudinal-Data-Analysis-Occurrence/dp/B017YBZFW0)
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+- [Chapter 9 Mixed Effects Models](https://glennwilliams.me/r4psych/mixed-effects-models.html)
+- [Applied longitudinal data analysis in brms and the tidyverse](https://bookdown.org/content/4253/index.html)
+

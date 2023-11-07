@@ -1,0 +1,538 @@
+---
+title: "マルチレベルモデリングChapter6:非線形モデリング(非連続モデル)"
+pagetitle: "マルチレベルモデリングChapter6:非線形モデリング(非連続モデル)"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)を利用してマルチレベルモデリングの勉強内容をまとめたもの。下記のサポートサイトにサンプルデータなどが保存されている。
+
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+
+ここでの目的は、マルチレベルモデルで想定している誤差共分散構造の扱いについてまとめておくこと。
+
+## 標準的なマルチレベルモデル
+
+ここで使用するデータは、1週間毎(`time`)に35名の参加者(`id`)に対して「反対語を言う」という認知的パフォーマンス(`cog`)を4回測定した調査のデータ。
+
+```{r}
+library(tidyverse)
+library(broom)
+library(nlme)
+library(DT)
+library(patchwork)
+library(stargazer)
+
+opposites <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/opposites_pp.txt",header=TRUE,sep=",")
+datatable(opposites)
+```
+
+ここでも書籍に従って、下記の個人データセット形式で話を進めていく。
+
+```{r}
+opposites %>% 
+  slice(1:40) %>% 
+  select(id, opp, cog, wave) %>% 
+  pivot_wider(names_from = wave,
+              values_from = opp,
+              names_prefix = "OPP")
+
+```
+
+このデータを標準的なマルチレベルモデルを利用して定式化していく。$\pi_{0i}$は個人$i$の初期値で$\pi_{1i}$は1週間の変化率を表す。また、レベル2サブモデルには、個人の初期値と切片が異なるようにランダム効果を加える。認知的スキル(`COG_C`)が両方のパラメタと関連している。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{j} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} COG\_C_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{11} COG\_C_{i} + \zeta_{1i} \\
+
+\epsilon_{ij} &\sim& N(0, \sigma_{\epsilon}^{2})  \\
+\begin{bmatrix}
+\zeta_{0i} \\
+\zeta_{1i} \\
+\end{bmatrix} &\sim& N \left(
+\begin{bmatrix}
+0 \\
+0 
+\end{bmatrix},
+\begin{bmatrix}
+\sigma_{0}^{2} & \sigma_{01} \\
+\sigma_{10} & \sigma_{1}^{2} \\
+\end{bmatrix}
+\right)
+\end{eqnarray}
+$$
+
+モデルを当てはめた結果は下記の通り。平均的な認知スキルを持つ個人について、反対語を言う能力の初期値は`164.37`であり。認知的なスキルが1ポイント異なると、`-0.11`低くなる。また、平均的な認知スキルを持つ個人の変化率は`26.95`で、認知的なスキルが1ポイント異なると、`0.43286`高くなる。
+
+```{r}
+opp.reml <- lme(opp ~ time * ccog,
+                random = ~ time | id,
+                opposites)
+summary(opp.reml)
+```
+
+残差に目を向けると、認知的なスキル(`ccog`)を考慮しても、初期値の分散は`1236.42`で、変化率の残差分散は`107.248`である。また、初期値と変化率の共分散は`-0.489`で負の共分散をもつ。つまり、反対語を言うスキルの初期値が低い参加者は、変化率が大きく、スキルが高い場合、変化率が小さいということになる。レベル1の残差分散は`159.47`である。
+
+```{r}
+VarCorr(opp.reml)
+```
+
+## 標準的なマルチレベルモデルの合成モデル
+
+誤差共分散行列を理解するためには合成モデルを利用するのがよく、説明のために$r_{ij} = \epsilon_{ij} + \zeta_{0i} + \zeta_{1i} TIME_{j}$とする。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + \gamma_{01} COG\_C_{i} + \gamma_{10} TIME_{j} + \gamma_{11} COG\_C_{i} TIME_{j}  + \color{red}{[\epsilon_{ij} + \zeta_{0i} + \zeta_{1i} TIME_{j}]} \\
+&=& \gamma_{00} + \gamma_{01} COG\_C_{i} + \gamma_{10} TIME_{j} + \gamma_{11} COG\_C_{i} TIME_{j}  + \color{red}{r_{ij}} \\
+\end{eqnarray}
+$$
+
+マルチレベルの$r_{ij}$の性質に興味があるので、この部分に焦点をあてて話を進める。上記のように誤差項目をまとめると重回帰モデルのようにも見える。この場合、$r_{ij}$は独立で、平均0の等分散を仮定することになる。つまり、下記のような仮定をとる。
+
+$$
+\begin{eqnarray}
+\begin{bmatrix}
+r_{11} \\ r_{12} \\ r_{13} \\ r_{14} \\
+r_{21} \\ r_{22} \\ r_{23} \\ r_{24} \\
+\vdots \\
+r_{n1} \\ r_{n2} \\ r_{n3} \\ r_{n4} \\
+\end{bmatrix} &\sim& N \left(
+\begin{bmatrix}
+0 \\ 0 \\ 0 \\ 0 \\
+0 \\ 0 \\ 0 \\ 0 \\
+\vdots \\
+0 \\ 0 \\ 0 \\ 0 \\
+\end{bmatrix},
+\begin{bmatrix}
+\sigma_{r}^{2} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \ldots & 0 & 0 & 0 & 0 \\
+0 & \sigma_{r}^{2} & 0 & 0 & 0 & 0 & 0 & 0 & \ldots & 0 & 0 & 0 & 0 \\
+0 & 0 & \sigma_{r}^{2} & 0 & 0 & 0 & 0 & 0 & \ldots & 0 & 0 & 0 & 0 \\
+0 & 0 & 0 & \sigma_{r}^{2} & 0 & 0 & 0 & 0 & \ldots & 0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 & \sigma_{r}^{2} & 0 & 0 & 0 & \ldots & 0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 & 0 & \sigma_{r}^{2} & 0 & 0 & \ldots & 0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 & 0 & 0 & \sigma_{r}^{2} & 0 & \ldots & 0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 & 0 & 0 & 0 & \sigma_{r}^{2} & \ldots & 0 & 0 & 0 & 0 \\
+\vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \ddots & \vdots & \vdots & \vdots & \vdots & \\
+0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \ldots & \sigma_{r}^{2} & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \ldots & 0 & \sigma_{r}^{2} & 0 & 0 \\
+0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \ldots & 0 & 0 & \sigma_{r}^{2} & 0 \\
+0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \ldots & 0 & 0 & 0 & \sigma_{r}^{2} \\
+\end{bmatrix}
+\right)
+\end{eqnarray}
+$$
+合成残差が個人間で独立で平均0の正規分布に従うことを期待するが、個人内ではその分散は非等質で、時間間で相関することがマルチレベルモデルでは期待される。つまり時間のマルチレベルモデルではこの仮定は思わしくない。これをブロック体格の誤差共分散構造を持つ多変量正規分布に従うようにする。これは個人$i$は自分以外の残差との共分散は0である一方で、各ブロック内では、残差は個人内では相関する。これは、個人内の残差分散が測定時点によって異なることを仮定している。
+
+ブロック内は全員で同じものを共有している。これは、個人内では独立ではなく何ら化に従属しているかもしれないけれども、全体の誤差構造は個人間で同じであり、全員の残差は同じように異質で、自己相関している。
+
+$$
+\begin{eqnarray}
+\begin{bmatrix}
+r_{11} \\ r_{12} \\ r_{13} \\ r_{14} \\
+r_{21} \\ r_{22} \\ r_{23} \\ r_{24} \\
+\vdots \\
+r_{n1} \\ r_{n2} \\ r_{n3} \\ r_{n4} \\
+\end{bmatrix} &\sim& N \left(
+\begin{bmatrix}
+0 \\ 0 \\ 0 \\ 0 \\
+0 \\ 0 \\ 0 \\ 0 \\
+\vdots \\
+0 \\ 0 \\ 0 \\ 0 \\
+\end{bmatrix},
+\begin{bmatrix}
+\sigma_{r1}^{2} & \sigma_{r1,r2}^{2} & \sigma_{r1,r3}^{2} & \sigma_{r1,r4}^{2} & 0 & 0 & 0 & 0 & \ldots & 0 & 0 & 0 & 0 \\
+\sigma_{r2,r1}^{2} & \sigma_{r2}^{2} & \sigma_{r2,r3}^{2} & \sigma_{r2,r4}^{2} & 0 & 0 & 0 & 0 & \ldots & 0 & 0 & 0 & 0 \\
+\sigma_{r3,r1}^{2} & \sigma_{r3,r2}^{2} & \sigma_{r3}^{2} & \sigma_{r3,r4}^{2} & 0 & 0 & 0 & 0 & \ldots & 0 & 0 & 0 & 0 \\
+\sigma_{r4,r1}^{2} & \sigma_{r4,r2}^{2} & \sigma_{r4,r3}^{2} & \sigma_{r4}^{2} & 0 & 0 & 0 & 0 & \ldots & 0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 & \sigma_{r1}^{2} & \sigma_{r1,r2}^{2} & \sigma_{r1,r3}^{2} & \sigma_{r1,r4}^{2} & \ldots & 0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 & \sigma_{r2,r1}^{2} & \sigma_{r2}^{2} & \sigma_{r2,r3}^{2} & \sigma_{r2,r4}^{2} & \ldots & 0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 & \sigma_{r3,r1}^{2} & \sigma_{r3,r2}^{2} & \sigma_{r3}^{2} & \sigma_{r3,r4}^{2} & \ldots & 0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 & \sigma_{r4,r1}^{2} & \sigma_{r4,r2}^{2} & \sigma_{r4,r3}^{2} & \sigma_{r4}^{2} & \ldots & 0 & 0 & 0 & 0 \\
+\vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \ddots & \vdots & \vdots & \vdots & \vdots & \\
+0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \ldots & \sigma_{r1}^{2} & \sigma_{r1,r2}^{2} & \sigma_{r1,r3}^{2} & \sigma_{r1,r4}^{2} \\
+0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \ldots & \sigma_{r2,r1}^{2} & \sigma_{r2}^{2} & \sigma_{r2,r3}^{2} & \sigma_{r2,r4}^{2} \\
+0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \ldots & \sigma_{r3,r1}^{2} & \sigma_{r3,r2}^{2} & \sigma_{r3}^{2} & \sigma_{r3,r4}^{2} \\
+0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \ldots & \sigma_{r4,r1}^{2} & \sigma_{r4,r2}^{2} & \sigma_{r4,r3}^{2} & \sigma_{r4}^{2} \\
+\end{bmatrix}
+\right)
+\end{eqnarray}
+$$
+
+これを行列を使って書き直すと見通しが良くなる。マルチレベルモデルでは、共分散行列の要素を推定することになり、等質性の前提のもとで誤差共分散部分行列$\mathbf{ \Sigma_{r}}$を推定していることになる。ただ、変化についてのマルチレベルモデルでは、もう少し制約を加える必要がある。
+
+$$
+\begin{eqnarray}
+\mathbf{ r } &\sim& N \left(
+\mathbf{0},
+\begin{bmatrix}
+\mathbf{ \Sigma_{r}} & 0 & \ldots & 0 \\
+0 & \mathbf{ \Sigma_{r}} & \ldots & 0  \\
+\vdots & \vdots & \ddots & 0 \\
+0 & 0 & 0 &\mathbf{ \Sigma_{r}} \\
+\end{bmatrix}
+\right), \\
+\mathbf{ \Sigma_{r}} &=& 
+\begin{bmatrix}
+\sigma_{r1}^{2} & \sigma_{r1,r2}^{2} & \sigma_{r1,r3}^{2} & \sigma_{r1,r4}^{2} \\
+\sigma_{r2,r1}^{2} & \sigma_{r2}^{2} & \sigma_{r2,r3}^{2} & \sigma_{r2,r4}^{2} \\
+\sigma_{r3,r1}^{2} & \sigma_{r3,r2}^{2} & \sigma_{r3}^{2} & \sigma_{r3,r4}^{2} \\
+\sigma_{r4,r1}^{2} & \sigma_{r4,r2}^{2} & \sigma_{r4,r3}^{2} & \sigma_{r4}^{2} \\
+\end{bmatrix}
+\end{eqnarray}
+$$
+
+標準的なマルチレベルモデルの誤差共分散の部分行列$\mathbf{ \Sigma_{r}}$はどのような形をしているのだろうか。正規分布する変数の重みつき線形結合は正規分布する。例えば、$r_{ij} = \epsilon_{ij} + \zeta_{0i} + \zeta_{1i} TIME_{j}$の各成分は正規分布する。ランダム変数の重み付き線形結合の平均値は、平均値の同じように重み付けられた線形結合と同じ、つまり、$r_{ij} = \epsilon_{ij} + \zeta_{0i} + \zeta_{1i} TIME_{j}$の平均値は0となる。
+
+## 変化についての標準的なマルチレベルモデル
+
+$r_{ij} = \epsilon_{ij} + \zeta_{0i} + \zeta_{1i} TIME_{j}$を代数的に操作することで、誤差共分散の部分行列$\mathbf{ \Sigma_{r}}$の対角要素を$TIME$とモデルの分散成分で表すことができる。
+
+$$
+\sigma^{2}_{r_j} = VAR(\epsilon_{ij} + \zeta_{0i} + \zeta_{1i} TIME_{j}) = \sigma_{\epsilon}^{2} + \sigma_{0}^{2} + 2\sigma_{01} TIME_{j} + \sigma_{1}^{2} TIME_{j}^{2}
+$$
+
+下記の値はモデルから抽出できるので、
+
+```{r}
+VarCorr(opp.reml)
+```
+
+$\hat{\sigma}_{\epsilon}^{2} = 159.5$、$\hat{\sigma}_{0}^{2} = 1236.4$、$\hat{\sigma}_{1}^{2} = 107.3$となる。また、共分散$\hat{\sigma}_{01}=-178.2$は下記の関数を利用すれば取得できる。
+
+```{r}
+getVarCov(opp.reml)
+```
+
+まとめると下記の数値が得られるので、
+
+- $\hat{\sigma}_{\epsilon}^{2}=159.5$
+- $\hat{\sigma}_{0}^{2}=1236.4$
+- $\hat{\sigma}_{1}^{2}=107.3$
+- $\hat{\sigma}_{01}=-178.2$
+
+これを使って計算する。
+
+$$
+\begin{eqnarray}
+\hat{\sigma}^{2}_{r1} &=& \hat{\sigma}_{\epsilon}^{2} + \hat{\sigma}_{0}^{2} + 2\hat{\sigma}_{01} 0 + \hat{\sigma}_{1}^{2} 0^2 \\
+                      &=& 159.5 + 1236.4 + 2×-178.2(0) + 107.3(0^2) = 1395.9 \\
+\hat{\sigma}^{2}_{r2} &=& \hat{\sigma}_{\epsilon}^{2} + \hat{\sigma}_{0}^{2} + 2\hat{\sigma}_{01} 1 + \hat{\sigma}_{1}^{2} 1^2 \\
+                      &=& 159.5 + 1236.4 + 2×-178.2(1) + 107.3(1^2) = 1146.8 \\
+\hat{\sigma}^{2}_{r3} &=& \hat{\sigma}_{\epsilon}^{2} + \hat{\sigma}_{0}^{2} + 2\hat{\sigma}_{01} 2 + \hat{\sigma}_{1}^{2} 2^2 \\
+                      &=& 159.5 + 1236.4 + 2×-178.2(2) + 107.3(2^2) = 1112.3 \\
+\hat{\sigma}^{2}_{r4} &=& \hat{\sigma}_{\epsilon}^{2} + \hat{\sigma}_{0}^{2} + 2\hat{\sigma}_{01} 3 + \hat{\sigma}_{1}^{2} 3^2 \\
+                      &=& 159.5 + 1236.4 + 2×-178.2(3) + 107.3(3^2) = 1294.4 \\
+\end{eqnarray}
+$$
+
+つまり、誤差共分散行列に値を代入すると、変化についての標準的なマルチレベルモデルの合成残差分散は時点間で異なり、これは予測された異分散性を表す。合成残差分散は最初と最後の時点でデータ収集時点で大きく、中間は小さくなる。
+
+$$
+\begin{eqnarray}
+\hat{\mathbf{ \Sigma}}_{r} &=& 
+\begin{bmatrix}
+\hat{\sigma}_{r1}^{2}    & \hat{\sigma}_{r1,r2}^{2} & \hat{\sigma}_{r1,r3}^{2} & \hat{\sigma}_{r1,r4}^{2} \\
+\hat{\sigma}_{r2,r1}^{2} & \hat{\sigma}_{r2}^{2}    & \hat{\sigma}_{r2,r3}^{2} & \hat{\sigma}_{r2,r4}^{2} \\
+\hat{\sigma}_{r3,r1}^{2} & \hat{\sigma}_{r3,r2}^{2} & \hat{\sigma}_{r3}^{2}    & \hat{\sigma}_{r3,r4}^{2} \\
+\hat{\sigma}_{r4,r1}^{2} & \hat{\sigma}_{r4,r2}^{2} & \hat{\sigma}_{r4,r3}^{2} & \hat{\sigma}_{r4}^{2} \\
+\end{bmatrix} &=& 
+\begin{bmatrix}
+1395.9    & \hat{\sigma}_{r1,r2}^{2} & \hat{\sigma}_{r1,r3}^{2} & \hat{\sigma}_{r1,r4}^{2} \\
+\hat{\sigma}_{r2,r1}^{2} & 1146.8    & \hat{\sigma}_{r2,r3}^{2} & \hat{\sigma}_{r2,r4}^{2} \\
+\hat{\sigma}_{r3,r1}^{2} & \hat{\sigma}_{r3,r2}^{2} & 1112.3    & \hat{\sigma}_{r3,r4}^{2} \\
+\hat{\sigma}_{r4,r1}^{2} & \hat{\sigma}_{r4,r2}^{2} & \hat{\sigma}_{r4,r3}^{2} & 1294.4 \\
+\end{bmatrix}
+\end{eqnarray}
+$$
+
+これは平方完成すれば、なぜこのような性質があるのかがわかりやすい。つまり、この変化についての標準的なマルチレベルモデルでは、合成残差分散は二次関数の関係を持っている。
+
+$$
+\begin{eqnarray}
+\sigma^{2}_{r_j} &=& \sigma_{\epsilon}^{2} + \sigma_{0}^{2} + 2\sigma_{01} TIME_{j} + \sigma_{1}^{2} TIME_{j}^{2} \\
+&=& \left(\sigma_{\epsilon}^{2} + \frac{\sigma_{0}^{2}\sigma_{1}^{2}-\sigma_{01}^{2}}{\sigma_{1}^{2}}\right) + \sigma_{1}^{2} \left( TIME_{j} + \frac{\sigma_{01}}{\sigma_{1}^{2}} \right)^{2}
+\end{eqnarray}
+$$
+
+## 変化についての標準的なマルチレベルモデルの合成残差の共分散
+
+変化についての標準的なマルチレベルモデルの合成残差の共分散には時間依存性がある。$r_{ij} = \epsilon_{ij} + \zeta_{0i} + \zeta_{1i} TIME_{j}$を代数的に操作することで、$TIME_{j},TIME_{j'}$の共分散成分を表すことができる。
+
+$$
+\begin{eqnarray}
+\sigma^{2}_{r_j,r'_j} &=& \sigma_{0}^{2} + \sigma_{01}( TIME_{j} + TIME_{j'} ) + \sigma_{1}^{2} TIME_{j}×TIME_{j'} \\
+\end{eqnarray}
+$$
+
+1行目を計算すると、下記の共分散が得られる。
+
+```{r}
+list(
+1236.4 + (-178.2)*(0+1)+107.3*0*1,
+1236.4 + (-178.2)*(0+2)+107.3*0*2,
+1236.4 + (-178.2)*(0+3)+107.3*0*3
+)
+```
+
+計算した数値を代入した結果がこれで、右上、左下に行くにつれて減少していることがわかる。対角要素から離れるに従って、残差共分散はちいさくなるため、時点間が離れると個人内の残差間の相関の強さが減少することになる。
+
+$$
+\begin{eqnarray}
+\hat{\mathbf{ \Sigma}}_{r} &=& 
+\begin{bmatrix}
+1395.9 & 1058.2 & 880.0 & 701.7 \\
+1058.2 & 1146.8 & 916.2 & 845.2 \\
+880.0 & 916.2 & 1112.3 & 988.8 \\
+701.7 & 845.2 & 988.8 & 1294.4 \\
+\end{bmatrix}
+\end{eqnarray}
+$$
+
+また、共分散の計算式には時間変数が入っているので、時間の変数が大きいと、誤差共分散の値も大きくなる。
+
+実際、この標準的な誤差構造が適しているかは、データが必要としている性質に依存する。ここでまでは標準的な誤差構造を利用していたが、サポートサイトには、他の誤差共分散構造を仮定したモデリングの方法がまとまっている。
+
+- 標準(普通にnleでモデリングする)
+- 非構造的
+- 複合対照的
+- 異分散複合対照的
+- 自己回帰的
+- 異分散自己回帰的
+- トープリッツ
+
+誤差共分散構造には他にもいくつもの種類があり、AICやBICを元に判断するのがよいと思われる。
+
+```
+attach(opposites)
+corandcov <- function(glsob,cov=T,...){
+  corm <- corMatrix(glsob$modelStruct$corStruct)[[5]]
+  print(corm)
+  varstruct <- print(glsob$modelStruct$varStruct)  
+  varests <- coef(varstruct, uncons=F, allCoef=T)
+  covm <- corm*glsob$sigma^2*t(t(varests))%*%t(varests)
+  return(covm)}
+
+unstruct <- gls(opp~time*ccog,opposites, correlation=corSymm(form = ~ 1 |id),  weights=varIdent(form = ~ 1|wave),method="REML")
+corandcov(unstruct)
+
+
+          [,1]      [,2]      [,3]      [,4]
+[1,] 1.0000000 0.8085045 0.7338888 0.4578986
+[2,] 0.8085045 1.0000000 0.8626074 0.7187155
+[3,] 0.7338888 0.8626074 1.0000000 0.7939959
+[4,] 0.4578986 0.7187155 0.7939959 1.0000000
+
+Variance function structure of class varIdent representing
+        1         2         3         4 
+1.0000000 0.9248170 0.9584917 0.9468611 
+
+          1         2         3         4
+1 1345.1224 1005.7731  946.1944  583.1998
+2 1005.7731 1150.4649 1028.5350  846.5661
+3  946.1944 1028.5350 1235.7723  969.2921
+4  583.1998  846.5661  969.2921 1205.9640
+comsym <- gls(opp~time*ccog,opposites, correlation=corCompSymm(,form = ~ 1 |id), method="REML")
+cc <- corMatrix(comsym$modelStruct$corStruct)[[5]]
+print(cc)	
+          [,1]      [,2]      [,3]      [,4]
+[1,] 1.0000000 0.7309599 0.7309599 0.7309599
+[2,] 0.7309599 1.0000000 0.7309599 0.7309599
+[3,] 0.7309599 0.7309599 1.0000000 0.7309599
+[4,] 0.7309599 0.7309599 0.7309599 1.0000000
+cc * comsym$sigma^2
+
+          [,1]      [,2]      [,3]      [,4]
+[1,] 1231.3559  900.0718  900.0718  900.0718
+[2,]  900.0718 1231.3559  900.0718  900.0718
+[3,]  900.0718  900.0718 1231.3559  900.0718
+[4,]  900.0718  900.0718  900.0718 1231.3559
+hetercom <- gls(opp~time*ccog,opposites, correlation=corCompSymm(,form = ~ 1 |id),weights=varIdent(form = ~1|wave), method="REML")
+corandcov(hetercom)
+
+          [,1]      [,2]      [,3]      [,4]
+[1,] 1.0000000 0.7367232 0.7367232 0.7367232
+[2,] 0.7367232 1.0000000 0.7367232 0.7367232
+[3,] 0.7367232 0.7367232 1.0000000 0.7367232
+[4,] 0.7367232 0.7367232 0.7367232 1.0000000
+
+Variance function structure of class varIdent representing
+        1         2         3         4 
+1.0000000 0.8616618 0.8934397 0.9528415 
+          1         2         3         4
+1 1438.1404  912.9405  946.6096 1009.5465
+2  912.9405 1067.7632  815.6573  869.8876
+3  946.6096  815.6573 1147.9734  901.9689
+4 1009.5465  869.8876  901.9689 1305.6977
+auto1 <- gls(opp~time*ccog,opposites, correlation=corAR1(,form = ~ 1 |id), method="REML")
+cc <- corMatrix(auto1$modelStruct$corStruct)[[5]]
+print(cc)
+
+          [,1]      [,2]      [,3]      [,4]
+[1,] 1.0000000 0.8253423 0.6811899 0.5622148
+[2,] 0.8253423 1.0000000 0.8253423 0.6811899
+[3,] 0.6811899 0.8253423 1.0000000 0.8253423
+[4,] 0.5622148 0.6811899 0.8253423 1.0000000
+cc * auto1$sigma^2
+
+          [,1]      [,2]      [,3]      [,4]
+[1,] 1256.6859 1037.1960  856.0417  706.5274
+[2,] 1037.1960 1256.6859 1037.1960  856.0417
+[3,]  856.0417 1037.1960 1256.6859 1037.1960
+[4,]  706.5274  856.0417 1037.1960 1256.6859
+hauto1 <- gls(opp~time*ccog,opposites, correlation=corAR1(,form = ~ 1 |id), weights=varIdent(form = ~1|wave), method="REML")
+corandcov(hauto1)
+
+          [,1]      [,2]      [,3]      [,4]
+[1,] 1.0000000 0.8198784 0.6722005 0.5511227
+[2,] 0.8198784 1.0000000 0.8198784 0.6722005
+[3,] 0.6722005 0.8198784 1.0000000 0.8198784
+[4,] 0.5511227 0.6722005 0.8198784 1.0000000
+Variance function structure of class varIdent representing
+        1         2         3         4 
+1.0000000 0.9104126 0.9512871 0.9593613 
+          1         2         3         4
+1 1340.7078 1000.7413  857.3232  708.8668
+2 1000.7413 1111.2471  951.9922  787.1427
+3  857.3232  951.9922 1213.2696 1003.1765
+4  708.8668  787.1427 1003.1765 1233.9528
+toep <- gls(opp~time*ccog,opposites, correlation=corARMA(,form = ~ 1 |id,p=3,q=0), method="REML")
+cc <- corMatrix(toep$modelStruct$corStruct)[[5]]
+print(cc)
+
+          [,1]      [,2]      [,3]      [,4]
+[1,] 1.0000000 0.8255072 0.7190556 0.5004861
+[2,] 0.8255072 1.0000000 0.8255072 0.7190556
+[3,] 0.7190556 0.8255072 1.0000000 0.8255072
+[4,] 0.5004861 0.7190556 0.8255072 1.0000000
+cc * toep$sigma^2
+
+          [,1]      [,2]      [,3]      [,4]
+[1,] 1246.8832 1029.3111  896.5783  624.0477
+[2,] 1029.3111 1246.8832 1029.3111  896.5783
+[3,]  896.5783 1029.3111 1246.8832 1029.3111
+[4,]  624.0477  896.5783 1029.3111 1246.8832
+anova(unstruct,comsym,hetercom,auto1,hauto1,toep)
+         Model df      AIC      BIC    logLik   Test   L.Ratio p-value
+unstruct     1 14 1283.789 1324.566 -627.8944                         
+comsym       2  6 1299.048 1316.524 -643.5238 1 vs 2 31.258855  0.0001
+hetercom     3  9 1302.954 1329.168 -642.4770 2 vs 3  2.093731  0.5532
+auto1        4  6 1277.876 1295.352 -632.9382 3 vs 4 19.077497  0.0003
+hauto1       5  9 1282.840 1309.054 -632.4199 4 vs 5  1.036723  0.7924
+toep         6  8 1274.081 1297.382 -629.0404 5 vs 6  6.759007  0.0093
+Table 7.4, p. 265.
+
+#Standard error covariance structure
+summary(lme(opp ~ time * ccog, opposites, random =  ~ time | id))
+
+Linear mixed-effects model fit by REML
+ Data: opposites 
+       AIC      BIC    logLik
+  1276.285 1299.586 -630.1424
+
+Random effects:
+ Formula: ~time | id
+ Structure: General positive-definite, Log-Cholesky parametrization
+            StdDev   Corr  
+(Intercept) 35.16282 (Intr)
+time        10.35609 -0.489
+Residual    12.62843       
+
+Fixed effects: opp ~ time * ccog 
+                Value Std.Error  DF   t-value p-value
+(Intercept) 164.37429  6.206122 103 26.485828  0.0000
+time         26.95998  1.993878 103 13.521383  0.0000
+ccog         -0.11355  0.504014  33 -0.225297  0.8231
+time:ccog     0.43286  0.161928 103  2.673156  0.0087
+ Correlation: 
+          (Intr) time   ccog  
+time      -0.522              
+ccog       0.000  0.000       
+time:ccog  0.000  0.000 -0.522
+
+Standardized Within-Group Residuals:
+         Min           Q1          Med           Q3          Max 
+-2.248169084 -0.618725724  0.004284978  0.614719613  1.556883051 
+
+Number of Observations: 140
+Number of Groups: 35 
+
+#Unstructured error covariance structure
+summary(gls(opp~time*ccog,opposites, correlation=corSymm(form = ~ 1 |id), weights=varIdent(form = ~ 1|wave),method="REML"))
+Generalized least squares fit by REML
+  Model: opp ~ time * ccog 
+  Data: opposites 
+       AIC      BIC    logLik
+  1283.789 1324.566 -627.8944
+
+Correlation Structure: General
+ Formula: ~1 | id 
+ Parameter estimate(s):
+ Correlation: 
+  1     2     3    
+2 0.809            
+3 0.734 0.863      
+4 0.458 0.719 0.794
+Variance function:
+ Structure: Different standard deviations per stratum
+ Formula: ~1 | wave 
+ Parameter estimates:
+        1         2         3         4 
+1.0000000 0.9248170 0.9584917 0.9468610 
+
+Coefficients:
+                Value Std.Error   t-value p-value
+(Intercept) 165.83211  5.953009 27.856855  0.0000
+time         26.58438  1.925888 13.803698  0.0000
+ccog         -0.07409  0.483458 -0.153250  0.8784
+time:ccog     0.45829  0.156406  2.930157  0.0040
+
+ Correlation: 
+          (Intr) time   ccog  
+time      -0.508              
+ccog       0.000  0.000       
+time:ccog  0.000  0.000 -0.508
+
+Standardized residuals:
+        Min          Q1         Med          Q3         Max 
+-2.45633281 -0.74687031  0.06638661  0.72058752  2.16323956 
+
+Residual standard error: 36.67591 
+Degrees of freedom: 140 total; 136 residual
+```
+## 参考文献
+
+- [縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)
+- [Applied Longitudinal Data Analysis: Modeling Change and Event Occurrence](https://www.amazon.com/Applied-Longitudinal-Data-Analysis-Occurrence/dp/B017YBZFW0)
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+- [Chapter 9 Mixed Effects Models](https://glennwilliams.me/r4psych/mixed-effects-models.html)
+- [Applied longitudinal data analysis in brms and the tidyverse](https://bookdown.org/content/4253/index.html)
+

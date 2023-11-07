@@ -1,0 +1,336 @@
+---
+title: "マルチレベルモデリングChapter4:無条件平均モデルと無条件成長モデル"
+pagetitle: "マルチレベルモデリングChapter4:無条件平均モデルと無条件成長モデル"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)を利用してマルチレベルモデリングの勉強内容をまとめたもの。下記のサポートサイトにサンプルデータなどが保存されている。
+
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+
+ここでは、無条件平均モデルと無条件成長モデルについてまとめておく。
+
+## 分析内容について
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)のp75に詳細は書いてあるとおり、青年期のアルコール摂取量の変化に関する分析をここでもお借りする。82人(`n`)を対象に14歳,15歳,16歳の3回(`age`)の計測タイミングがある。`alcuse`はアルコール摂取に関する頻度の合成スコアで、予測変数として、友達の飲酒割合に関する`peer`と親がアルコール依存症かを表す`coa`が用意されている。
+
+この分析の目的は、親がアルコール依存症であったり、自分の周囲の友だちが飲酒していれば、自分のアルコール摂取量を14歳,15歳,16歳の時間経過とともに、アルコール摂取量が増加していくのではないか、という仮説を検証すること。
+
+
+```{r}
+library(tidyverse)
+library(nlme)
+library(DT)
+
+# `VarCorr`関数は、線形混合効果モデルにおけるランダム効果項間の推定分散、標準偏差、および相関を計算するものである。
+# between（個体間でのばらつき）と within（個体内でのばらつき）
+get_rho <- function(model){
+  tmp <- as.numeric(VarCorr(model)[c("(Intercept)", "Residual"),"Variance"])
+  res <- c(tmp, tmp[[1]]/sum(tmp))
+  names(res) <- c("sigma2_0", "sigma2_eps", "rho")
+  return(res)
+}
+
+alcohol1 <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/alcohol1_pp.txt", header=T, sep=",")
+alcohol1 <- alcohol1 %>% mutate(
+  mean_peer = mean(peer), 
+  flg_peer = ifelse(peer < mean_peer, "low peer", "high peer"),
+  flg_peer = factor(flg_peer, levels = c("low peer", "high peer"))
+  )
+datatable(alcohol1 %>% mutate_if(is.numeric, round, digit = 2))
+```
+
+## マルチレベルモデルのおさらい
+
+まずは下記のモデルを使って個人成長プロットを可視化する。
+
+- $\pi_{0i}$は、$TIME_{ij}=0$の個人$i$の$Y$の初期値
+- $\pi_{1i}$は、個人$i$の$Y$に対する変化率
+- $\epsilon_{ij}$は、個人$i$の時点$j$における説明できない部分
+
+$$
+Y_{ij} = \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij}
+$$
+
+```{r}
+ggplot(alcohol1 %>% filter(id %in% c(4, 14, 23, 32, 41, 56, 65, 82)), aes(age_14, alcuse)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", formula = "y ~ x", se = FALSE, colour = "tomato", size = 1) + 
+  scale_x_continuous(breaks = c(14, 15, 16)) + 
+  scale_x_continuous(breaks = c(0, 1, 2), label = c("14", "15", "16")) +
+  ylim(-1, 5) + 
+  facet_wrap( ~ id, scales = "free", nrow = 2) + 
+  theme_bw()
+```
+
+前回同様、予測変数が有効かどうかを判断するために、変数に分けて可視化もしておく。まずは`coa`でわけてみると、アルコール依存症の親を持つ個人は、アルコール依存症の親をもたない個人よりも切片が高いことがわかる。
+
+```{r}
+ggplot(alcohol1, aes(age_14, alcuse)) + 
+  geom_line(aes(group = id),   stat="smooth", method = "lm", formula = y ~ x, alpha = 0.3) +
+  geom_line(aes(group = NULL), stat="smooth", method = "lm", formula = y ~ x, col = "tomato", size = 2) + 
+  geom_point(color = "gray", alpha = 0.3) + 
+  scale_x_continuous(breaks = c(0, 1, 2), label = c("14", "15", "16")) +
+  ylim(-1, 5) + 
+  xlab("age") + 
+  facet_wrap( ~ coa) + 
+  theme_bw()
+```
+
+`peer`は連続変数なので、平均値を基準に`flg_peer`に処理して可視化すると、友人のアルコール摂取頻度が高いと、そうではない個人よりも、自分も飲酒することがわかる。
+
+```{r}
+
+ggplot(alcohol1, aes(age_14, alcuse)) + 
+  geom_line(aes(group = id),   stat="smooth", method = "lm", formula = y ~ x, alpha = 0.3) +
+  geom_line(aes(group = NULL), stat="smooth", method = "lm", formula = y ~ x, col = "tomato", size = 2) + 
+  geom_point(color = "gray", alpha = 0.3) + 
+  scale_x_continuous(breaks = c(0, 1, 2), label = c("14", "15", "16")) +
+  ylim(-1, 5) + 
+  xlab("age") + 
+  facet_wrap( ~ flg_peer) + 
+  theme_bw()
+
+```
+
+以上より、予測変数として`coa`と`peer`は有効であることがわかる。
+
+## 合成モデル
+
+ここからはマルチレベルモデリングにおける合成モデルについてまとめていく。前回同様、ここでは下記のマルチレベルモデルを採用する。
+
+- $\gamma_{00}, \gamma_{10}$は、親がアルコール依存症ではないグループ(`coa=0`)の母集団における平均的な初期値と変化率を表す。
+- $\gamma_{01}, \gamma_{11}$は、親がアルコール依存症であるグループ(`coa=1`)の母集団における平均的な初期値と変化率を表すし、$\gamma_{00}, \gamma_{10}$に対して、加点ないし減点がされる
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01} COA_{i} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{11} COA_{i} + \zeta_{1i} \\
+\begin{bmatrix}
+\zeta_{0i} \\
+\zeta_{1i}
+\end{bmatrix} &\sim& N 
+\begin{bmatrix}
+\sigma_{0}^{2} & \sigma_{01} \\
+\sigma_{10} & \sigma_{1}^{2}
+\end{bmatrix},\quad  \epsilon_{ij} \sim N(0, \sigma_{\epsilon}^{2}) 
+\end{eqnarray}
+$$
+
+合成モデルはレベルごとに分けるのではなく、レベル2サブモデルをレベル1サブモデルに代入した形にしたものを合成モデルとよぶ。赤色が構造的な部分で、青色が確率的な部分。Rでモデル化する際は、この合成モデルの形式で指定する必要があり、結果もこれらの変数に対するパラメタが表示されるので、合成モデルを理解できていないと、結果が解釈できない。
+
+モデルを段階に分けることのメリットは、個人内の変化に焦点を当て、変化の個人間差に焦点を当てていることがわかりやすい。パラメタの区別がわかりやすく、アルコール依存症ではない親の個人の$\gamma_{00}, \gamma_{10}$は初期値と変化率を表し、アルコール依存症ではない親の個人の$(\gamma_{00}+\gamma_{01}),(\gamma_{10},\gamma_{11})$は初期値と変化率を表していることもわかりやすい。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& (\gamma_{00} + \gamma_{01} COA_{i} + \zeta_{0i}) + (\gamma_{10} + \gamma_{11} COA_{i} + \zeta_{1i}) TIME_{ij} + \epsilon_{ij} \\
+&=& \color{red}{[\gamma_{00} + \gamma_{10}TIME_{ij} + \gamma_{01} COA_{i} + \gamma_{11} COA_{i} \cdot TIME_{ij}]} + \color{blue}{[\zeta_{0i} + \zeta_{1i} \cdot TIME_{ij} + \epsilon_{ij}]}
+\end{eqnarray}
+$$
+
+合成モデルでも、実際の値を代入すると解釈しやすくなる。まずは親がアルコール依存症ではない場合(`coa=0`)。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + \gamma_{10}TIME_{ij} + \gamma_{01} COA_{i} + \gamma_{11} COA_{i} \cdot TIME_{ij} + \zeta_{0i} + \zeta_{1i} \cdot TIME_{ij} + \epsilon_{ij}　\\
+&=& \gamma_{00} + \gamma_{10}TIME_{ij} + \gamma_{01} \cdot 0 + \gamma_{11} \cdot 0 \cdot TIME_{ij} + \zeta_{0i} + \zeta_{1i} \cdot TIME_{ij} + \epsilon_{ij} \\
+&=& \gamma_{00} + \gamma_{10}TIME_{ij} + [\zeta_{0i} + \zeta_{1i} \cdot TIME_{ij} + \epsilon_{ij}] \\
+\end{eqnarray}
+$$
+
+次は親がアルコール依存症の場合(`coa=1`)。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + \gamma_{10}TIME_{ij} + \gamma_{01} COA_{i} + \gamma_{11} COA_{i} \cdot TIME_{ij} + \zeta_{0i} + \zeta_{1i} \cdot TIME_{ij} + \epsilon_{ij}　\\
+&=& \gamma_{00} + \gamma_{10}TIME_{ij} + \gamma_{01} \cdot 1 + \gamma_{11} \cdot 1 \cdot TIME_{ij} + \zeta_{0i} + \zeta_{1i} \cdot TIME_{ij} + \epsilon_{ij} \\
+&=& (\gamma_{00} + \gamma_{01}) + (\gamma_{10} + \gamma_{11}) \cdot TIME_{ij} + [\zeta_{0i} + \zeta_{1i} \cdot TIME_{ij} + \epsilon_{ij}] \\
+\end{eqnarray}
+$$
+
+合成モデルのメリットは、サブモデルを分けたときとは別の見方でモデルを見れる。$Y_{ij}$は、レベル1の予測変数$TIME_{ij}$、レベル2の予測変数$COA_{i}$、レベルを跨いだクロスレベル交互作用である予測変数$COA_{i} \cdot TIME_{ij}$が同時に定式化されている。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \color{red}{[\gamma_{00} + \gamma_{10}TIME_{ij} + \gamma_{01} COA_{i} + \gamma_{11} COA_{i} \cdot TIME_{ij}]} + \color{blue}{[\zeta_{0i} + \zeta_{1i} \cdot TIME_{ij} + \epsilon_{ij}]}
+\end{eqnarray}
+$$
+
+合成モデルは確率的な部分のパラメタに対する関係が少しわかりにくいが、これも実際の値を代入すると、わかりやすくなる。例えば`COA=0`であれば、$(\gamma_{00} + \zeta_{0i}), (\gamma_{10} + \zeta_{1i})$のように、初期値と変化率をばらつかせ、その後に観測時点$j$ごとに$\epsilon_{ij}$が個人の変化の軌跡にさらにばらつきを加える。
+
+$$
+\begin{eqnarray}
+then \quad COA &=& 0 \\
+Y_{ij} &=& (\gamma_{00} + \zeta_{0i}) + (\gamma_{10} + \zeta_{1i}) \cdot TIME_{ij} + \epsilon_{ij} \\
+then \quad COA &=& 1 \\
+Y_{ij} &=& (\gamma_{00} + \gamma_{01} + \zeta_{0i}) + (\gamma_{10} + \gamma_{11} + \zeta_{1i}) \cdot TIME_{ij} + \epsilon_{ij} \\
+\end{eqnarray}
+$$
+
+合成モデルの確率的な部分はさきほどのように解釈もできるが、合成残差$\color{blue}{[\zeta_{0i} + \zeta_{1i} \cdot TIME_{ij} + \epsilon_{ij}]}$として考えることで、さらにモデルへの理解を深められる。合成残差は個人$i$の観測時点$j$の$Y$の観測値と予測値の差を表す。数式を見ると、$TIME_{ij}$があることで、残差が独立とは言えず、自己相関していて、等分散を仮定できなさそうなことがわかる。アルコール依存症の例であれば、摂取量は年々増加するだろうし、$TIME_{ij}$が乗じられることで、時点ごとに大きくなることもなんとなく想像できる。
+
+個人時点データに対して、最小二乗法で回帰分析を行う場合、パラメタは不偏推定値となるが、仮定を満たせないので、標準誤差の有効性が望めず、検定を行うために適切でない。そのため、マルチレベルモデルでは、一般化最小二乗法(GLS)、一般化最小二乗法を繰り返す反復一般化最小二乗法(IGLS)や完全最尤推定法(FML)を利用することになる。
+
+細かい話は扱わないが、一般化最小二乗法(GLS)は2段階アプローチをとる。まず最小二乗法で推定し、誤差共分散行列を得る。一般化最小二乗法には誤差共分散行列が必要なので、推定された誤差共分散行列を使って、再度パラメタを推定する。反復一般化最小二乗法(IGLS)は、これを繰り返すことで推定値を改善していく。
+
+## 無条件平均モデル(Unconditional model)
+
+無条件平均モデルと無条件成長モデルを利用することで、サブモデルのレベルのどこに変動が存在しているかを調べることができる。無条件平均モデルは下記のとおりで、時間に関する$TIME$のパラメタがないので、モデルは時間を通じて一定の値をもつため、意味のないモデルに見えるが、このモデルは全体の変動を分解してくれる。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \zeta_{0i} \\
+\epsilon_{ij} &\sim& N(0, \sigma_{\epsilon}^{2}) \\ 
+\zeta_{0i} &\sim& N(0, \sigma_{0}^{2}) \\
+\end{eqnarray}
+$$
+このモデルでは個人$i$の$Y$の平均値は$\pi_{0i}$であって、母集団全員の$Y$の平均値は$\gamma_{00}$である。このモデルでは、個人平均と全平均が求められている。無条件平均モデルでは、個人$i$の時点$j$において、観測された$Y$の値は、これらの平均値からの偏差で表される。時点$j$において、$Y_{ij}$は個人$i$の平均$\pi_{0i}$から$\epsilon_{ij}$離れていると考えることで、$Y_{ij}$と平均$\pi_{0i}$の個人内偏差となる。
+
+さらに個人$i$の平均である$\pi_{0i}$は、母集団の平均である$\gamma_{00}$から$\zeta_{0i}$離れていることになるため、$\pi_{0i}$と$\gamma_{00}$の間の距離を測定した個人間偏差となる。
+
+$\sigma_{\epsilon}^{2}$は個人内分散で、自分の平均値を中心としたデータの散らばりをならしたもので、$\sigma_{0}^{2}$は個人間分散で、全平均を中心とした各個人のデータの散らばりをならしたもの。つまり、個人間に変動があるのか、個人内に変動があるのかをシンプルに分解してくれるのが、無条件平均モデルである。
+
+```{r}
+#Model A
+model.a <- lme(alcuse ~ 1, alcohol1, random = ~1 |id, method = "ML")
+summary(model.a)
+```
+
+個人内分散$\sigma_{\epsilon}^{2}$と個人間分散$\sigma_{0}^{2}$、級内相関係数$\rho$を計算する。級内相関係数は全変動のうち、個人間時変動の占める割合を表す。つまり、今回の結果であれば、$Y$の変動の半分は個人間によるばらつきだとわかる。
+
+```{r}
+# sigma2_0  : 個人間分散 
+# sigma2_eps: 個人内分散
+# rho       : 級内相関係数
+get_rho(model.a)
+```
+
+級内相関係数は、無条件平均モデルの残差自己相関の大きさも表している。無条件平均モデルを合成モデルで表すと、
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + [\zeta_{0i} + \epsilon_{ij}] \\
+\end{eqnarray}
+$$
+
+であり、レベル1残差$\epsilon_{ij}$には$j$があって時点で変化するが、レベル2残差$\zeta_{0i}$には$j$がなく時点で変化しない。$\zeta_{0i}$が各$\epsilon_{ij}$に含まれることで、残差に繋がりが生まれ、残差が相関することになる。無条件平均モデルでは、残差の自己相関と級内相関係数は一致する。自己相関が0.5もあるので、OLSの仮定は満たされているとは言い難い。マルチレベルの自己相関の扱いについては、別のノートで扱う。
+
+## 無条件成長モデル(Unconditional growth model)
+
+無条件平均モデルに$TIME$を加えると無条件成長モデルになる。
+
+このモデルでは個人$i$の時点$j$における$Y_{0i}$が個人の平均から$\epsilon_{ij}$離れている無条件平均モデルとは異なり、変化の軌跡から$\epsilon_{ij}$離れていることを意味する。レベル1の定式化が変わるため残差の意味を変わってしまう。$\epsilon_{ij}$は、平均値ではなく、線形変化の軌跡からの散らばりを表す。レベル2の$\sigma_{0}^{2},\sigma_{1}^{2}$は初期値と変化率の個人間の変動を表す。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} TIME_{ij} + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \zeta_{1i} \\
+\begin{bmatrix}
+\zeta_{0i} \\
+\zeta_{1i}
+\end{bmatrix} &\sim& N 
+\begin{bmatrix}
+\sigma_{0}^{2} & \sigma_{01} \\
+\sigma_{10} & \sigma_{1}^{2}
+\end{bmatrix},\quad  \epsilon_{ij} \sim N(0, \sigma_{\epsilon}^{2}) 
+\end{eqnarray}
+$$
+
+無条件平均モデルでパラメタを推定して、変動がどう変化したのかを確認する。
+
+```{r}
+model.b <- lme(alcuse ~ age_14 , data = alcohol1, random= ~ age_14 | id, method = "ML")
+summary(model.b)
+```
+
+レベル1の残差分散$\sigma_{\epsilon}^{2}$は個人の変化の軌跡の周りの散らばりの程度を表している。変化の軌跡が年齢に対して線形であれば、無条件平均モデルの$\sigma_{\epsilon}^{2}$より無条件成長モデルの$\sigma_{\epsilon}^{2}$のほうが小さくなる。実際に$\sigma_{\epsilon}^{2}$を比較すると、0.56から0.33と小さくなってる。つまり、$Y$の個人内変動の40％は線形の$TIME$と関係があると考えられそうである。さらに、残差を小さくするためには、レベル1に時不変ではなく、$TIME$のように時変な変数が必要。
+
+```{r}
+## summaryのRandom effectsのStdDev^2でVarianceを計算してもOK
+VarCorr(model.b)
+```
+
+$\sigma_{0}^{2}=0.624$は初期値の予測できないばらつきであり、$\sigma_{1}^{2}=0.151$は変化率の予測できないばらつきである。これは予測変数を今後追加した際に、その予測変数が有効かどうか、つまり残差を小さくできる変数なのかを判断する基準値となる。また、$\sigma_{0}^{2}$と$\sigma_{1}^{2}$の相関係数$\rho_{\sigma_{0}^{2},\sigma_{1}^{2}}=-0.22$なので、弱い相関があると判断できる。これは、初期値が大きく(小さく)なると、変化率は小さく(大きく)なるという関係がある(かもしれない)。
+
+さきほどと同じく合成モデルで残差を可視化する。先程の無条件平均モデルに合成残差に加え、$\zeta_{1i} TIME_{ij}$があるため、自己相関、不均一分散が先程と同じく想定されそうである。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \gamma_{00} + \gamma_{10} TIME_{ij} + [\zeta_{0i} + \zeta_{1i} TIME_{ij} + \epsilon_{ij}] \\
+\end{eqnarray}
+$$
+
+## 疑$R^{2}$統計量
+
+通常の回帰モデルと同様にデータへの当てはまりの良さを示す$R^{2}$に似たような指標がマルチレベルモデルでもある。それが疑$R^{2}$統計量である。これは、各個人の$Y$とモデルの予測値の相関係数の2乗することで求められる。
+
+```{r}
+pred <- rep((fixed.effects(model.b)[[1]] + fixed.effects(model.b)[[2]]*c(0,1,2)), times = length(unique(alcohol1$id)))
+cor(alcohol1$alcuse,pred)^2
+```
+
+無条件成長モデルの疑$R^{2}$統計量は4.3%となるので、$Y$の全変動のうち4.3%は線形の$TIME$と関係があることがわかる。
+
+また、レベル1の分散成分から計算される疑$R_{\sigma_{\epsilon}^{2}}^{2}$統計量もある。これは残差$\sigma_{\epsilon}^{2}$の残差分散減少率に着目しているもので、各モデルの$\sigma_{\epsilon}^{2}$を比較する。
+
+$$
+Pseudo R^{2} = \frac{\sigma_{\epsilon_{Unconditional}}^{2} - \sigma_{\epsilon_{UnconditionalGrowth}}^{2}}{\sigma_{\epsilon_{Unconditional}}^{2}}
+$$
+
+無条件平均モデルと無条件成長モデルの$\sigma_{\epsilon}^{2}$を比べると、0.56から0.33まで減少するので、$Y$の個人変動の40％は線形の$TIME$で説明できるということがわかる。
+
+```{r}
+list(
+  modelA = get_rho(model.a)["sigma2_eps"],
+  modelB = get_rho(model.b)["sigma2_eps"],
+  PseudoR2 = (get_rho(model.a)["sigma2_eps"] - get_rho(model.b)["sigma2_eps"])/get_rho(model.a)["sigma2_eps"]
+)
+```
+
+
+レベル2の分散成分からも同様に疑$R^{2}$統計量を計算できる。
+
+$$
+Pseudo R^{2} = \frac{\sigma_{\zeta_{UnconditionalGrowth}}^{2} - \sigma_{\zeta_{NewModel}}^{2}}{\sigma_{\zeta_{UnconditionalGrowth}}^{2}}
+$$
+
+ただ、計算式の通り、疑$R^{2}$統計量は負の値を取ることがあるので、注意が必要である。
+
+## 参考文献
+
+- [縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)
+- [Applied Longitudinal Data Analysis: Modeling Change and Event Occurrence](https://www.amazon.com/Applied-Longitudinal-Data-Analysis-Occurrence/dp/B017YBZFW0)
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+- [Chapter 9 Mixed Effects Models](https://glennwilliams.me/r4psych/mixed-effects-models.html)
+- [Applied longitudinal data analysis in brms and the tidyverse](https://bookdown.org/content/4253/index.html)
+

@@ -1,0 +1,346 @@
+---
+title: "マルチレベルモデリングChapter6:非線形モデリング(非連続モデル)"
+pagetitle: "マルチレベルモデリングChapter6:非線形モデリング(非連続モデル)"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)を利用してマルチレベルモデリングの勉強内容をまとめたもの。下記のサポートサイトにサンプルデータなどが保存されている。
+
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+
+ここでの目的は、非線形なモデリング方法についてまとめておく。
+
+## 非連続レベル1モデル
+
+個々の変化が非線形であるモデルを適合させる方法をここではまとめていく。
+
+使用するデータは、ここでも男子高校生の中退者の労働市場経験と賃金の関係を追跡したデータを利用する。このデータは下記の特徴を持っている。
+
+- 最初の時点で年齢が14歳から17歳までばらついている
+- 測定の間隔が1年後であったり、2年後の場合もある
+- 調査月もバラバラな状態
+- 面接調査のときに2つ以上の仕事に回答できる
+- 異なる時期に退学して、異なる時期に就職して、異なる時期に転職できる
+
+`lnw`は自然対数変換された賃金で、$e^{2.03}=7.6$ドルとなる。`exper`は時間的な変数であり`lnw`の観測値と関連付けられた特定の時点を表す。例えば、`id=206`は3回の測定回数をもっており、`1.87, 2.81, 4.31`年経過後を意味している。転職すると、調査があって、レコードが生成されるというイメージ。白人ラテン系(`black=0`)でありアフリカ系(`black=1`)である。また、`hgc`は修了年数で、`hgc.9`は9を引いて中心化しているので、`0`は9年生、`3`は12年生を意味する。
+
+今回あらたに利用する変数`ged`は高卒認定資格のようなもので、`0`または`1`をとる時変変数であり、取得前は`0`を表し、取得後は`1`を表す。必ずしも全員が取得するわけではないので、観察期間中すべて`0`の個人もいる。
+
+また、`postexp`は`ged`取得後に値が0より大きくなる変数で、`exper`との差分を値として持ち、`ged`取得後の1つ後ろの時点(`ged`取得時点での`postexp`は`0`)から時間経過とともに累計されるように作られている。モデルの解釈をしやすいように変数がこのように加工されている。
+
+```{r}
+library(tidyverse)
+library(broom)
+library(nlme)
+library(DT)
+library(patchwork)
+library(stargazer)
+wages <- read.table("https://stats.idre.ucla.edu/stat/r/examples/alda/data/wages_pp.txt", header=T, sep=",")
+wages$ged.exper <- wages$ged*wages$exper
+datatable(wages %>% select(id, lnw, exper, ged, postexp, ged.exper, black, hgc.9, uerate) %>% filter(id %in% c(206,2365,4384)) %>% mutate_if(is.numeric, round, 2))
+```
+
+ここでやりたいことを個人経験プロットとして可視化して確認しておく。例えば、緑であれば`ged=1`のあとは賃金が増加しているようにも見える。つまり、`ged`が賃金に関して、その時点で切片を押し上げているかも知れないし、傾き自体を変化させているかもしれない。このような非連続な変化をするモデルをここでは扱う。
+
+```{r}
+wages %>% 
+  filter(id %in% c(206, 2365, 4384)) %>% 
+  mutate(id = factor(id)) %>% 
+  ggplot(aes(x = exper, y = lnw)) +
+  geom_point(aes(color = id), size = 4) +
+  geom_line(aes(color = id)) +
+  geom_text(aes(label = ged), size = 3) +
+  scale_x_continuous(breaks = 1:13) +
+  ggtitle('GED coded 0 = "not yet", 1 = "yes." in cercle point') +
+  theme_bw()
+```
+
+## 非連続な変化のパターン
+
+`ged`の前後の関係から高さと傾きの変化を考えると、簡略化した尤もらしい4つのパターンが考えられる。尤もらしいというだけで他にも無数にある。`ged`が取るタイミングがおそくなると、タイミングによっては`ged`の効果は弱くなる可能性も考えられる。
+
+- 高さの無変化と傾きの無変化(赤)
+- 高さの変化と傾きの無変化(緑)
+- 高さの無変化と傾きの変化(青)
+- 高さの変化と傾きの変化(紫)
+
+下記は労働市場3年目に`GED`の効果が出た場合の変化のパターンを可視化したもの。これらのモデルを以降で深堀りしていく。
+
+```{r}
+tibble(exper = c(0, 3, 3, 10), ged = rep(0:1, each = 2)) %>% 
+  expand(model = letters[1:4], nesting(exper, ged)) %>% 
+  mutate(exper2 = if_else(ged == 0, 0, exper - 3)) %>% 
+  mutate(lnw = case_when(
+    model == "a" ~ 1.60 + 0.04 * exper,
+    model == "b" ~ 1.65 + 0.04 * exper + 0.05 * ged,
+    model == "c" ~ 1.75 + 0.04 * exper + 0.02 * exper2 * ged,
+    model == "d" ~ 1.85 + 0.04 * exper + 0.01 * ged + 0.02 * exper * ged
+  )) %>% 
+  ggplot(aes(x = exper, y = lnw)) +
+  geom_line(aes(color = model), size = 1) + 
+  scale_x_continuous(breaks = seq(0, 10, 1)) +
+  scale_y_continuous(breaks = seq(0, 3, 0.25), limits = c(1.5, 2.5)) +
+  ggtitle("Model Pattern") + 
+  theme_bw()
+```
+
+## 高さの変化と傾きの無変化(緑)
+
+高さの変化と傾きの無変化(緑)のパターンをモデル化すると下記の通り。傾きではなく、直線の高さに変化が出るパターンなので、そのまま`GED`をモデルに取り込めば良い。`GED=0`までは時間経過ととも変化する直線で、`GED=1`からは軌跡の高さが$\pi_{2i}$の分だけかさ上げされる。つまり`GED`前後で切片が異なる。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} EXPER_{ij} + \pi_{2i} GED_{ij} + \epsilon_{ij} \\
+if \ GED = 0 \\
+Y_{ij} &=& \pi_{0i} + \pi_{1i} EXPER_{ij} + \epsilon_{ij} \\
+if \ GED = 1 \\
+Y_{ij} &=& (\pi_{0i} + \pi_{2i}) + \pi_{1i} EXPER_{ij} + \epsilon_{ij}
+\end{eqnarray}
+$$
+
+
+## 高さの無変化と傾きの変化(青)
+
+高さの無変化と傾きの変化(青)のパターンをモデル化すると下記の通り。このモデルは高さに`GED`の効果は表れないが、傾きに変化がでるパターン。`POSTEXP`は`EXPER`の関係は、両者は全く同じ割合で増加するという関係にある。こうすることで、予測変数の1単位の変化が、他の予測変数との1単位の増加と同時に起こることになる。その結果、パラメタの解釈が簡単になる。
+
+つまり、`GED`取得前の傾きは$\pi_{1i}$で、時間の1単位の差に対する賃金への変化を表し、`GED`取得後は、`POSTEXP`の1単位の増加は、`EXPER`の1単位の増加に付随して起こるので、傾きは$\pi_{1i} + \pi_{3i}$として解釈できる。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} EXPER_{ij} + \pi_{3i} POSTEXP_{ij} + \epsilon_{ij} \\
+if \ GED = 0 \& POSTEXP = 0 \\
+Y_{ij} &=& \pi_{0i} + \pi_{1i} EXPER_{ij} + \epsilon_{ij} \\
+if \ GED = 1 \& POSTEXP >0\\
+Y_{ij} &=& \pi_{0i} + \pi_{1i} EXPER_{ij} + \pi_{3i} POSTEXP_{ij} + \epsilon_{ij} \\
+\end{eqnarray}
+$$
+
+言葉ではわかりづらいので、計算して確かめておく。`exper`、`postexp`が一緒に同じ割合で変化するというのはどういことなのか。`ged=1`のときから`exper - postexp=4.68`が続いていることがわかる。
+
+```{r}
+wages %>% 
+  filter(id == 2365) %>% 
+  filter(ged == 1) %>%  # 可視化の際の一貫性のため
+  select(id, ged, exper, postexp) %>% 
+  mutate(min_exper = min(exper),
+         `exper - postexp` = exper - postexp,
+        my_postexp = exper - min_exper)
+```
+
+
+```{r}
+wages %>% 
+  group_by(id) %>% 
+  mutate(min_ged = min(ged),
+         max_ged = max(ged)) %>% 
+  filter(min_ged != max_ged) %>% 
+  filter(id %in% c(53,134,145,226,248,411,741,1257)) %>% 
+  select(id, ged, lnw, exper, postexp) %>% 
+  ungroup() %>%
+  pivot_longer(c(exper, postexp), names_to = "time_type", values_to = "value") %>% 
+  ggplot(aes(x = value, y = lnw)) +
+  geom_line(aes(linetype = time_type, col = time_type)) +
+  facet_wrap(~ id, scales = "free_x") + 
+  theme_bw()
+```
+
+## 高さの変化と傾きの変化(紫)
+
+高さの変化と傾きの変化(紫)のパターンをモデル化すると下記の通り。このモデルは高さにも`GED`の効果が表れ、傾きにも変化がでるパターン。`POSTEXP`は`EXPER`の関係はさきほどと同じ。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} EXPER_{ij} + \pi_{2i} GED_{ij} + \pi_{3i} POSTEXP_{ij} + \epsilon_{ij} \\
+if \ GED = 0 \& POSTEXP = 0 \\
+Y_{ij} &=& \pi_{0i} + \pi_{1i} EXPER_{ij} + \epsilon_{ij} \\
+if \ GED = 1 \& POSTEXP >0\\
+Y_{ij} &=& (\pi_{0i} + \pi_{2i}) + \pi_{1i} EXPER_{ij} + \pi_{3i} POSTEXP_{ij} + \epsilon_{ij} \\
+\end{eqnarray}
+$$
+
+## 高さの変化と傾きの変化(別)
+
+高さの変化と傾きの変化(別)のパターンは交互作用を入れる方法でもモデル化できる。このモデルでは$\pi_{3i}$の振る舞いが興味深い。つまり$\pi_{3i} (EXPER_{ij} × GED_{ij})$となっていることで、`GED`は`0`または`1`しかとらないが、`GED`を取得するタイミング($EXPER_{ij}$)によって$\pi_{3i}$乗じられる値が異り、加えて$\pi_{2i}$も加算される(理解があまり追いついていない)。
+
+つまり、`GED`を取得したタイミングの高さの差が、経時的な経験により変化することを可能にしている。$\pi_{2i} + \pi_{3i} (EXPER_{ij}$がこれに当たる。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} EXPER_{ij} + \pi_{2i} GED_{ij} + \pi_{3i} (EXPER_{ij} × GED_{ij}) + \epsilon_{ij} \\
+if \ GED = 0 \& POSTEXP = 0 \\
+Y_{ij} &=& \pi_{0i} + \pi_{1i} EXPER_{ij} + \epsilon_{ij} \\
+if \ GED = 1 \& POSTEXP >0\\
+Y_{ij} &=& (\pi_{0i} + \pi_{2i}) + (\pi_{1i} + \pi_{3i} )EXPER_{ij} + \epsilon_{ij} \\
+\end{eqnarray}
+$$
+
+## どのモデルが妥当なのか
+
+どのモデルが妥当なのかは、仮説や理論に適合するモデルがよい。さきほどのモデルを前提に、これまでに有効と考えられる変数、レベル1の`EXPER`、`UERATE-7`、レベル2の`BLACK`、`HGC-9`をモデルに投入して、マルチレベルモデルを当てはめる。いくつかのモデルを試しているが、基本モデルは下記である。
+
+$$
+\begin{eqnarray}
+Y_{ij} &=& \pi_{0i} + \pi_{1i} EXPER_{ij} + \pi_{2i} (UERATE_{ij}-7) + \epsilon_{ij} \\
+\pi_{0i} &=& \gamma_{00} + \gamma_{01}(HGC_{i}-9) + \zeta_{0i} \\
+\pi_{1i} &=& \gamma_{10} + \gamma_{12}BLACK_{i} + \zeta_{1i} \\
+\pi_{2i} &=& \gamma_{20}
+\end{eqnarray}
+$$
+
+- モデルB：`GED`の固定効果とランダム効果を含めて、高さの非連続性を加える
+- モデルC：モデルBにおいて`GED`に関連していた分散成分を除外
+- モデルD：高さではなく傾きの非連続性を含める。`POSTEXP`の固定効果とランダム効果を含める
+- モデルE：モデルCにおいて`POSTEXP`に関連していた分散成分を除外
+
+```{r}
+model.a <- lme(lnw~exper+hgc.9+exper:black+ue.7        , wages, random= ~ exper         | id, method="ML") 
+model.b <- lme(lnw~exper+hgc.9+exper:black+ue.7+ged    , wages, random= ~ exper+ged     | id, method="ML")
+model.c <- lme(lnw~exper+hgc.9+exper:black+ue.7+ged    , wages, random= ~ exper         | id, method="ML")
+model.d <- lme(lnw~exper+hgc.9+exper:black+ue.7+postexp, wages, random= ~ exper+postexp | id, method="ML")
+model.e <- lme(lnw~exper+hgc.9+exper:black+ue.7+postexp, wages, random= ~ exper         | id, method="ML")
+```
+
+
+- モデルF：`GED`の高さ、`POSTEXP`の傾きの非連続性を含め、固定効果とランダム効果を得るモデル
+- モデルG：モデルFから`POSTEXP`のランダム効果を外したモデル
+- モデルH：モデルFから`GED`のランダム効果を外したモデル
+
+モデルFは収束に時間がかかるので、注意が必要。9年生で退学し、失業率が7％の地域に住んでいる白人は、初期値で`1.73`の賃金を得ており、`GED`取得前は時間経過とともに`0.0414`増加する。`GED`取得後はぞの時点で`0.0408`増加し、`0.041+0.0094=0.50`増加していく。ただ`GED`と`POSTEXP`は有意ではないので、変化の差は0かもしれない。
+
+```{r}
+control.list <-
+  lmeControl(
+    maxIter = 500,
+    msMaxIter = 500,
+    msMaxEval = 500,
+    tolerance = 0.1,
+    msTol = 0.1,
+    sing.tol = 1e-20
+  )
+
+model.f <- lme(lnw~exper+hgc.9+exper:black+ue.7+postexp+ged,
+               wages, 
+               random= ~exper+postexp+ged | id, 
+               method="ML",
+               control = control.list)
+#2*model.f$logLik
+# [1] -4789.354
+
+#anova(model.b, model.f)
+#         Model df      AIC      BIC    logLik   Test  L.Ratio p-value
+# model.b     1 13 4831.517 4919.454 -2402.759                        
+# model.f     2 18 4825.354 4947.113 -2394.677 1 vs 2 16.16312  0.0064
+summary(model.f)
+```
+
+他にも書籍で沢山のモデルを検証しているが、詳細は書籍を参照。ここではモデルFをベターなモデルとして話をすすめる。
+
+```{r}
+# anova(model.d, model.f)
+# model.g <- lme(lnw~exper+hgc.9+exper:black+ue.7+postexp+ged, wages, random= ~exper+ged | id, method="ML")
+# 2*model.g$logLik
+# 
+# anova(model.f, model.g)
+# 
+# model.h <- lme(lnw~exper+hgc.9+exper:black+ue.7+postexp+ged, wages, random= ~exper+postexp | id, method="ML")
+# 2*model.h$logLik
+# anova(model.f, model.h)
+# 
+# # 収束しない
+# # model.i <- lme(lnw~exper+hgc.9+exper:black+ue.7+ged+exper:ged, wages, random= ~exper+ged+exper:ged | id, method="ML", control = control.list)
+# # 2*model.i$logLik
+# # anova(model.b, model.i)
+# 
+# model.j <- lme(lnw~exper+hgc.9+exper:black+ue.7+ged+exper:ged, wages, random= ~exper+ged | id, method="ML")
+# 2*model.j$logLik
+# anova(model.i, model.j)
+```
+
+モデルFの理解を深めるために下記の典型的な4人を可視化する。`black`は`0 or 1`で、`hgc.9`は9を引いて中心化しているので、`0`は9年生、`3`は12年生を表す。この典型的な4人は失業率が7%(`ue.7=0`)の地域に住んでいる。また、`GED`は中退から3年目に取得している。
+
+- 白人ラテン系(`black=0`)で9年生(`hgc.9=0`)で中退
+- 白人ラテン系(`black=0`)で12年生(`hgc.9=3`)で中退
+- アフリカ系(`black=1`)で9年生(`hgc.9=0`)で中退
+- アフリカ系(`black=1`)で12年生(`hgc.9=3`)で中退
+
+ここまでくると、モデルが複雑なので、時間を粗くしてモデルのためのグリッドを可視化しておく。
+
+```{r}
+expand_grid(black = 0:1, 
+                            hgc.9 = c(0, 3), 
+                            exper = seq(from = 0, to = 11, by = 5),
+                            ue.7  = 0) %>% 
+  mutate(ged      = ifelse(exper < 3, 0, 1),
+         postexp  = ifelse(ged == 0, 0, exper - 3)
+  )
+```
+
+モデルの係数解釈通り、修了年数が大きいほうが初期時点で賃金が高く、アフリカ系であると変化率が緩やかになるため、「アフリカ系の12年生で中退した個人」は、最初は「白人ラテン系の12年生で中退した個人」と同じ賃金であるが、年数が経過するにつれて、「白人ラテン系の9年生で中退した個人」のほうが、「アフリカ系の12年生で中退した個人」よりも賃金が高くなっていることがわかる。また、`GED`を取得したからといって、「白人ラテン系の9年生で中退した個人」に「アフリカ系の12年生で中退した個人」が追いつくことはない。
+
+```{r}
+fixef.f <- fixef(model.f)
+df_fit_plt_f <- expand_grid(black = 0:1, 
+                            hgc.9 = c(0, 3), 
+                            exper = seq(from = 0, to = 11, by = 0.01),
+                            ue.7  = 0) %>% 
+  mutate(ged      = ifelse(exper < 3, 0, 1),
+         postexp  = ifelse(ged == 0, 0, exper - 3)
+  ) %>% 
+  mutate(
+    lnwage = fixef.f[[1]] + 
+      fixef.f[[2]] * exper + 
+      fixef.f[[3]] * hgc.9 + 
+      fixef.f[[4]] * ue.7 + 
+      fixef.f[[5]] * postexp + 
+      fixef.f[[6]] * ged + 
+      fixef.f[[7]] * exper*black,
+         type = paste0("black=", black, " & hgc.9=", hgc.9))
+
+ggplot(df_fit_plt_f, aes(exper, lnwage, col = as.character(type))) + 
+  geom_path(size = 1) +
+  scale_x_continuous(breaks = seq(0, 12, 1)) +
+  scale_color_manual(values = c("#a0d8ef", "#19448e", "#ec6d71", "#a22041"), name = "type") +
+  xlab("exper") + 
+  ggtitle("Model F for the effects of balck & hgc9") +
+  theme_bw()
+  
+```
+
+
+
+
+## 参考文献
+
+- [縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)
+- [Applied Longitudinal Data Analysis: Modeling Change and Event Occurrence](https://www.amazon.com/Applied-Longitudinal-Data-Analysis-Occurrence/dp/B017YBZFW0)
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+- [Chapter 9 Mixed Effects Models](https://glennwilliams.me/r4psych/mixed-effects-models.html)
+- [Applied longitudinal data analysis in brms and the tidyverse](https://bookdown.org/content/4253/index.html)
+

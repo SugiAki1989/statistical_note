@@ -1,0 +1,284 @@
+---
+title: "マルチレベルモデリングChapter2"
+pagetitle: "マルチレベルモデリングChapter2"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)を利用してマルチレベルモデリングの勉強内容をまとめたもの。下記のサポートサイトにサンプルデータなどが保存されている。
+
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+
+## 縦断データセット
+
+マルチレベルモデリングで必要なデータセットは、いわゆるWide型ではなくLong型のデータセットが必要になる。そのため、モデリング以前にデータセットを前処理する必要がある。サポートサイトで提供されているデータを変換する。この手の形式は、機械では扱いづらく、時間変化を伴わない時不変変数(time-invariant)は扱えても、時間変化を伴う時変変数(time-variant)は扱えない。
+
+```{r}
+library(tidyverse)
+library(broom)
+library(patchwork)
+
+tolerance <-
+  read.table(
+    "https://stats.idre.ucla.edu/wp-content/uploads/2016/02/tolerance1.txt",
+    sep = ",",
+    header = TRUE
+  )
+tolerance
+```
+
+このデータセットは1人の子供11歳から15歳まで追跡し、毎年、逸脱行動に対する耐性を9項目を4段階尺度(1=非常悪い〜4=全く悪くない)から評価し、平均得点が`tolerance`に格納されている。
+
+`tolerance`が高い個人は、他人の逸脱行為(カンニング、マリファナ使用、窃盗、暴力など)を悪くないと思いやすい傾向があると解釈できる。`exposure`は、11歳時点で、自分の周りの友人の逸脱行為にどの程度、接触していたかを回答者が申告したもので、4段階尺度(0=全くいない〜5=全員)の平均得点で表す変数。つまり、`exposure`が高いということは、11歳時点で自分の周りの友人が逸脱行為を行いやすく、そのような環境下に回答者が置かれていることを表す。
+
+```{r}
+tolerance.pp <- tolerance %>% 
+  pivot_longer(
+    cols = starts_with("tol"),                 # tolで始まる変数が変換対象
+    names_to = "age" ,                         # 変数名はage
+    names_prefix = "tol",                      # 変数名を値に変更する際にtolは削除
+    names_transform = list(age = as.integer),  # 変数timeを整数型に変更 
+    values_to = "tolerance"                    # 変数名はtoleranceに変更
+               ) %>% 
+  select(id, age, tolerance, male, exposure, age) %>% 
+  group_by(id) %>% 
+  mutate(time = row_number(),   # tolerance1_pp.txtに含まれているため再現
+         age_center = age - 11, # 後で利用
+         exposure_highlow = if_else(exposure > 1.145, "High", "Low")) # 後で利用
+
+# median(tolerance$exposure) [1] 1.145
+tolerance.pp
+```
+
+## 個人の経験的成長プロット
+
+基本的な分析手法として、個人の時間変化を可視化する「経験的成長プロット」を行う。これは各個人の時間変化に対する変数の変化を可視化するもの。大規模なデータの場合は、有効な変数で層化して、必要なサイズにサンプリングしてから可視化する。パラメトリックなアプローチ、ノンパラメトリックなアプローチをとる。
+
+まずはノンパラメトリックなアプローチ。Loess平滑化曲線で時間変化をを可視化する。曲線の高さ、傾き、形などを考察する。
+
+```{r}
+ggplot(tolerance.pp, aes(age, tolerance)) + 
+  geom_point() + 
+  geom_smooth(method = "loess", se = FALSE, colour = "tomato", size = 1) + 
+  facet_wrap( ~ id, scales = "free", nrow = 4) + 
+  xlim(11, 15) + 
+  ylim(0, 4) + 
+  theme_bw()
+```
+
+パラメトリックなアプローチであれば最小二乗法による回帰モデルを当てはめることが多い。
+
+```{r}
+ggplot(tolerance.pp, aes(age, tolerance)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", formula = "y ~ x", se = FALSE, colour = "tomato", size = 1) + 
+  facet_wrap( ~ id, scales = "free", nrow = 4) + 
+  xlim(11, 15) + 
+  ylim(0, 4) + 
+  theme_bw()
+```
+
+この際に`age`を中心化することで切片の解釈がわかりよくなるので、中心化することが推奨される。プロット上の回帰直線では`age=0`のときの`tolerance`の値を切片が表している。0歳はそもそも調査対象外で外挿になるので、11歳を引くことで、切片が「11歳時点での初期値」を表すように中心化する。中心化しても個人の時間変化を表す傾きには影響しない。
+
+```{r}
+ggplot(tolerance.pp, aes(age_center, tolerance)) + 
+  geom_point(color = "gray", alpha = 0.8) +
+  geom_smooth(method = "lm", formula = "y ~ x", se = FALSE, colour = "tomato", size = 1) + 
+  facet_wrap( ~ id, scales = "free", nrow = 4) + 
+  xlim(0, 4) + 
+  ylim(0, 4) + 
+  theme_bw()
+```
+
+回帰直線を利用することのメリットは、個人ごとの回帰モデルに関するOLS推定での切片、回帰係数、標準誤差、残差分散などの情報を得られる点。[縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)のp30の表を再現しておく。
+
+```{r}
+tolerance_fit <- tolerance.pp %>% 
+  group_by(id) %>% 
+  nest() %>% 
+  mutate(
+    fit_lm = map(.x = data, .f = function(x){lm(tolerance ~ age_center, data = x)}),
+    tidy_lm = map(.x = fit_lm, .f = function(x){tidy(x)}),
+    glance_lm = map(.x = fit_lm, .f = function(x){glance(x)})
+    )
+
+df_coef <- tolerance_fit %>% 
+  unnest(tidy_lm) %>% 
+  select(term, estimate, std.error) %>% 
+  pivot_wider(names_from = term, values_from = c(estimate, std.error)) %>% 
+  set_names(c("id", "inercept_coef", "slope_coef", "inercept_std", "slope_std")) %>% 
+  select(id, inercept_coef, inercept_std, slope_coef, slope_std) %>% 
+  ungroup()
+
+df_stat <- tolerance_fit %>% 
+  unnest(glance_lm) %>% 
+  mutate(sigma2 = sigma^2) %>% 
+  select(sigma2, r.squared) %>% 
+  ungroup()
+
+df_fit <- df_coef %>% 
+  left_join(., df_stat, by = c("id" = "id")) %>% 
+  left_join(., tolerance.pp %>% distinct(male, exposure), by = c("id" = "id"))
+
+df_fit
+```
+
+このデータから11歳時点での平均的な`tolerance`の値や平均的な変化を計算できる。他の統計量を使えば、いろんな事ができる。自己相関、分散不均一のデータであると、回帰モデルの仮定が崩れ、パラメタの分散が有効性を失っている可能性がある点には注意する。
+
+```{r}
+df_fit %>% 
+  summarise(
+    mean_inercept_coef = mean(inercept_coef),
+    mean_slope_coef = mean(slope_coef)
+  )
+```
+
+OLSで推定されたパラメタの精度をばらつきで判断する。同じ母集団から無限回サンプリングして、得られるばらつきの測度のこと。推定値の標準誤差は小さくなると、精度が高くなり、標準誤差が大きくなると、精度が低くなるという関係がある。さきほどの結果をみてもわかるが、各個人の変化率の標準誤差には大きい子ども(`id=1552`)もいれば、小さい子ども(`id=569`)もいる。
+
+```{r}
+ggplot(tolerance.pp %>% filter(id %in% c(569, 1552)), aes(age_center, tolerance)) + 
+  geom_point(color = "gray", alpha = 0.8) +
+  geom_smooth(method = "lm", formula = "y ~ x", se = FALSE, colour = "tomato", size = 1) + 
+  facet_wrap( ~ id, scales = "free", nrow = 1) + 
+  xlim(0, 4) + 
+  ylim(0, 4) + 
+  theme_bw()
+```
+
+OLS推定による変化率の精度は、残差分散、測定回数(ここでは個人を繰り返し観測するため)のもと下記の通り計算される。
+
+$$
+std = \frac{\sigma_{\epsilon_{i}}^{2}}{\sum_{j=1}^{T} (t_{ij} - \bar{t_{i}})^{2}}
+$$
+
+このことから精度を高くする、つまり標準誤差を小さくするためには、分子の残差分散を小さくするか、分母の観察回数を増やすかのいずれかをとる必要がある。ただ、残差分散を小さくすることはできないので、観測回数を増やす必要がある。
+
+## 全体の経験的成長プロット
+
+変化の個人差を検討する簡便な方法は、全体と個人の回帰直線をまとめて可視化する方法。こうすることで、グループ全体の平均的な変化を可視化できる。
+
+平均的には逸脱行為に対する耐性がついてくることがわかる。また、観察期間内で極端に上昇するこどもいれば、あまり変化しないこどももいる。一方で、低下していくこどもも存在していることがわかる。このような異質性が年齢と共に大きくなる。つまり分散が大きくなることで、扇形のように可視化されていく。
+
+```{r}
+ggplot(tolerance.pp, aes(age_center, tolerance)) + 
+  geom_line(aes(group = NULL), stat="smooth", method = "lm", formula = y ~ x, col = "tomato", size = 1) + 
+  geom_line(aes(group = id),   stat="smooth", method = "lm", formula = y ~ x, alpha = 0.2) +
+  geom_point(color = "gray") +
+  xlim(0, 4) + 
+  ylim(0, 4) + 
+  theme_bw()
+```
+
+さきほど作成した回帰モデルの情報が格納されているデータを利用して、記述統計量を利用して情報を得ることもできる。
+
+- 推定された切片と傾きの平均値：個人の初期値と変化率の不偏推定値
+- 推定された切片と傾きの標準偏差：個人の変化、つまり個人差を数値化したもの
+- 推定された切片と傾きの相関係数：初期値と変化率の関係を表す
+
+
+```{r}
+df_fit %>% 
+  summarise(
+    mean_inercept_coef = mean(inercept_coef),
+    mean_inercept_sd = sd(inercept_coef),
+    mean_slope_coef = mean(slope_coef),
+    mean_slope_sd = sd(slope_coef),
+    cor_intercept_slope = cor(inercept_coef, slope_coef)
+  ) %>% 
+  pivot_longer(
+    cols = everything(),
+    names_to = "type",
+    values_to = "value"
+  )
+```
+
+この結果から、このサンプルデータにおける11歳時点の`tolerance`は1.36で、1年間に0.13ポイント上昇する。また、標準偏差から、初期値と変化率は個人差が大きいことがわかる。相関係数は負の相関なので、関係性としては、初期の段階で`tolerance`が高いと、耐性があるからなのか、変化率は小さくなる(上昇の程度がゆるい)。
+
+## 時不変の予測変数との関係
+
+このデータには時不変の予測変数として`male`、`exposure`が用意されている。用意されているというよりも、研究者の仮説にそって収集されている。これ利用することで`male`、`exposure`によって、逸脱行動に対する耐性の初期値や変化に違いがあるのかを検討できる。`exposure`については、`exposure`を中央値で分割したフラグを利用する。
+
+性差があるかを確認した結果、初期値に関しては同じ高さであり、変化率については、男性のほうが少し変化が急ではあるが、性差は初期値や変化率にあまり違いがないと考えられそうである。
+
+```{r}
+ggplot(tolerance.pp, aes(age_center, tolerance)) + 
+  geom_line(aes(group = NULL), stat="smooth", method = "lm", formula = y ~ x, col = "tomato", size = 1) + 
+  geom_line(aes(group = id),   stat="smooth", method = "lm", formula = y ~ x, alpha = 0.2) +
+  geom_point(color = "gray") +
+  xlim(0, 4) + 
+  ylim(0, 4) + 
+  facet_wrap( ~ male) + 
+  theme_bw()
+```
+
+`exposure`が高いということは、11歳時点で自分の周りの友人が逸脱行為を行いやすく、そのような環境下に回答者が置かれていることを表す。高いグループでは、低いグループに比べて、初期値に変化はないものの、変化率は明らかに異なっており、初期に逸脱行動への接触が多ければ、年齢とともにはやく耐性をつけている可能性が示唆される。
+
+```{r}
+ggplot(tolerance.pp, aes(age_center, tolerance)) + 
+  geom_line(aes(group = NULL), stat="smooth", method = "lm", formula = y ~ x, col = "tomato", size = 1) + 
+  geom_line(aes(group = id),   stat="smooth", method = "lm", formula = y ~ x, alpha = 0.2) +
+  geom_point(color = "gray") +
+  xlim(0, 4) + 
+  ylim(0, 4) + 
+  facet_wrap( ~ exposure_highlow) + 
+  theme_bw()
+```
+
+外れ値に引っ張られている感じもするが、この外れ値に該当する`id=978`を除外してもさきほどの傾向が示唆される。
+
+```{r}
+ggplot(tolerance.pp %>% filter(id != 978), aes(age_center, tolerance)) + 
+  geom_line(aes(group = NULL), stat="smooth", method = "lm", formula = y ~ x, col = "tomato", size = 1) + 
+  geom_line(aes(group = id),   stat="smooth", method = "lm", formula = y ~ x, alpha = 0.2) +
+  geom_point(color = "gray") +
+  xlim(0, 4) + 
+  ylim(0, 4) + 
+  facet_wrap( ~ exposure_highlow) + 
+  theme_bw()
+```
+
+さきほど同様に、層別してから初期値や変化率の関係を調べることで、さらに探索的に分析ができる。
+
+```{r}
+l1 <- ggplot(df_fit, aes(male, inercept_coef)) + geom_point() + xlim(-0.5, 1.5)
+l2 <- ggplot(df_fit, aes(male, slope_coef))    + geom_point() + xlim(-0.5, 1.5)
+r1 <- ggplot(df_fit, aes(exposure, inercept_coef)) + geom_point() + xlim(0, 2)
+r2 <- ggplot(df_fit, aes(exposure, slope_coef))    + geom_point() + xlim(0, 2)
+
+((l1 | r1) / (l2 | r2)) & theme_bw() 
+```
+
+
+## 参考文献
+
+- [縦断データの分析I―変化についてのマルチレベルモデリング―](https://www.asakura.co.jp/detail.php?book_code=12191)
+- [Applied Longitudinal Data Analysis: Modeling Change and Event Occurrence](https://www.amazon.com/Applied-Longitudinal-Data-Analysis-Occurrence/dp/B017YBZFW0)
+- [TEXTBOOK EXAMPLES APPLIED LONGITUDINAL DATA ANALYSIS](https://stats.oarc.ucla.edu/other/examples/alda/)
+- [Chapter 9 Mixed Effects Models](https://glennwilliams.me/r4psych/mixed-effects-models.html)
+
