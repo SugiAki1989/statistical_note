@@ -1,0 +1,219 @@
+---
+title: "固定効果モデル"
+pagetitle: "固定効果モデル"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは固定効果モデルについて簡単にまとめておく。下記の書籍を参考にしている。
+
+- [Rによる実証分析 回帰分析から因果分析へ第2版](https://www.rniyoru.com/)
+
+固定効果モデル式、Rでモデリングする部分が中心となる。固定効果モデルとマルチレベルは似たようなモデルではあるものの、少し異なる部分もあるので、その点はここでは触れない。下記にまとめているので、そちらを参照ください。
+
+- [マルチレベルモデルと固定効果モデル](https://sugiaki1989.github.io/statistical_note/note_MultiLevelRegression14/note_MultiLevelRegression14.html)
+
+固定効果モデルは経済系、マルチレベルは社会心理、生物系とかで使われているイメージ。
+
+## 固定効果モデルとは
+
+固定効果モデル(Fixed Effect Model)はパネルデータで使用される分析モデル。パネルデータは同一の個体を複数の時点で観察したデータのこと。ここでの個体は、人間や地域のことを指す。クロスセクションデータとは異なるので、データの性質を先にまとめておく。パネルデータの変数$X_{it}$は、個人$i$の時点$t$における値を表す。$X_{it}$はいくつかのパターンを持つ。
+
+- 1. 個人$i$と時点$t$の両方が変化する(年収、労働時間、失業率など)
+- 2. 各個人$i$では異なるが、時点$t$では変化しない(性別や地域や個人など時間変化しない特性など)
+- 3. 個人$i$では変化せずに共通で、時点$t$では異なる(コロナによる行動制限など、皆に共通の影響があるもの)
+
+これらを考慮すると、パネルデータに対する回帰モデルは下記のように書ける。誤差項は1-3の各変数に対応する形で存在する。これらの誤差項が変数と相関せず、内生生が存在しないのであれば、回帰モデルでパラメタを正しく推定できるが、普通は相関する。
+
+$$
+Y_{it} = \beta_{0} + 
+\overbrace{X_{it}^{(1)}\beta_{1} + \cdots + X_{it}^{(k)}\beta_{k}}^{1} + 
+\overbrace{Z_{i}^{(1)}\alpha_{1} + \cdots + Z_{i}^{(l)}\alpha_{l}}^{2} + 
+\overbrace{W_{t}^{(1)}\gamma_{1} + \cdots + W_{it}^{(m)}\gamma_{m}}^{3} + 
+\overbrace{\epsilon_{it} + e_{i} + u_{t}}^{\varepsilon_{it}}
+$$
+
+このままだと見通しが良くないので、変数の数を減らして簡略化したモデルを使って、より理解を深めていく。$\beta_{1}$を正しく推定するためには$X_{it}$と$\epsilon_{it} + e_{i} + u_{t}$の内生性の問題を解決する必要がある。
+
+$$
+\begin{eqnarray} 
+Y_{it} &=& \beta_{0} + X_{it}\beta_{1} + Z_{i}\alpha + W_{t}\gamma + \epsilon_{it} + e_{i} + u_{t} \\
+     i &=& 1,\dots,n \\
+     t &=& 1,\dots,T
+\end{eqnarray}
+$$
+
+そもそも$e_{i},u_{t}$は何か。
+
+- $e_{i}$は、時点$t$に依存せず$Y_{it}$に影響する、観測できない個体$i$が持つ固有の要因
+- $u_{t}$は、個体$i$に依存せず$Y_{it}$に影響する、観測できない時点$t$が持つ固有の要因
+
+個体を「地域」と考えるのであれば、$e_{i}$は地域の固有の特徴、魅力、能力などが該当する。つまり、時点は関係なく、各地域が持っている固有の観測できない要因が、$e_{i}$には含まれる。これは普通に考えるのであれば$X_{it}$と相関するため、内生性の問題が生じる。そのため、このような変数を細分化して観測できないので、下記のように$\phi_{i}, \psi_{t}$でまとめて肩代わりしてもらうことで、$X_{it}$の影響$\beta_{0}$を推定しようと試みる。これが固定効果モデル。
+
+$\phi_{i}$は時点$t$について不変の$i$固有の効果全てで、$\psi_{t}$は時点$t$にのみ依存して個人間で共通の効果をまとめたもの。
+
+$$
+\begin{eqnarray}
+\phi_{i} &=& \beta_{0} + Z_{i}\alpha + e_{i} \\
+\psi_{t} &=& W_{t}\gamma + u_{t}
+\end{eqnarray}
+$$
+
+$\phi_{i}, \psi_{t}$に関して、ダミー変数を利用すれば、個人$i$や地域$i$は数多くあることが一般的で、時点$t$も数年分あることが一般的なので、下記のようにシグマでまとめることが出来る。
+
+$$
+\begin{eqnarray}
+Y_{it} &=& \beta_{0} + X_{it}\beta_{1} + \phi_{i} + \psi_{t} + \epsilon_{it} \\
+&=& X_{it}\beta_{1} + \sum_{j=1}^{n} I_{ij}\phi_{j} + \sum_{k=1}^{T} \delta_{tk}\psi_{k} + \epsilon_{it} \\
+i&=&1,...,n \\ t &=& 1,...,T \\
+\end{eqnarray}
+$$
+
+これが固定効果モデル(2方向固定効果モデル)であり、推定にバイアスがかからないように個体固有の効果や時点固有の効果をモデルに組み込んでいる。このモデルをみるとわかるが、変数としてモデルに組み込めるのは、個人$i$と時点$t$の両方が変化する変数のみである。なぜなら、それ以外の特徴をもつ変数はすでに固定効果$\phi_{i}, \psi_{t}$としてモデルに含まれている。
+
+推定に関しては、最小2乗法を利用すればよい。ただ、within推定と呼ばれる方法も利用される。固定効果を1つ含む下記の固定効果モデルを考える。
+
+$$
+Y_{it} = X_{it}\beta_{1} + \sum_{j=1}^{n} I_{ij}\phi_{j} + \epsilon_{it}
+$$
+
+この式に対して、平均を計算して、
+
+$$
+\bar{ Y_{i} } = \frac{1}{T}\sum_{t=1}^{T}Y_{it}, \quad
+\bar{ X_{i} } = \frac{1}{T}\sum_{t=1}^{T}X_{it}, \quad
+\bar{ \epsilon_{i} } = \frac{1}{T}\sum_{t=1}^{T}X\epsilon_{it}
+$$
+
+先程の式から平均を引くことで、
+
+$$
+\bar{ Y_{i} } = \bar{ X_{i} }\beta_{1} + \sum_{j=1}^{n} I_{ij}\phi_{j} + \bar{ \epsilon_{i} }
+$$
+
+固定効果を消去することが出来る。このモデルで$\beta$を推定するのと、さきほどの固定効果モデルを推定しても、パラメタの値は同じである。
+
+$$
+\begin{eqnarray}
+Y_{it} - \bar{ Y_{i} } &=& X_{it}\beta_{1} - \bar{ X_{i} }\beta_{1} + \sum_{j=1}^{n} I_{ij}\phi_{j} - \sum_{j=1}^{n} I_{ij}\phi_{j} + \epsilon_{it} - \bar{ \epsilon_{i} } \\
+&=& (X_{it} - \bar{ X_{i} })\beta_{1} + (\epsilon_{it} - \bar{ \epsilon_{i} })
+\end{eqnarray}
+$$
+
+## 固定効果モデルの推定
+
+[Rによる実証分析 回帰分析から因果分析へ第2版](https://www.rniyoru.com/)のp269で使用されるデータをお借りして固定効果モデルの推定を行う。まずは必要なライブラリを読み込む。書籍では、`fixest`パッケージを使用しているが、`estimatr`パッケージでも固定効果モデルは推定できるはずなので、`estimatr`パッケージも利用する。
+
+```{r}
+library(tidyverse)
+library(broom)
+library(fixest)
+library(estimatr)
+```
+
+このデータには、47都道府県(`pref`)の1997年から2019年(`year`)までの失業率(`unemp`)と自殺死亡率(`suicide`)が含まれる。このデータを利用して、固定効果モデルを用いることで、失業率が自殺死亡率に影響するかどうかを分析する。
+
+パネルデータなので、下記の通り地域$i$を北海道に限定すると、時点$t$が数多く記録されている。
+
+```{r}
+prefdata <- readr::read_csv("~/Desktop/prefecture.csv")
+prefdata %>% 
+  filter(pref == '北海道') %>% 
+  arrange(pref)
+```
+
+まずは地域の固定効果をモデルに取り込んで、パラメタを推定する。モデルの結果を見る限り、失業率が1%増加すると、人口10万人あたりの自殺者数がおよそ3人増加することになる。
+
+```{r}
+prefdata %>% 
+  lm(suicide ~ -1 + unemp + pref,
+     data = .) %>% 
+  tidy() %>% 
+  filter(term == 'unemp')
+```
+
+within推定でも同様の数値が計算できる。
+
+```{r}
+prefdata %>% 
+  group_by(pref) %>% 
+  mutate(suicidebar = mean(suicide),
+         unempbar   = mean(unemp),
+         suicide2   = suicide - suicidebar,
+         unemp2     = unemp - unempbar) %>% 
+  lm(suicide2 ~ -1 + unemp2,
+     data = .) %>% 
+  tidy() %>% 
+  filter(term == 'unemp2')
+```
+
+さらに時点効果を含めたモデルを作成する(2方向固定効果モデル)。パラメタの値が小さくなり、失業率が1%増加すると、人口10万人あたりの自殺者数がおよそ0.77人増加する、という結果となった。
+
+```{r}
+prefdata %>% 
+  lm(suicide ~ -1 + unemp + pref + as.factor(year),
+     data = .) %>% 
+  tidy() %>% 
+  filter(term == 'unemp')
+```
+
+`fixest`パッケージの`feols`関数では`|`の後に固定効果を記述すれば固定効果モデルとして推定できる。先程の結果と同じくパラメタの値は0.77となったが、`std.error`の値が異なることがわかる。
+
+```{r}
+feols(suicide ~ unemp | pref + year, data = prefdata)
+```
+
+これは、固定効果モデルで推定する際に、同じ個体$i$が何度も記録されることにより標準誤差の計算を調整する必要がある。それを`feols`関数では考慮してくれている。標準誤差に関しては下記にまとめている。
+
+- [不均一分散とロバスト標準誤差](https://sugiaki1989.github.io/statistical_note/note_regression10/note_regression10.html)
+
+固定効果を確認したければ、`fixef`関数を利用する。
+
+```{r}
+feols(suicide ~ unemp | pref + year, data = prefdata) %>% 
+  fixef()
+```
+
+`estimatr`パッケージの`lm_robust`関数でも固定効果モデルを推定する。先程の結果と同じくパラメタの値は0.77となり、`std.error`の値も調整されていることがわかる。
+
+```{r}
+lm_robust(
+  suicide ~ unemp,
+  fixed_effects = ~ pref + year, #固定効果と年固定効果
+  clusters = pref,
+  data = prefdata,
+  se_type = "CR0"
+)
+```
+
+## 参考文献および参考資料
+
+- [Rによる実証分析 回帰分析から因果分析へ第2版](https://www.rniyoru.com/)
+

@@ -43,7 +43,7 @@
 - [回帰分析と回帰診断図](https://sugiaki1989.github.io/statistical_note/note_regression02/note_regression02.html)
 - [ポアソン回帰分析の誤差構造とリンク関数の視覚化](https://sugiaki1989.github.io/statistical_note/note_regression03/note_regression03.html)
 - [最小 2 乗法の BLUE が成立しないケースについて](https://sugiaki1989.github.io/statistical_note/note_regression04/note_regression04.html)
-  ※数理的な説明は「マルチレベル回帰モデル」セクションの[回帰モデルの仮定のおさらい](https://sugiaki1989.github.io/statistical_note/note_MultiLevelRegression00/note_MultiLevelRegression00.html)の方が詳しい。
+  ※数理については[回帰モデルの仮定のおさらい](https://sugiaki1989.github.io/statistical_note/note_MultiLevelRegression00/note_MultiLevelRegression00.html)に詳細をまとめた。
 - [ロジスティック回帰の平均限界効果について](https://sugiaki1989.github.io/statistical_note/note_regression05/note_regression05.html)
 - [対数正規分布を用いた回帰モデル](https://sugiaki1989.github.io/statistical_note/note_regression06/note_regression06.html)
 - [y=a*exp(b*x)の回帰係数の解釈について](https://sugiaki1989.github.io/statistical_note/note_regression07/note_regression07.html)
@@ -88,6 +88,8 @@
 - [傾向スコアと生存分析](https://sugiaki1989.github.io/statistical_note/note_CausalInference03/note_CausalInference03.html)
 - [差分の差分法(DID)](https://sugiaki1989.github.io/statistical_note/note_CausalInference04/note_CausalInference04.html)
 - [回帰不連続デザイン](https://sugiaki1989.github.io/statistical_note/note_CausalInference05/note_CausalInference05.html)
+- [固定効果モデル](https://sugiaki1989.github.io/statistical_note/note_CausalInference06/note_CausalInference06.html)
+
 
 ## 生存時間解析(非公開)
 
