@@ -59,7 +59,7 @@ $$
 ベイズの定理を分解すると、3つのパートで構成されていることがわかる。
 
 - $P(A|B)$: 事後確率(posterior)と呼ばれ、事前確率と尤度の積で表される確率を意味する
-- $P(B|A)$: 尤度(likelohood)と呼ばれ、データが観測される確率を意味する
+- $P(B|A)$: 尤度(likelohood)と呼ばれ、データが観察された時に、そのデータが尤もらしく得られるパラメタの度合い
 - $P(A)$: 事前確率(prior)と呼ばれ、データを観察する前の確率を意味する
 
 $P(B)$は事後確率が0-1に収まるようにする規格化定数である。ベイズの定理のお気持ちを察すると、事前に持っている確信度合いに、観察されたデータの確率を掛け合わせて、元の確率を更新する。ただ、実際のところ、事前、事後確率はわからないので、確率分布を利用することになる。確率分布を利用した場合、事後分布、尤度、事前分布と呼ばれる。
@@ -73,6 +73,7 @@ p(\theta) &=& \frac{1}{B(\alpha,\beta)}\theta^{\alpha-1}(1-\theta)^{\beta-1}
 \end{eqnarray}
 $$
 これらの分布をベイズの定理に当てはめて計算すると、ベータ分布に戻る。
+
 $$
 \begin{eqnarray}
 p(\theta|x) &=& \frac{p(x|\theta)p(\theta)}{p(x)} \\
@@ -167,8 +168,7 @@ total_tosses <- 10
 heads <- 3
 tails <- total_tosses - heads
 # beta params
-# heads = alpha - 1
-# tails = beta - 1
+# Βinom(10,0.3)はΒ(4,8) (α=4, Β=8) 
 
 alpha <- heads + 1
 beta <- tails + 1
@@ -182,14 +182,25 @@ tibble(
   theme_bw()
 ```
 
-やっと尤度や事前分布のおさらいが終わったので、ここからは事後分布がどのように更新されるか確認していく。これまでの例で扱ってきた尤度の$n=10,x=3$の二項分布はベータ分布$\alpha=4,\beta=8$として表現し、
-事前分布として$\alpha=3,\beta=3$のベータ分布を利用すれば、成功回数と失敗回数は各パラメタの和で計算できるため、$\alpha=7,\beta=11$のベータ分布が事後分布となる。可視化すると、少し尤度が事前分布に引き寄せられていることがわかる。事後分布を可視化したことで、パラメタ$p$がどれくらいにあるのかを確認できる。
+やっと尤度や事前分布のおさらいが終わったので、ここからは事後分布がどのように更新されるか確認していく。これまでの例で扱ってきた尤度の$n=10,x=3$の二項分布と事前分布として$\alpha=3,\beta=3$のベータ分布を利用すれば、共役関係から$\alpha=6,\beta=10$のベータ分布が事後分布となる。
+
+$$
+\begin{eqnarray}
+p(\theta|x) &\propto& \theta^{(x+\alpha)-1}(1-\theta)^{(n-x+\beta)-1} \\
+&\propto& \theta^{(3+3)-1}(1-\theta)^{(10-3+3)-1} \\
+&\propto& \theta^{6-1}(1-\theta)^{10-1}
+\end{eqnarray}
+$$
+可視化すると、少し尤度が事前分布に引き寄せられていることがわかる。事後分布を可視化したことで、パラメタ$p$がどれくらいにあるのかを確認できる。
+
 ```{r}
 tibble(
   x = seq(0, 1, 0.01),
   prior = dbeta(x, 3, 3),
+  # 可視化のためBinom(10, 0.3)のかわりにBeta(4,8)を使う
   likelihood = dbeta(x, 4, 8),
-  posterior = dbeta(x, 7, 11)
+  # \theta^{(x+\alpha)-1}(1-\theta)^{(n-x+\beta)-1}
+  posterior = dbeta(x, 6, 10)
 ) %>% 
   pivot_longer(-x, names_to = "type", values_to = "value") %>% 
   ggplot(aes(x = x, y = value, fill = type)) +
@@ -205,7 +216,8 @@ tibble(
 ```{r}
 n_trial <- 10000
 set.seed(1989)
-posterior <- rbeta(n = n_trial, 3 + 4, 3 + 8)
+# \theta^{(x+\alpha)-1}(1-\theta)^{(n-x+\beta)-1}
+posterior <- rbeta(n = n_trial, 3 + 3, 10 - 3 + 3)
 quantile(posterior, probs = c(0.025, 0.5, 0.975))
 ```
 
@@ -314,8 +326,9 @@ df_likelihood
 
 tibble(
   x = seq(0, 1, 0.0001),
-  a = dbeta(x, prior_alpha + df_likelihood$cv[1], prior_beta + df_likelihood$not_cv[1]),
-  b = dbeta(x, prior_alpha + df_likelihood$cv[2], prior_beta + df_likelihood$not_cv[2])
+  # \theta^{(x+\alpha)-1}(1-\theta)^{(n-x+\beta)-1}
+  a = dbeta(x, prior_alpha + df_likelihood$cv[1], prior_beta + df_likelihood$count[1] - df_likelihood$cv[1]),
+  b = dbeta(x, prior_alpha + df_likelihood$cv[2], prior_beta + df_likelihood$count[2] - df_likelihood$cv[2])
 ) %>% 
   pivot_longer(-x, names_to = "type") %>% 
   ggplot(aes(x = x, y = value, fill = type)) +
@@ -332,8 +345,9 @@ tibble(
 ```{r}
 n_trial <- 500000
 set.seed(1989)
-a_sampling <- rbeta(n = n_trial, prior_alpha + df_likelihood$cv[1], prior_beta + df_likelihood$not_cv[1])
-b_sampling <- rbeta(n = n_trial, prior_alpha + df_likelihood$cv[2], prior_beta + df_likelihood$not_cv[2])
+# \theta^{(x+\alpha)-1}(1-\theta)^{(n-x+\beta)-1}
+a_sampling <- rbeta(n = n_trial, prior_alpha + df_likelihood$cv[1], prior_beta + df_likelihood$count[1] - df_likelihood$cv[1])
+b_sampling <- rbeta(n = n_trial, prior_alpha + df_likelihood$cv[2], prior_beta + df_likelihood$count[2] - df_likelihood$cv[2])
 
 ab_result <- sum(a_sampling > b_sampling) / n_trial
 ab_result
@@ -384,3 +398,4 @@ plot(ab_all)[3]
 
 ## 参考文献
 
+- [Bayesian Statistics and A/B Testing](https://rpubs.com/Argaadya/bayesian_ab)
