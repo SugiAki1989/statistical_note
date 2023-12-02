@@ -168,6 +168,7 @@ total_tosses <- 10
 heads <- 3
 tails <- total_tosses - heads
 # beta params
+# https://web.sfc.keio.ac.jp/~maunz/BS19/BS19_R02.html
 # Βinom(10,0.3)はΒ(4,8) (α=4, Β=8) 
 
 alpha <- heads + 1

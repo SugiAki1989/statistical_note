@@ -19,6 +19,8 @@
 - [ダミーWebサービスのデータでABテストを実践する2(非公開)](https://sugiaki1989.github.io/statistical_note/note_pvalue15/note_pvalue15.html)
 - [母数の不偏性、一致性、有効性について](https://sugiaki1989.github.io/statistical_note/note_pvalue12/note_pvalue12.html)
 - [フィッシャー情報量の直感的な理解](https://sugiaki1989.github.io/statistical_note/note_pvalue13/note_pvalue13.html)
+- [条件付き独立について](https://sugiaki1989.github.io/statistical_note/note_pvalue16/note_pvalue16.html)
+
 
 ## 数値解析
 

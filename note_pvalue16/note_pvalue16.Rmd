@@ -1,0 +1,187 @@
+---
+title: "条件付き独立について"
+pagetitle: "条件付き独立について"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは、条件付き独立について定義と数値を用いた具体例をまとめているだけのノートです。個人的に、因果推論やベイズ統計の参考書を読むたびに「条件付き独立」が数理的にはそうなるのはわかっても、直感的に理解するのに時間がかかっていたので、まとめることにした。
+
+
+## 条件付き独立(Conditional Independence)
+
+条件付き独立の前に「独立」の定義を確認しておく。2つの確率変数$X,Y$が独立の時、同時確率が2つの確率の積で書けるというもの。
+
+$$
+P(X , Y) = P(X)P(Y)
+$$
+
+もしくは、$Y$で条件づけても確率が変わらないため、下記のようにも書ける。
+
+$$
+P(X|Y) = P(X)
+$$
+
+条件付き独立を確認する。条件付き独立は、「$Y$と$Z$で条件をつけたときの$X$の確率」が「$Z$だけで条件をつけたときの$X$の確率」と等しいことを表現している。つまり$Y$が情報を持ってないので、あってもなくても同じということ。
+
+$$
+P(X|\ Y,Z) = P(X|Z)
+$$
+
+この関係から、条件付き独立は$X$と$Y$の同時確率があったときに、$Z$で条件をつけると、$Z$で条件をつけた$X$と$Y$の積に分解できることも導ける。
+
+$$
+P(X,Y|Z) = P(X|Z)P(Y|Z)
+$$
+
+汚くても申し訳ないが、導出過程は手書きメモの通り。
+
+![Conditional Independence](/Users/aki/Documents/statistical_note/note_pvalue16/ci.png)
+
+## 条件付き独立の数値例1
+
+下記のYoutubeにアップされている動画の例をお借りする。
+
+- [Conditional Independence Definition and Example](https://www.youtube.com/watch?v=vgw4uiOv5KI)
+
+問題の設定は下記の通り。
+
+- $N=60$
+- $P(A)   = \frac{12}{60}=\frac{1}{5}$
+- $P(B)   = \frac{12}{60}=\frac{1}{5}$
+- $P(C)   = \frac{20}{60}=\frac{1}{6}$
+- $P(A,B) = \frac{2}{60}=\frac{1}{30}$
+- $P(A,C) = \frac{4}{60}=\frac{1}{15}$
+- $P(B,C) = \frac{5}{60}=\frac{1}{12}$
+- $P(A,B,C) = \frac{1}{60}=\frac{1}{60}$
+- $P(B|A) = \frac{2}{12}=\frac{1}{6}$
+- $P(C|A) = \frac{4}{12}=\frac{1}{3}$
+- $P(A|B) = \frac{2}{10}=\frac{1}{5}$
+- $P(C|B) = \frac{5}{10}=\frac{1}{2}$
+- $P(A|C) = \frac{4}{20}=\frac{1}{5}$
+- $P(B|C) = \frac{5}{20}=\frac{1}{4}$
+
+![Venn](/Users/aki/Documents/statistical_note/note_pvalue16/venn.png)
+
+この例は、AとBは独立ではないので、下記は成立しない。
+
+$$
+\begin{eqnarray}
+P(A,B) &=& P(A)P(B) \\
+\frac{2}{60} &=& \frac{12}{60}\frac{12}{60} \\
+\frac{1}{30} &\neq& \frac{1}{25}  \\
+\end{eqnarray}
+$$
+
+ただ、「Cで条件づける」とAとBは独立となり、条件付き独立が成立する。
+
+- $P(A,B|C) = \frac{1}{20}$
+
+$$
+\begin{eqnarray}
+P(A,B|C) &=& P(A|C)P(B|C) \\
+\frac{1}{20} &=& \frac{4}{20}\frac{5}{20} \\
+\frac{1}{20} &=& \frac{1}{20} \\
+\end{eqnarray}
+$$
+
+
+## 条件付き独立の数値例2
+
+次は高橋先生の書籍のp37-38の例をお借りする。
+
+- [高橋(2022)統計的因果推論の理論と実装](https://www.kyoritsu-pub.co.jp/book/b10011781.html)
+
+まずはデータを再現しておく。
+
+```{r}
+library(tidyverse)
+library(janitor)
+
+calc_cross <- function(data){
+  r <- data %>% 
+  tabyl(treat, yesno) %>%
+  adorn_totals(where = 'row')%>% 
+  adorn_percentages('row') %>% 
+  adorn_pct_formatting(digits = 1) %>%  
+  adorn_ns(position = 'front')
+
+  return(r)
+}
+
+yesno <- c('0.yes', '1.no')
+treat <- c('0.treat', '1.control')
+male_val   <-  c(126, 35, 54, 15)
+female_val <-  c(30, 72, 70, 168)
+all_val <- c(156, 107, 124, 183)
+
+male_df   <- expand_grid(yesno, treat) %>% bind_cols(freq = male_val) %>% slice(rep(1:n(), times = freq)) %>% select(-freq)
+female_df <- expand_grid(yesno, treat) %>% bind_cols(freq = female_val) %>% slice(rep(1:n(), times = freq)) %>% select(-freq)
+all_df <- expand_grid(yesno, treat) %>% bind_cols(freq = all_val) %>% slice(rep(1:n(), times = freq)) %>% select(-freq)
+```
+
+570人全体でみると、処置群における有効割合は55.7%で、コントロール群における有効割合は36.9%である。この結果だけみれば、介入することは有効である可能性が高いことがわかる。
+
+```{r}
+calc_cross(all_df)
+```
+
+ただ、条件として性別を加えて、層別でクロス集計を計算してみると、男性のいずれの群でも有効割合70.0%、女性のいずれの群でも有効割合30.0%である。つまり、各性別ごとでみると、有効割合に違いはない。
+
+```{r}
+list(
+  'Male' = calc_cross(male_df),
+  'Female' = calc_cross(female_df)
+)
+```
+
+女性のクロス集計で独立かどうか確認すると、独立であることはわかる。
+
+$$
+\begin{eqnarray}
+P(treat,yes) &=& P(treat)P(yes) \\
+\frac{30}{340} &=& \frac{102}{340}\frac{100}{340} \\
+\frac{3}{34} &=& \frac{3}{34}  \\
+\end{eqnarray}
+$$
+
+因果推論で条件付き独立は重要な性質である。なぜなら、データが独立でなくとも、共変量で条件付けることで独立と考えることができるからである。共変量$\mathbf{X}$で条件づけることで、介入の割付($T_{i}$)が、潜在的結果変数の組$\{Y_{i}(1),Y_{i}(0)\}$に依存しなくできれば(=独立)、より適切に介入の効果を計測できるようになる。
+
+$$
+\{Y_{i}(1),Y_{i}(0)\} \perp T_{i}|\mathbf{X}
+$$
+
+
+
+
+
+
+
+## 参考文献
+
+- [Conditional Independence Definition and Example](https://www.youtube.com/watch?v=vgw4uiOv5KI)
+- [高橋(2022)統計的因果推論の理論と実装](https://www.kyoritsu-pub.co.jp/book/b10011781.html)
+
