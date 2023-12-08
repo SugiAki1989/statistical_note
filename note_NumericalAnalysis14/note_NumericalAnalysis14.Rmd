@@ -1,0 +1,697 @@
+---
+title: "ハミルトニアンモンテカルロ法について"
+pagetitle: "ハミルトニアンモンテカルロ法について"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+
+## ハミルトニアンモンテカルロ法について
+
+ここではハミルトニアンモンテカルロ法について、下記の書籍に記載されている第5章の事例および、演習問題の解答を試みることで、ハミルトニアンモンテカルロ法についての理解を深める。
+
+- [基礎からのベイズ統計学―ハミルトニアンモンテカルロ法による実践的入門―](https://www.asakura.co.jp/detail.php?book_code=12212)
+
+第5章で使用されているコードや演習問題の解答は、[出版社のサイト](https://www.asakura.co.jp/user_data/contents/12212/1.zip)のファイルから確認できるが、演習問題の解答に使用するRのコードは確認できないので、私が記載している解答が正しいかはわからない。
+
+## 5.5章: HMC法(ハミルトニアンモンテカルロ法)
+### リープフロッグ法
+
+
+```{r}
+library(tidyverse)
+library(patchwork)
+
+eps <- 0.01
+lambda <- 1
+alpha <- 11
+steps <- 50000
+
+deriv_f <- function(x, lambda, alpha) {
+  return ((alpha - 1) / x - lambda)
+}
+
+x <- seq(0, 30, length.out = 100)
+y <- seq(-5, 5, length.out = 100)
+df <- expand.grid(x = x, y = y)
+
+euler <- function(q, p, eps, lambda, alpha, deriv_f) {
+  q_new <- q + eps * p
+  p_new <- p + eps * deriv_f(q, lambda, alpha)
+  return(c(q_new, p_new))
+}
+
+euler_arr <- matrix(0, ncol = 2, nrow = steps)
+euler_arr[1, ] <- c(3.0, 0.0)
+
+for (i in 2:steps) {
+  euler_arr[i, ] <- euler(euler_arr[i-1, 1], euler_arr[i-1, 2], eps, lambda, alpha, deriv_f)
+}
+
+df_euler <- data.frame(
+  "q" = euler_arr[,1],
+  "p" = euler_arr[,2]
+  )
+
+p1 <- ggplot() + 
+  geom_contour(data = df, 
+               aes(x ,y, 
+                   # Hamiltonian
+                   z = y^2/2 - (alpha - 1) * log(x) + lambda * x), 
+               breaks = c(-12, -10, -5, 0), col = 'gray') +
+  geom_path(data = df_euler, aes(x = q, y = p), color = 'tomato') +
+  xlab('theta') + ylab('p') + ggtitle('Euler Method')
+
+
+leap_flog <- function(q, p, eps, lambda, alpha, deriv_f) {
+  p_new <- p + 0.5 * eps * deriv_f(q, lambda, alpha)
+  q_new <- q + eps * p_new
+  p_new <- p_new + 0.5 * eps * deriv_f(q, lambda, alpha)
+  return(c(q_new, p_new))
+}
+
+leap_flog_arr <- matrix(0, ncol = 2, nrow = steps)
+leap_flog_arr[1, ] <- c(3.0, 0.0)
+
+for (i in 2:steps) {
+  leap_flog_arr[i, ] <- leap_flog(leap_flog_arr[i-1, 1], leap_flog_arr[i-1, 2], eps, lambda, alpha, deriv_f)
+}
+
+df_leap_flog_arr <- data.frame(
+  "q" = leap_flog_arr[,1],
+  "p" = leap_flog_arr[,2]
+)
+
+p2 <- ggplot() + 
+  geom_contour(data = df, 
+               aes(x ,y, 
+                   # Hamiltonian
+                   z = y^2/2 - (alpha - 1) * log(x) + lambda * x), 
+               breaks = c(-12, -10, -5, 0), col = 'gray') +
+  geom_path(data = df_leap_flog_arr, aes(x = q, y = p), color = 'royalblue') +
+  xlab('theta') + ylab('p') + ggtitle('Leap Flog Method')
+
+p1 | p2
+
+```
+
+```{r}
+# rm(list=ls())
+# 
+# # ガンマ分布のパラメタ
+# alpha <- 11
+# lambda <- 13
+# #対数尤度関数のマイナス
+# loggamma<-function(theta){lambda * theta - (alpha - 1) * log(theta)}
+# #対数尤度関数の微分のマイナス
+# Dloggamma<-function(theta){lambda - (alpha - 1)/theta}
+# 
+# #表5.1、図5.1、図5.2のために
+# #リープフロッグ(運動量、位置、高さ、ハミルトニアン)
+# hmc01 <- function(ini, p, cc = 15, e = 0.05, E = loggamma, D = Dloggamma) {
+#     leapfrog <- function(p, z2, e) {
+#       p2 <- p  - e * D(z2) / 2
+#       z2 <- z2 + e * p2
+#       p2 <- p2 - e * D(z2) / 2
+#       list(p2 = p2, z2 = z2)
+#     }
+#     z <- matrix(0, cc, 4)
+#     z[1, 1] <- p
+#     z[1, 2] <- z2 <- ini
+#     z[1, 3] <- E(z[1, 2])
+#     z[1, 4] <- H <- (p ^ 2) / 2 + z[1, 3]
+#     for (j in 2:cc) {
+#       pz <- leapfrog(p, z2, e)
+#       z[j, 1] <- p <- pz$p2
+#       z[j, 2] <- z2 <- pz$z2
+#       z[j, 3] <- E(z[j, 2])
+#       z[j, 4] <- H <- (p^2) / 2 + z[j, 3]
+#     }
+#     return(z)
+#   }
+# #リープフロッグの実行
+# z01<-hmc01(ini = 0.1, p = 0, cc = 5, e = 0.05)
+# # z02<-hmc01(ini=2.4343660,p=-1.143050, cc=15, e=0.05)
+# # library(xtable)
+# # xtable(z01, digits = 2)
+# # xtable(z02, digits = 2)
+# 
+# #位相空間 ハミルトニアンの計算
+# Hami01 <- function(p, theta){(p * p) / 2 + loggamma(theta)}
+# 
+# #図5.6左
+# # par(mfrow=c(1,2))
+# # p<-seq(0,5,0.1)
+# # theta<-seq(0.05,3.0,along=p)
+# # Hamiltonian<-outer(p,theta,Hami01)
+# # persp(p,theta,Hamiltonian,theta=-120,phi=30,expand=0.7,col=gray(0.9),cex=1.5, ylab="θ")
+# 
+# #図5.6右
+# p <- seq(-5, 5, 0.1)
+# theta <- seq(0.05, 3.0, along = p)
+# Hamiltonian <- outer(p, theta, Hami01)
+# contour(p, theta, Hamiltonian, nlevels = 15, cex.axis = 1.5, xlab = "p", ylab = "θ", cex.lab = 1.5)
+# z01 <- hmc01(ini = 0.1, p = 0, cc = 168, e = 0.01)
+# for (i in seq(1, nrow(z01), by = 3)) {
+#   points(z01[i, 1], z01[i, 2], pch = 16)
+# }
+# # par(mfrow=c(1,1))
+# #dev.copy2eps(file="z05isou06.eps",family='Japan1')
+# 
+# 
+# # #表5.2
+# # rownames(z01)<-1:nrow(z01)
+# # z03<-z01[seq(1,nrow(z01),by=10),]
+# # xtable(z03, digits = 2)
+```
+
+### HMC法の計算例(ガンマ分布モデル)
+
+```{r}
+library(ggplot2)
+library(stats)
+
+alpha <- 11
+lambda <- 1
+eps <- 0.01
+L <- 100
+steps <- 20000
+warmup <- 5000
+lf_arr <- matrix(0, ncol = 2, nrow = steps)
+n_accept <- 0
+
+gamma_x <- seq(qgamma(0.001, shape = alpha), qgamma(0.999, shape = alpha), length.out = 100)
+gamma_y <- dgamma(gamma_x, shape = alpha, scale = 1/lambda)
+df_gamma <- data.frame(x = gamma_x, y = gamma_y)
+ggplot(df_gamma, aes(x, y)) + geom_line()
+
+deriv_f <- function(x, lambda, alpha) {
+  return(-lambda + (alpha-1) / x)
+}
+
+leap_flog <- function(q, p, eps, lambda, alpha, deriv_f) {
+  p_new <- p + 0.5 * eps * deriv_f(q, lambda, alpha)
+  q_new <- q + eps * p_new
+  p_new <- p_new + 0.5 * eps * deriv_f(q_new, lambda, alpha)
+  return(c(q_new, p_new))
+}
+
+q <- 4.0
+p <- 0.0
+for (s in 1:steps) {
+  hamiltonian_c <- p^2/2 + lambda * q - (alpha-1) * log(q)
+  q_c <- q
+  p_c <- p
+  
+  for (i in 1:L) {
+    result <- leap_flog(q_c, p_c, eps, lambda, alpha, deriv_f)
+    q_c <- result[1]
+    p_c <- result[2]
+  }
+  
+  hamiltonian_new <- p_c^2/2 + lambda * q_c - (alpha-1) * log(q_c)
+  
+  if (runif(1) < exp(hamiltonian_c - hamiltonian_new)) {
+    q <- q_c
+    p <- p_c
+    hamiltonian_c <- hamiltonian_new
+    n_accept <- n_accept + 1
+  }
+  
+  lf_arr[s,] <- c(q, p)
+  p <- rnorm(1,0,1) 
+}
+
+x <- seq(0, 30, length.out = 100)
+y <- seq(-5, 5, length.out = 100)
+df <- expand.grid(x = x, y = y)
+df_leap_flog <- data.frame(q = lf_arr[,1], p = lf_arr[,2])
+ggplot() + 
+  geom_contour(data = df, 
+               aes(x ,y, 
+                   # Hamiltonian
+                   z = y^2/2 - (alpha - 1) * log(x) + lambda * x), 
+               breaks = c(-12, -10, -5, 0), col = 'gray') +
+  geom_point(data = df_leap_flog, aes(q, p), alpha = 0.1)
+```
+
+```{r}
+ggplot() + 
+  geom_line(data = df_gamma, aes(x, y)) + 
+  geom_histogram(data = df_leap_flog, aes(x = q, y = ..density..),
+                 alpha = 0.5, bins = 50, fill = 'royalblue') +
+  labs(x = "q", y = "Density", title = 'Hamiltonian Monte Carlo Sampling')
+```
+
+```{r}
+# 
+# #ハミルトニアンモンテカルロ
+# #位相空間 ハミルトニアンの計算
+# Hami01<-function(p,theta){(p*p)/2 +loggamma(theta)}
+# 
+# # N=スカラー、サンプリングする乱数の数
+# # ini=母数ベクトルの初期値
+# # E=関数、対数尤度関数のマイナス（母数ベクトルを入力、スカラーを返す）
+# # D=関数、対数尤度関数の微分のマイナス（母数ベクトルを入力、ベクトルを返す）
+# # L=スカラー、遷移内の移動時間
+# # epsi=リープフロッグ法の精度
+# hmc <- function(N,ini,E,D,L=100,epsi=0.01){
+#   leapfrog <- function(r,z2,e){
+#     r2 <- r  - e * D(z2) / 2
+#     z2 <- z2 + e * r2
+#     r2 <- r2 - e * D(z2) / 2
+#     list(r2=r2,z2=z2)
+#   }
+#   p<-length(ini)
+#   z<- matrix(0,N,p); rr<- matrix(0,N,p);
+#   z[1,] <- ini
+#   co<- 1; #最初は採択
+#   for(i in 2:N) { 
+#     r <- rr[i-1,]<-rnorm(p)
+#     H <- sum(r^2)/2 + E(z[i-1,]) 
+#     #e <- sample(c(-1,1), 1) * runif(1, 0.9, 1.1) * epsi 
+#     e <- epsi 
+#     z2 <- z[i-1,] 
+#     #LL <- sample(L:(L*2),1) 
+#     LL <- L 
+#     for(j in 1:LL) { 
+#       rz<-leapfrog(r,z2,e) 
+#       r <- rz$r2
+#       z2<- rz$z2
+#     } 
+#     dH <- H - (sum(r^2)/2 + E(z2)); 
+#     if (runif(1) < exp(dH)) {
+#       z[i,]<-z2; co<-co+1
+#     }else{
+#       z[i,]<-z[i-1,]
+#     }
+#   } 
+#   ac<-co/N
+#   return(list(z=z,rr=rr,ac=ac))
+# }
+# 
+# #ガンマ分布モデルのための関数の設定
+# alpha <- 11; 
+# lambda <- 13; 
+# #対数尤度関数のマイナス
+# loggamma<-function(theta){lambda*theta-(alpha-1)*log(theta)}
+# #対数尤度関数の微分のマイナス
+# Dloggamma<-function(theta){lambda-(alpha-1)/theta}
+# 
+# 
+# #表5.3
+# set.seed(1234)
+# fit<-hmc(N=100,ini=c(2.5),E=loggamma,D=Dloggamma)
+# mean(fit$z[2:100])
+# mean(fit$rr[2:100])
+# print(fit$ac)
+# fit$z[1:3]
+# fit$rr[1:3]
+# 
+# #図5.7左　フリーハンドで書いている部分があるので再現は難しい
+# # par(mfrow=c(1,2))
+# # p<-seq(-5,5,0.1);theta<-seq(0.05,3.0,along=p)
+# # Hamiltonian<-outer(p,theta,Hami01)
+# # contour(p,theta,Hamiltonian,nlevels = 15,cex.axis=1.5,xlab="p",ylab="θ",cex.lab=1.5,xlim=c(-5,5),ylim=c(0.05,3))
+# # par(new=T)
+# # #plot(fit$rr[1:3],fit$z[1:3],type="p",xlim=c(-5,5),ylim=c(0.05,3),xlab="",ylab="",cex.axis=1.5,cex.lab=1.5)
+# # points(fit$rr[1:3],fit$z[1:3],pch=16,cex=2)
+# # points(-4.44,fit$z[2],pch=15,cex=2)
+# # points(-1.5,fit$z[3],pch=15,cex=2)
+# # text(fit$rr[1]+0.1,fit$z[1]+0.1, "t=1",cex=1.5)
+# # text(fit$rr[2]+0.1,fit$z[2]+0.1,"t=2",cex=1.5)
+# # text(fit$rr[3]+0.1,fit$z[3]+0.1,"t=3",cex=1.5)
+# # #xy<-locator(20)
+# # #for (i in 1:19){segments(xy$x[i],xy$y[i],xy$x[i+1],xy$y[i+1],lwd=2.5)}
+# # #xyxy<-locator(1)
+# # #arrows(xy$x[20],xy$y[20],xyxy$x[1],xyxy$y[1],lwd=2.5)
+# 
+# #図5.7右
+# p<-seq(-5,5,0.1);theta<-seq(0.05,3.0,along=p)
+# Hamiltonian<-outer(p,theta,Hami01)
+# contour(p,theta,Hamiltonian,nlevels = 15,cex.axis=1.5,xlab="p",ylab="θ",cex.lab=1.5,xlim=c(-5,5),ylim=c(0.05,3))
+# par(new=T)
+# plot(fit$rr,fit$z,type="b",xlim=c(-5,5),ylim=c(0.05,3),xlab="",ylab="",cex.axis=1.5,cex.lab=1.5)
+# par(mfrow=c(1,1))
+# #dev.copy2eps(file="z05isou07.eps",family='Japan1')
+# 
+# 
+# #図5.8 ガンマ分布　トレースライン
+# fit<-hmc(N=1000,ini=c(3.0),E=loggamma,D=Dloggamma)
+# plot(fit$z,type="l",xlab="t",ylab="θ",cex.axis=1.5,cex.lab=1.5)
+# #dev.copy2eps(file="z05tore08.eps",family='Japan1')
+# fit$ac; #採用率
+
+```
+
+### HMC法の計算例(正規分布モデル)
+
+```{r}
+# # hmc <- function(N,ini,E,D,L=100,epsi=0.01){
+# #   leapfrog <- function(r,z2,e){
+# #     r2 <- r  - e * D(z2) / 2
+# #     z2 <- z2 + e * r2
+# #     r2 <- r2 - e * D(z2) / 2
+# #     list(r2=r2,z2=z2)
+# #   }
+# #   p<-length(ini)
+# #   z<- matrix(0,N,p); rr<- matrix(0,N,p);
+# #   z[1,] <- ini
+# #   co<- 1; #最初は採択
+# #   for(i in 2:N) { 
+# #     r <- rr[i-1,]<-rnorm(p)
+# #     H <- sum(r^2)/2 + E(z[i-1,]) 
+# #     #e <- sample(c(-1,1), 1) * runif(1, 0.9, 1.1) * epsi 
+# #     e <- epsi 
+# #     z2 <- z[i-1,] 
+# #     #LL <- sample(L:(L*2),1) 
+# #     LL <- L 
+# #     for(j in 1:LL) { 
+# #       rz<-leapfrog(r,z2,e) 
+# #       r <- rz$r2
+# #       z2<- rz$z2
+# #     } 
+# #     dH <- H - (sum(r^2)/2 + E(z2)); 
+# #     if (runif(1) < exp(dH)) {
+# #       z[i,]<-z2; co<-co+1
+# #     }else{
+# #       z[i,]<-z[i-1,]
+# #     }
+# #   } 
+# #   ac<-co/N
+# #   return(list(z=z,rr=rr,ac=ac))
+# # }
+# 
+# #データの用意
+# set.seed(1234)
+# n<-100
+# x<-round(rnorm(n,170,7.0))
+# (m<-mean(x))
+# (v<-sum((x-m)^2)/n)
+# x
+# n<-length(x)
+# 
+# #対数尤度関数のマイナス
+# lognorm<-function(theta){   mu<-theta[1];   sigma2<-theta[2];
+# return(((n*log(sigma2)/(-2))-(sum((x-mu)^2)/(2*sigma2)))*(-1))}
+# #対数尤度関数の微分のマイナス
+# dmu    <-function(theta){   mu<-theta[1];sigma2<-theta[2];
+# return(sum(x-mu)/sigma2)}
+# dsigma2<-function(theta){   mu<-theta[1];sigma2<-theta[2];
+# return((-1*n)/(2*sigma2) + sum((x-mu)^2)/(2*sigma2*sigma2))}
+# Dlognorm<-function(theta){
+#   return(c(dmu(theta),dsigma2(theta))*(-1))}
+# 
+# #ハミルトニアンサンプリング（今までの計算と比べると時間がかかります）
+# fit<-hmc(N=10000,ini=c(168,49),E=lognorm,D=Dlognorm,L=100,epsi=0.01)
+# z<-fit$z
+# r<-fit$rr
+# print(fit$ac); #採用率
+# zzz<-c(1001:10000)
+# 
+# #MAP推定値　先頭に来るものが経験的なMAP
+# rev(sort(table(round(z[zzz,1],1))))[1:5]
+# rev(sort(table(round(z[zzz,2],1))))[1:5]
+# hist(z[zzz,2],breaks = 50,freq =T)
+# 
+# #EAP推定値、MED推定値
+# summary(z[zzz,1])
+# summary(z[zzz,2])
+# 
+# #事後標準偏差
+# sd(z[zzz,1])
+# sd(z[zzz,2])
+# 
+# 
+# #図5.9　正規分布モデルのトレースライン
+# par(mfrow=c(2,1))
+# plot(z[,1],type="l",cex.axis=1.5,xlab="t",ylab="μ",cex.lab=1.5)
+# plot(z[,2],type="l",cex.axis=1.5,xlab="t",ylab="σ2",cex.lab=1.5)
+# par(mfrow=c(1,1))
+# #dev.copy2eps(file="z05tore09.eps",family='Japan1')
+# 
+# 
+# #図5.10　平均と分散の10万個の同時分布
+# plot(z,type="p",cex.axis=1.5,xlab="μ",ylab="σ2",cex.lab=1.5)
+# #dev.copy2eps(file="z05norm10.eps",family='Japan1')
+```
+
+## 5.7: 章末問題
+### 5.7.8: 章末問題
+
+事後分布$p=10.2, q=5.8$のベータ分布。初期位置$\theta^{(0)}=0.1$とし、最初は静止しているものとして$p(1)=0$とする。定数は$\epsilon=0.05,L=5$としてリープフロッグ法を実行し、移動の様子を報告する。
+
+```{r}
+# # 基礎からのベイズ統計学第5章 5.7 (8)
+# 
+# # ベータ分布
+# beta_p = 10.2
+# beta_q = 5.8
+# 
+# # HMC
+# sig = 0.05
+# L = 5
+# 
+# init_theta = 0.1
+# init_p = 0
+# 
+# # 負の対数事後分布
+# h <- function(theta) {
+#   a = -(beta_p - 1) * log(theta)
+#   b = -(beta_q - 1) * log(1 - theta)
+#   
+#   return(a + b)
+# }
+# 
+# # 負の対数事後分布の微分
+# h_dash <- function(theta) {
+#   # ゼロ除算回避
+#   sigma = 0.000001
+#   
+#   a = -(beta_p - 1) / ifelse(theta == 0, sigma, theta)
+#   b = (beta_q - 1) / ifelse(1 - theta == 0, sigma, 1 - theta)
+#   return(a + b)
+# }
+# 
+# # ハミルトニアン
+# hamiltonian <- function(theta, p) {
+#   return(h(theta) + (1 / 2) * (p^2))
+# }
+# 
+# leapfrog <- function(theta, p) {
+#     p = p - (sig / 2) * h_dash(theta)
+#     theta = theta + sig * p
+#     p = p - (sig / 2) * h_dash(theta)
+#   
+#   return(list(theta, p))
+# }
+# 
+# thetas = c(init_theta)
+# ps = c(init_p)
+# h_thetas = c(h(init_theta))
+# hamils = c(hamiltonian(init_theta, init_p))
+#   
+# for (i in 1:L) {
+#   moved = leapfrog(tail(thetas, 1), tail(ps, 1))
+#   thetas = append(thetas, moved[[1]])
+#   ps = append(ps, moved[[2]])
+#   h_thetas = append(h_thetas, h(moved[[1]]))
+#   hamils = append(hamils, hamiltonian(moved[[1]], moved[[2]]))
+# }
+#   
+# for (i in 0:L + 1) {
+#   print(sprintf("p=%f θ=%f h(θ)=%f H(θ,p)=%f", ps[i], thetas[i], h_thetas[i], hamils[i]))
+# }
+# Warning: NaNs producedWarning: NaNs produced[1] "p=0.000000 θ=0.100000 h(θ)=21.689513 H(θ,p)=21.689513"
+# [1] "p=3.119088 θ=0.208333 h(θ)=15.552618 H(θ,p)=20.416972"
+# [1] "p=4.425835 θ=0.411909 h(θ)=10.708162 H(θ,p)=20.502170"
+# [1] "p=4.789751 θ=0.650917 h(θ)=9.001972 H(θ,p)=20.472829"
+# [1] "p=3.957766 θ=0.890884 h(θ)=11.696624 H(θ,p)=19.528579"
+# [1] "p=5.905886 θ=1.046693 h(θ)=NaN H(θ,p)=NaN"
+```
+
+### 5.7.9: 章末問題
+
+前問の状態で、$\epsilon=0.01,L=15$としてリープフロッグ法を実行し、遷移の状態を観察する。
+
+```{r}
+# # 基礎からのベイズ統計学第5章 5.7 (9)
+# 
+# # ベータ分布
+# beta_p = 10.2
+# beta_q = 5.8
+# 
+# # HMC
+# sig = 0.01
+# L = 15
+# 
+# init_theta = 0.1
+# init_p = 0
+# 
+# # 負の対数事後分布
+# h <- function(theta) {
+#   a = -(beta_p - 1) * log(theta)
+#   b = -(beta_q - 1) * log(1 - theta)
+#   
+#   return(a + b)
+# }
+# 
+# # 負の対数事後分布の微分
+# h_dash <- function(theta) {
+#   # ゼロ除算回避
+#   sigma = 0.000001
+#   
+#   a = -(beta_p - 1) / ifelse(theta == 0, sigma, theta)
+#   b = (beta_q - 1) / ifelse(1 - theta == 0, sigma, 1 - theta)
+#   return(a + b)
+# }
+# 
+# # ハミルトニアン
+# hamiltonian <- function(theta, p) {
+#   return(h(theta) + (1 / 2) * (p^2))
+# }
+# 
+# leapfrog <- function(theta, p) {
+#   p = p - (sig / 2) * h_dash(theta)
+#   theta = theta + sig * p
+#   p = p - (sig / 2) * h_dash(theta)
+#   
+#   return(list(theta, p))
+# }
+# 
+# thetas = c(init_theta)
+# ps = c(init_p)
+# h_thetas = c(h(init_theta))
+# hamils = c(hamiltonian(init_theta, init_p))
+# 
+# for (i in 1:L) {
+#   moved = leapfrog(tail(thetas, 1), tail(ps, 1))
+#   thetas = append(thetas, moved[[1]])
+#   ps = append(ps, moved[[2]])
+#   h_thetas = append(h_thetas, h(moved[[1]]))
+#   hamils = append(hamils, hamiltonian(moved[[1]], moved[[2]]))
+# }
+# 
+# for (i in 0:L + 1) {
+#   print(sprintf("p=%f θ=%f h(θ)=%f H(θ,p)=%f", ps[i], thetas[i], h_thetas[i], hamils[i]))
+# }
+# [1] "p=0.000000 θ=0.100000 h(θ)=21.689513 H(θ,p)=21.689513"
+# [1] "p=0.847432 θ=0.104333 h(θ)=21.322410 H(θ,p)=21.681480"
+# [1] "p=1.627688 θ=0.116949 h(θ)=20.340373 H(θ,p)=21.665056"
+# [1] "p=2.302081 θ=0.136887 h(θ)=19.001717 H(θ,p)=21.651506"
+# [1] "p=2.863870 θ=0.162990 h(θ)=17.543410 H(θ,p)=21.644286"
+# [1] "p=3.324552 θ=0.194164 h(θ)=16.115459 H(θ,p)=21.641782"
+# [1] "p=3.700986 θ=0.229481 h(θ)=14.793109 H(θ,p)=21.641757"
+# [1] "p=4.009019 θ=0.268184 h(θ)=13.606634 H(θ,p)=21.642750"
+# [1] "p=4.261531 θ=0.309662 h(θ)=12.563682 H(θ,p)=21.644007"
+# [1] "p=4.468356 θ=0.353415 h(θ)=11.662079 H(θ,p)=21.645180"
+# [1] "p=4.636741 θ=0.399029 h(θ)=10.896439 H(θ,p)=21.646121"
+# [1] "p=4.771857 θ=0.446150 h(θ)=10.261459 H(θ,p)=21.646767"
+# [1] "p=4.877183 θ=0.494466 h(θ)=9.753620 H(θ,p)=21.647078"
+# [1] "p=4.954749 θ=0.543693 h(θ)=9.372236 H(θ,p)=21.647003"
+# [1] "p=5.005208 θ=0.593561 h(θ)=9.120404 H(θ,p)=21.646457"
+# [1] "p=5.027730 θ=0.643797 h(θ)=9.006242 H(θ,p)=21.645278"
+```
+
+### 5.7.9: 章末問題
+
+$p=10.2, q=5.8$のベータ分布をHMC法によってシミュレーションし、EAP推定値と理論値である約0.638と比較しなさい。$T=1000,L=100,\epsilon=0.01$とする。
+
+```{r}
+# # 基礎からのベイズ統計学第5章 5.7 (10)
+# # ベータ分布
+# beta_p <- 10.2
+# beta_q <- 5.8
+# 
+# # HMC
+# sig <- 0.01
+# L <- 100
+# Time <- 1000
+# burnin <- 100
+# 
+# init_theta <- 0.5
+# 
+# # 負の対数事後分布
+# h <- function(theta) {
+#   a <- -(beta_p - 1) * log(theta)
+#   b <- -(beta_q - 1) * log(1 - theta)
+#   
+#   return(a + b)
+# }
+# 
+# # 負の対数事後分布の微分
+# h_dash <- function(theta) {
+#   # ゼロ除算回避
+#   sigma = 0
+#   
+#   a <- -(beta_p - 1) / ifelse(theta == 0, sigma, theta)
+#   b <- (beta_q - 1) / ifelse(1 - theta == 0, sigma, 1 - theta)
+#   return(a + b)
+# }
+# 
+# # ハミルトニアン
+# H <- function(theta, p) {
+#   return(h(theta) + (1 / 2) * (p^2))
+# }
+# 
+# # リープ・フロッグ法
+# leapfrog <- function(theta, p) {
+#   p <- p - (sig / 2) * h_dash(theta)
+#   theta = theta + sig * p
+#   p <- p - (sig / 2) * h_dash(theta)
+#   
+#   return(c(theta, p))
+# }
+# 
+# pred <- function(theta, p) {
+#   moved <- c(theta, p)
+#   for (i in 1:L) {
+#     moved <- leapfrog(moved[1], moved[2])
+#   }
+#   return(moved)
+# }
+# 
+# HMC <- function() {
+#   thetas <- c(init_theta)
+#   for (i in 1:Time) {
+#     random_p <- rnorm(1, 0, 1)[1]
+#     candidate <- pred(tail(thetas, 1), random_p)
+#     
+#     r <- exp(H(tail(thetas, 1), random_p) - H(candidate[1], candidate[2]))
+#     
+#     next_theta <- ifelse(runif(1) < r, candidate[1], tail(thetas, 1))
+#     thetas <- append(thetas, next_theta)
+#   }
+#   return(thetas)
+# }
+# 
+# result <- HMC()
+# print(mean(tail(result, Time - burnin)))
+# [1] 0.6392119
+```
+
