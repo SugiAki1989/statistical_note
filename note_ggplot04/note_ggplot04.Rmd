@@ -1,0 +1,107 @@
+---
+title: "箱ひげ図(Box Plot)"
+pagetitle: "箱ひげ図(Box Plot)"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+
+# はじめに
+
+このノートでは、ggplot2で箱ひげ図に様々な情報を追加することで、より箱ひげ図から得られる情報を豊富にするための方法についてまとめている。
+
+## 箱ひげ図
+
+箱ひげ図は四分位数をもとに作成されるプロットのこと。細かい部分で違いがあるが、基本的には、ヒゲとして最小値、最大値を利用し、第1四分位数
+、中央値、第3四分位数で箱(四分位範囲はデータの25%～75%)を表現する。
+
+つまり、箱ひげ図を使うことで、箱の位置を見れば中央値がどこにあり、どこにデータが偏っているのか。加えて、箱の大小を見ることで、中央値付近にどの程度データが集中しているのか、それともばらついているのかを目で確認できる。
+
+とはっても、なんとなくは分かるものの実際に見たほうがわかりやすいので、下記の通り可視化した。分布の形状は、右寄り、左寄り、中央寄り、フラット、バスタブを用意した。
+
+```{r}
+library(tidyverse)
+library(ggdist)
+library(ggthemes)
+
+id <- 1:1000
+x1 <- rbeta(n = length(id), shape1 =  1, shape2 = 3)  # RightFatTailed
+x2 <- rbeta(n = length(id), shape1 =  3, shape2 =  1) # LeftFatTailed 
+x3 <- rbeta(n = length(id), shape1 =  5, shape2 =  5) # Normal
+x4 <- rbeta(n = length(id), shape1 = .5, shape2 = .5) # Bathtub
+x5 <- rbeta(n = length(id), shape1 =  1, shape2 =  1) # Flat
+df <- data.frame(
+  id, 
+  'RightFatTailed' = x1,
+  'LeftFatTailed' = x2,
+  'Normal' = x3,
+  'Bathtub' = x4,
+  'Flat' = x5
+) %>% 
+  pivot_longer(cols = !id, names_to = 'type', values_to = 'x') %>% 
+  arrange(type, id)
+
+df %>% 
+  ggplot(aes(x = factor(type), y = x, fill = factor(type))) +
+  # add half-violin from {ggdist} package
+  stat_halfeye(
+    # adjust bandwidth
+    adjust = 0.5,
+    # move to the right
+    justification = -0.2,
+    # remove the slub interval
+    .width = 0,
+    point_colour = NA
+  )+
+  geom_boxplot(
+    width = 0.12,
+    alpha = 0.5
+  ) +
+  # stat_dots(
+  #   # ploting on left side
+  #   side = "left",
+  #   # adjusting position
+  #   justification = 1.1,
+  #   # adjust grouping (binning) of observations
+  #   binwidth = 0.01
+  # ) +
+  scale_fill_tableau("Tableau 20", name = NULL) +
+  labs(
+    title = "RainCloud Plot",
+    x = "Engine Size",
+    y = "Highway Fuel",
+    fill = "Cylinders"
+  ) +
+  coord_flip()
+```
+
+右寄り、左寄り、中央寄りなど、偏りに関しては箱ひげ図だけ見てもわかる。一方で、フラット、バスタブは箱ひげ図だけからでは、どのような分布なのかを想像するのは難しい。同じような分布と考えてしまうかもしれないので、ヒストグラムなどを併用することも大切である。
+
+## 参考文献
+
+- [Raincloud Plot with ggplot2](https://rpubs.com/rana2hin/raincloud)
+
+
