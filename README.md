@@ -20,6 +20,7 @@
 - [母数の不偏性、一致性、有効性について](https://sugiaki1989.github.io/statistical_note/note_pvalue12/note_pvalue12.html)
 - [フィッシャー情報量の直感的な理解](https://sugiaki1989.github.io/statistical_note/note_pvalue13/note_pvalue13.html)
 - [条件付き独立について](https://sugiaki1989.github.io/statistical_note/note_pvalue16/note_pvalue16.html)
+- [分位点関数(逆累積分布関数)について](https://sugiaki1989.github.io/statistical_note/note_pvalue17/note_pvalue17.html)
 
 
 ## 数値解析
@@ -38,6 +39,7 @@
 - [ニューラルネットワークの実装](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis11/note_NumericalAnalysis11.html)
 - [非線形最小二乗法のまとめ](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis12/note_NumericalAnalysis12.html)
 - [モンテカルロシュミレーションのまとめ](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis13/note_NumericalAnalysis13.html)
+- [ハミルトニアンモンテカルロ法(HMC)のまとめ](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis14/note_NumericalAnalysis14.html)
 
 ## 回帰分析
 

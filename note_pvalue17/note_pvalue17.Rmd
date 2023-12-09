@@ -1,0 +1,160 @@
+---
+title: "逆累積分布関数について"
+pagetitle: "逆累積分布関数について"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは、逆累積分布関数についてについて簡単にまとめているもの。様々なパラメタを持つ正規分布に対して、常に上側5%となる$x$の値を知りたい場合に、少し混乱したので、忘れないうちにまとめておく。逆累積分布関数は分位点関数とも呼ばれる。
+
+## 逆累積分布関数(Inverse cumulative distribution function; ICDF)
+
+まずは累積分布関数(CDF)の定義をおさらいしておく。累積分布関数は$X$が$x$以下の値となる確率$p$を表す関数。
+
+$$
+F_{X}(x) = Pr(X \le x) = p
+$$
+Rの標準正規分布の累積分布関数であれば`pnorm(q)`が対応する。つまり、入力は分位数であり、下記の例では$x=1.96$以下の値となる確率$p$を返す。
+
+```{r}
+pnorm(q = 1.96, 0, 1, lower.tail = TRUE)
+```
+
+この関数の逆関数なので、逆累積分布関数は、確率$p$となる$x$の値を返す関数。
+
+$$
+F^{-1}_{X}(p) = Q(p)
+$$
+
+Rの標準正規分布の累積分布関数であれば`qnorm(p)`が対応する。つまり、入力は確率であり、下記の例では$p=0.975$となる分位数$q$を返す。
+
+```{r}
+qnorm(p = 0.9750021, 0, 1, lower.tail = TRUE)
+```
+
+関係性をまとめると下記の図の通り。
+
+```{r}
+library(ggplot2)
+mu <- 0
+sd <- 1
+x <- seq(-3, 3, length = 100)
+y <- pnorm(x, mean = mu, sd = sd)
+
+# pnorm, qnormを使って計算するほうが望ましい
+arrow_data <- data.frame(
+  x1 = c(0.0, 0.0,-3.00, 0.67),
+  x2 = c(0.0,-3.0, 0.67, 0.67),
+  y1 = c(0.0, 0.5, 0.75, 0.75),
+  y2 = c(0.5, 0.5, 0.75, 0.00)
+)
+
+ggplot() +
+  geom_line(aes(x, y), col = "tomato") +
+  geom_segment(data = arrow_data,
+               aes(x = x1, y = y1, xend = x2, yend = y2),
+               arrow = arrow(length = unit(.3, 'cm'))
+               ) +
+  labs(title = "(Inverse) Cumulative Distribution Function",
+       x = "x",
+       y = "F(x)")
+```
+
+本題に移るが、標準正規分布ではなく、様々なパラメタを持つ正規分布に対して、常に上側5%となる$x$の値を知りたいという場合はどうすればよいのか。これは素直にRの力をお借りすれば、`pnorm, qnorm`のパラメタを調整すればよい。
+
+ここでは$\mu=100, sd=5$のときの正規分布を対象に、$x=100$以下の値となる確率$p=0.5$、$p=0.95$となる分位数$q=108.2243$の関係性を可視化している。
+
+```{r}
+mu <- 100
+sd <- 5
+x <- seq(80, 120, length = 1000)
+y <- pnorm(x, mean = mu, sd = sd)
+
+p <- 0.95
+# 上側の場合はlower.tail = FALSEを設定する
+# pnorm(x, mu, sd, lower.tail = FALSE) -> 0.05 を返す
+p1 <- pnorm(mu, mean = mu, sd = sd)
+p2 <- qnorm(p, mean = mu, sd = sd)
+xmin <- min(x)
+arrow_data <- data.frame(
+  x1 = c(mu, mu  , xmin, p2),
+  y1 = c( 0, p1  , p   , p ),
+  x2 = c(mu, xmin, p2  , p2),
+  y2 = c(p1, p1  , p   , 0 )
+)
+
+ggplot() +
+  geom_line(aes(x, y), col = "royalblue") +
+  geom_segment(data = arrow_data,
+               aes(x = x1, y = y1, xend = x2, yend = y2),
+               arrow = arrow(length = unit(.3, 'cm'))
+  ) +
+  scale_x_continuous(breaks = seq(80,120,2)) + 
+  labs(title = "(Inverse) Cumulative Distribution Function",
+       x = "x",
+       y = "F(x)")
+```
+
+Rにこのような便利な引数がなければどうすればよいのか。このようなときは、標準化を利用すれば良い。ここでは分位数を最終的に求めたいので、$x$を$q$で表記している。
+
+$$
+z = \frac{q-\mu}{\sigma}
+$$
+
+この式をzについて整理すれば、標準化前の値は、平均と標準偏差が分かれば計算することができる。
+
+$$
+q = \mu + \sigma * z 
+$$
+
+$\mu=100, sd=5$のときの正規分布を対象に、確率$p$が95%以下となる$x$の値を知りたいとする。標準正規分布の世界では、95%となるときの$z$の値は1.64である。教科書の末尾の数表をみればわかる。
+
+```{r}
+mu <- 100
+sd <- 5
+z <- qnorm(0.95, 0, 1)
+list(mu = mu, sd = sd, z = z)
+```
+
+これらの数値を利用して、$\mu=100, sd=5$のときの正規分布の世界の値を計算すると、$q=108.2243$が得られる
+
+```{r}
+# 逆正規分布関数を用いて位置 q を計算
+# mu + sd * qnorm(0.95, 0, 1)
+q <- mu + sd * z
+q
+```
+
+つまり、下記の通り、引数を使わずとも、標準化を利用すれば、様々なパラメタを持つ正規分布であっても、確率$p$が95%以下となる$x$の値を計算できる。
+
+```{r}
+qnorm(p, mean = mu, sd = sd)
+```
+
+## 参考文献
+
+- [分位関数](https://en.wikipedia.org/wiki/Quantile_function)
+
