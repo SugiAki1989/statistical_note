@@ -22,6 +22,18 @@
 - [条件付き独立について](https://sugiaki1989.github.io/statistical_note/note_pvalue16/note_pvalue16.html)
 - [分位点関数(逆累積分布関数)について](https://sugiaki1989.github.io/statistical_note/note_pvalue17/note_pvalue17.html)
 
+## ベイズ統計学
+
+- [アヒル本01](https://sugiaki1989.github.io/statistical_note/note_ahirubayes01/note_ahirubayes01.html)
+- [アヒル本02](https://sugiaki1989.github.io/statistical_note/note_ahirubayes02/note_ahirubayes02.html)
+- [アヒル本03](https://sugiaki1989.github.io/statistical_note/note_ahirubayes03/note_ahirubayes03.html)
+- [アヒル本04](https://sugiaki1989.github.io/statistical_note/note_ahirubayes04/note_ahirubayes04.html)
+- [アヒル本05](https://sugiaki1989.github.io/statistical_note/note_ahirubayes05/note_ahirubayes05.html)
+- [アヒル本06](https://sugiaki1989.github.io/statistical_note/note_ahirubayes06/note_ahirubayes06.html)
+- [アヒル本07](https://sugiaki1989.github.io/statistical_note/note_ahirubayes07/note_ahirubayes07.html)
+- [アヒル本08](https://sugiaki1989.github.io/statistical_note/note_ahirubayes08/note_ahirubayes08.html)
+- [アヒル本09](https://sugiaki1989.github.io/statistical_note/note_ahirubayes09/note_ahirubayes09.html)
+- [アヒル本10](https://sugiaki1989.github.io/statistical_note/note_ahirubayes10/note_ahirubayes10.html)
 
 ## 数値解析
 

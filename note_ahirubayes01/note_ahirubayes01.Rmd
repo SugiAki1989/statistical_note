@@ -1,0 +1,380 @@
+---
+title: "StanとRでベイズ統計モデリング01"
+pagetitle: "StanとRでベイズ統計モデリング01"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+今回は第4章「StanとRStanをはじめよう」のチャプターを写経していく。
+
+## 2.5 ベイズ信頼区間とベイズ予測区間
+
+コードが出てくるのは第4章からではあるが、第2章の予測分布で気になる部分があったのでメモを追加しておく。予測分布は下記の通り、確率モデルと事後分布を積分することで計算される。
+
+<div class="tbox">
+<th3>予測分布</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+p_{pred}(y|Y) = \int p(y|\theta) p(\theta|Y) d\theta \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+下記の書籍に書かれている通り、予測分布を得る場合は数千個得られるパラメタのMCMCサンプルを変えながら、確率モデルからの乱数を得ることになる。
+
+> より簡単に、事後分布$p(\theta|Y)$からのMCMCサンプルから値を1つ選び、それを$\theta^{+}$として確率モデル$p(y|\theta^{+})$に従う乱数$y^{+}$を生成することを繰り返し、$y^{+}$をたくさん生成することで予測分布$p_{pred}(y|Y)$からのMCMCサンプルとみなすことができる。
+
+どちらが良いのかは分からないが、他の書籍やブログなどには、MCMCサンプルの値を変えず、パラメタの事後分布の点推定量を計算し、それを利用して確率モデルから乱数を得る「条件付き予測分布」という方法が記載されている場合もある。このあたりの理解が最初は追いつかず、Stanでgenerated quantitiesの内容と頭の理解が一致せず、困った経験が過去にあったので、再勉強するにあたりメモを残しておく。基本的には事後予測分布を使用し、条件付き予測分布は使わなければ問題はなさそう。
+
+## 4.2.2 文法の基礎
+
+書籍に書かれている下記のモデル式4-1への理解を深めておく。
+
+<div class="tbox">
+<th3>モデル4-1</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &\sim& Normal(\mu, 1) \tag{4.1}\\
+\mu &\sim& Normal(0, 100) \tag{4.2}
+\end{eqnarray}
+$$
+</div>
+</div>
+
+これは書籍にも書かれているが、「データ1つごとに平均$\mu$、標準偏差1の正規分布から独立に確率的に生成された」ことを意味する。書き下すと下記の通りで、$\mu$は何らかのスカラであり、その$\mu$をもつ正規分布から生成されていることを意味する。スカラを強調しているのは、階層ベイズモデルなどを筆頭に複雑なモデルを扱う時、グループごとに$\mu$が変化することもあるためである。
+
+```
+Y[1] ~ Normal(mu, 1) かつ
+Y[2] ~ Normal(mu, 1) かつ
+Y[3] ~ Normal(mu, 1) かつ
+...
+Y[n] ~ Normal(mu, 1)
+
+これを略した記述がY[n] ~ normal(mu, 1)
+```
+
+Stanの文法で記述すると、下記に対応する。
+
+```
+model{
+  for (n in 1:N){
+    Y[n] ~ normal(mu, 1);
+  }
+  mu ~ normal(0, 100) # 事前分布
+}
+```
+
+モデルが複雑になってくると、どういうこと？これはどう記述すればよいのか？など、疑問は湧き出てくるので、しっかり基礎の基礎を理解しておきたい・・・(戒め)。
+
+## 4.4.3 モデル式の記述
+
+下記4つのモデルは別のモデルではなく等価なので解釈を誤らないように注意が必要。モデル4-5式はデータ1人ごとに平均$a+bX[n]$、標準偏差$\sigma$の正規分布から独立に生成されたことを意味している。
+
+どのモデルも平均値が$X$の値によって変わる条件つき正規分布で、すべての$X$において等分散を仮定しているモデルである。最終的にパラメタ$a,b$の事後分布を得たいものの、各モデル式をそのままStanのmodelブロックで定義すると異なる表記になるので注意が必要。
+
+<div class="tbox">
+<th3>モデル4-2</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &=& y_{base}[n] + \epsilon[n] \\
+y_{base}[n] &=& a + b X[n]\\
+\epsilon[n] &\sim& Normal(0, \sigma) \tag{4.4}
+\end{eqnarray}
+$$
+</div>
+</div>
+
+<div class="tbox">
+<th3>モデル4-3</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &=& a + b X[n] + \epsilon[n] \\
+\epsilon[n] &\sim& Normal(0, \sigma) 
+\end{eqnarray}
+$$
+</div>
+</div>
+
+<div class="tbox">
+<th3>モデル4-4</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+y_{base}[n] &=& a + b X[n] \\
+Y[n] &\sim& Normal(y_{base}[n], \sigma) 
+\end{eqnarray}
+$$
+</div>
+</div>
+
+<div class="tbox">
+<th3>モデル4-5</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &\sim& Normal(a + b X[n], \sigma) 
+\end{eqnarray}
+$$
+</div>
+</div>
+
+## 4.4.5 Stanで実装
+
+書籍内で使用されているデータは下記の通り。
+
+```{r}
+library(ggplot2)
+library(rstan)
+
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap04/input/data-salary.txt')
+data <- list(N = nrow(d), X = d$X, Y = d$Y)
+
+head(d)
+```
+
+まずはStanコードを作成する。別ファイルに記載しているコードを下記に転記している。
+
+```
+data {
+  int N;
+  real X[N];
+  real Y[N];
+}
+parameters {
+  real a;
+  real b;
+  real<lower=0> sigma;
+}
+model {
+  for (n in 1:N){
+    Y[n] ~ normal(a + b*X[n], sigma);
+  }
+}
+
+```
+
+modelブロックで記載しているモデルは、さきほどからしつこく書いている通り「データ1人ごとに平均$a+bX[n]$、標準偏差$\sigma$の正規分布から独立に生成された」ことを意味しているモデルを想定している。つまり、書き下すと下記のようになる。
+
+```
+Y[1] ~ normal(a + b*X[1], sigma);
+Y[2] ~ normal(a + b*X[2], sigma);
+...
+Y[N] ~ normal(a + b*X[N], sigma);
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model443 <- stan_model('note_ahirubayes01.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model443, data = data, seed = 1234)
+```
+
+推定結果は下記の通り。指定しない限り`parameters`ブロック、`transformed parameters`ブロック、`generated quantities`ブロックで指定されたパラメタのMCMCサンプルをサンプリングする。つまり、どのようなパラメタがサンプリングされるかは、モデル式をどのように記述するのかに依存する。
+
+```{r}
+fit
+```
+
+分析目的に適う作図や分析結果を得るためには想定しているモデル構造、それをもとに記述されるモデル式への理解を深める必要がある。
+
+## 4.4.11 ベイズ信頼区間とベイズ予測区間の算出
+
+ベイズ信頼区間、予測区間を算出するためにすることは、まず各パラメタのMCMCサンプルを`extract()`関数で取り出すこと。MCMCサンプルの長さは`chains * (iter - warmup)/thin`という関係にあるので、今回は`4 * (2000 - 1000)/1 = 4000`となる。つまり、先程表示されていたパラメタのサマリーは、4000個のMCMCサンプルから計算されていることになる。
+
+```{r}
+ms <- rstan::extract(fit, permuted = TRUE)
+str(ms)
+```
+
+下記は、各パラメタの1-10行目を取り出しているが、
+
+```{r}
+data.frame(
+  set = paste0('set', 1:10),
+  a = ms$a[1:10],
+  b = ms$b[1:10],
+  sigma = ms$sigma[1:10]
+)
+```
+
+これは$p(a,b,\sigma|X,Y)$という同時分布からサンプリングした1つの組み(=1行)であり、この組みが4000組得られている。この4000組を使って信用区間、予測区間を算出する。条件付き予測分布の例があったので、少し混乱するが、書籍では23-60歳の範囲での予測区間を算出する前に、丁寧に1時点での解説がされているので、大変イメージしやすい。下記は50歳時点での予測分布を構築するコードである。
+
+```{r}
+ms <- rstan::extract(fit) 
+N_mcmc <- length(ms$lp__)
+y50_base <- ms$a + ms$b * 50
+y50 <- rnorm(n = N_mcmc, mean = y50_base, sd = ms$sigma)
+d_mcmc <- data.frame(a = ms$a, b = ms$b, sigma = ms$sigma, y50_base, y50)
+```
+
+`ms$a + ms$b * 50`の部分がまさに下記を表している。
+
+> より簡単に、事後分布$p(\theta|Y)$からのMCMCサンプルから値を1つ選び、それを$\theta^{+}$として確率モデル$p(y|\theta^{+})$に従う乱数$y^{+}$を生成することを繰り返し、$y^{+}$をたくさん生成することで予測分布$p_{pred}(y|Y)$からのMCMCサンプルとみなすことができる。
+
+`ms$a`も`ms$b`も4000個のベクトルであって、ベクトルの計算に年齢`50`を乗じることで、4000個の平均ベクトルを得ている。1番目のパラメタの1組を取り出して平均を計算し、2番目のパラメタの1組を取り出して平均を計算し、これを4000回繰り返す。そして、この平均を使って正規分布からの乱数`rnorm(n = N_mcmc, mean = y50_base, sd = ms$sigma)`を得ている。
+
+`rnorm()`関数の平均にベクトルを渡すというイメージは分かりにくいかもしれないが、変化する平均をもとに、乱数を生成する。
+
+```{r}
+set.seed(1234)
+rnorm(5, c(1,10,100,1000,10000), 1)
+```
+
+これが50歳時点での予測分布となるので、あとはこれを23-60歳の範囲で同じように繰り返すことで予測区間が算出される。
+
+```{r}
+hist(d_mcmc$y50, breaks = 50, main = 'Posterior Predicted Distribution of Income at Age 50')
+```
+
+実際はStan側からデータを受け取って予測区間となるMCMCサンプルを計算するではなく、Stan側で計算させることができる。先程説明した、計算したいパラメタとStanのモデル式が対応しているとはこのことである。
+
+まずはStanコードを作成する。別ファイルに記載しているコードを下記に転記している。
+
+```
+data {
+  int N;
+  real X[N];
+  real Y[N];
+  int N_new;
+  real X_new[N_new];
+}
+
+parameters {
+  real a;
+  real b;
+  real<lower=0> sigma;
+}
+
+transformed parameters {
+  real y_base[N];
+  for (n in 1:N)
+    y_base[n] = a + b*X[n];
+}
+
+model {
+  for (n in 1:N)
+    Y[n] ~ normal(y_base[n], sigma);
+}
+
+generated quantities {
+  real y_base_new[N_new];
+  real y_new[N_new];
+  for (n in 1:N_new) {
+    y_base_new[n] = a + b*X_new[n];
+    y_new[n] = normal_rng(y_base_new[n], sigma);
+  }
+}
+
+```
+
+`generated quantities`ブロックを追加して、予測分布を算出するための予測値のMCMCサンプルを計算させている。あとはデータを用意して、
+
+```{r}
+X_new <- 23:60
+data <- list(N = nrow(d), X = d$X, Y = d$Y, N_new = length(X_new), X_new = X_new)
+```
+
+モデルをコンパイルし、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model4412 <- stan_model('note_ahirubayes01-2.stan')
+```
+
+サンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model4412, data = data, seed = 1234)
+```
+
+サンプリング結果を確認すると、`parameters`ブロック、`transformed parameters`ブロック、`generated quantities`ブロックで指定されたパラメタの事後分布が得られている。
+
+```{r}
+print(fit, probs = c(0.025, 0.5, 0.975))
+```
+
+ここから予測分布を作成していくが、まずはデータがどのように保存されているのか確認する。信用区間を算出したければ`ms$y_new`を`ms$y_base_new`に読み替えればOK。
+
+```{r}
+ms <- rstan::extract(fit)
+str(ms$y_new)
+```
+
+予測区間を算出するために必要なのは`ms$y_new`であるが、`matrix`クラスで保存されている。先程の`a,b`はベクトルだったが、今回は`matrix`クラスで保存されている。これは23−60歳までのMCMCサンプルを計算しているためである。つまり`mcmcサンプルの長さ × forloopのループ回数`という形式で`matrix`が保存されていることを意味する。
+
+```{r}
+# mcmcサンプルの長さは20まで表示。全部の長さは4000
+ms$y_new[1:20,]
+```
+
+上記の通り、各年齢ごと(列として)にMCMCサンプルが得られている列ごとにパーセンタイルを計算すれば、信用区間を算出できる。転置まで含めて`purrr::map_dfr()`関数で書き直すことは可能ではあるが、`apply()`関数のほうが高速(たぶん)なので、書籍の通り`apply()`関数を使用する。
+
+```{r}
+# purrr::map_dfr(.x = ms$y_new, .f = function(x){quantile(x, probs = c(0.025, 0.25, 0.50, 0.75, 0.975))})
+qua <- apply(ms$y_new, 2, quantile, probs=c(0.025, 0.25, 0.50, 0.75, 0.975))
+d_est <- data.frame(X = X_new, t(qua), check.names = FALSE)
+d_est
+```
+
+あとはこのデータをもとに作図すれば予測区間つきの散布図を作ることができる。
+
+```{r}
+ggplot() +  
+  theme_bw(base_size = 15) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `2.5%`, ymax = `97.5%`), fill = 'black', alpha = 1/6) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `25%` , ymax = `75%`), fill = 'black', alpha = 2/6) +
+  geom_line(data = d_est, aes(x = X, y = `50%`), size = 1) +
+  geom_point(data = d,     aes(x = X, y = Y), shape = 1, size = 3) +
+  coord_cartesian(xlim = c(22, 61), ylim = c(200, 1400)) +
+  scale_y_continuous(breaks = seq(from = 200, to = 1400, by = 400)) +
+  labs(y = 'Y', title = 'Prediction intervals')
+```
+
+## 参考文献および参考資料
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+- [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)
