@@ -1,0 +1,485 @@
+---
+title: "StanとRでベイズ統計モデリング08"
+pagetitle: "StanとRでベイズ統計モデリング08"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+今回は第8章「階層モデル」のチャプターを写経していく。
+
+## 8.2 階層モデルの導入
+
+この章で使用するデータの説明しておく。4業界$GID$の30企業$KID$の年齢$X-23$、年収$Y$が記録されている300人のデータを使用する。$X$から23が引かれているのは解釈がしやすくするため。
+
+```{r}
+options(max.print = 999999)
+library(dplyr)
+library(ggplot2)
+library(rstan)
+
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap08/input/data-salary-3.txt')
+head(d, 10)
+```
+
+
+## 8.2.1 解析の目的とデータの分布の確認
+
+ここでも分析の問題は、年功序列で賃金は上昇する傾向にあるが、業界や会社によって「新卒時点の基本年収」や「年齢の伴う昇給額は異なる」と考えられるため、その会社による業界差、会社差を検討したい。
+
+可視化してみると、どの業界でも年齢に伴う昇給は確認できるが、新卒時点での基本年収や昇給額は業界によって異なることがわかる。
+
+```{r}
+d$GID <- as.factor(d$GID)
+res_lm <- lm(Y ~ X, data = d)
+coef <- coef(res_lm)
+ggplot(d, aes(X, Y, shape = GID)) +
+  theme_bw(base_size = 15) +
+  geom_abline(intercept = coef[1], slope = coef[2], linewidth = 2, alpha = 0.3) +
+  facet_wrap(~ GID) +
+  geom_line(stat = 'smooth', method = 'lm', se = FALSE) +
+  geom_point(size = 3, alpha = 0.8) +
+  scale_shape_manual(values = c(16, 2, 4)) +
+  labs(x = 'X', y = 'Y')
+```
+
+業界ごと、企業ごとで回帰係数$a,b$を推定したものを集めてヒストグラムにしたものが下記のグラフ。$a$に関しては業界3のばらつきは小さいが、業界1,2のばらつきが大きい。このグラフから業界3は他の業界1,2よりも平均は高そうで、ばらつきも小さいことが想定される。
+
+```{r}
+KIDGID <- unique(d[,3:4])
+N <- nrow(d)
+K <- 30
+G <- 3
+coefs <- as.data.frame(t(sapply(1:K, function(k) {
+  d_sub <- subset(d, KID == k)
+  coef(lm(Y ~ X, data = d_sub))
+})))
+colnames(coefs) <- c('a', 'b')
+d_plot <- data.frame(coefs, KIDGID)
+d_plot$GID_label <- factor(paste0('GID  =  ', d_plot$GID), levels  =  paste0('GID  =  ', 1:3))
+
+bw <- diff(range(d_plot$a))/20
+ggplot(data = d_plot, aes(x = a)) +
+  theme_bw(base_size = 15) +
+  facet_wrap(~GID_label, nrow = 3) +
+  geom_histogram(binwidth = bw, color = 'black', fill = 'white') +
+  geom_density(aes(y = after_stat(count)*bw), alpha = 0.2, color = 'black', fill = 'gray20') +
+  geom_rug(sides = 'b') +
+  labs(x = 'a', y = 'count')
+```
+
+$b$に関しても業界3のばらつきは小さいが、業界1,2のばらつきが大きい。このグラフから業界3は他の業界1,2よりも昇給額の平均は低く、ばらつきも小さいことが想定される。
+
+```{r}
+bw <- diff(range(d_plot$b))/20
+ggplot(data = d_plot, aes(x = b)) +
+  theme_bw(base_size = 15) +
+  facet_wrap(~GID_label, nrow = 3) +
+  geom_histogram(binwidth = bw, color = 'black', fill = 'white') +
+  geom_density(aes(y = after_stat(count)*bw), alpha = 0.2, color = 'black', fill = 'gray20') +
+  geom_rug(sides = 'b') +
+  labs(x = 'b', y = 'count')
+```
+
+## 8.2.2 メカニズムの想像ーその1
+
+ここで想定しているモデルは「新卒年収」と「年収昇給額」の平均は業界ごとに異なるが、「新卒年収」と「年収昇給額」の会社差のばらつきは共通としている。
+
+$a$について考えることで、モデルへの理解を深める。各業界の$a_{業界平均}[g]$を「すべての業界で共通の平均
+」と「業界差」に分けて考える。つまり$a_{業界平均}[g] = a_{全体平均} + a_{業界差}[g]$であり、$a_{業界差}[g]$には平均0、標準偏差$\sigma_{ag}$の正規分布から生成されると考える。さらに$\sigma_{ag}$には無情報事前分布を設定する。
+
+そして、各社の$a[k]$は会社の属する業界$a_{業界平均}[g]$を平均とする正規分布から生成されると考える。
+
+## 8.2.3 モデル式の記述ーその1
+
+ここで想定しているモデルは下記の通り。
+
+<div class="tbox">
+<th3>モデル8-5</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &\sim& Normal(a[KID[n]] + b[KID[n]] X[n], \sigma_{Y}) \\
+a_{業界平均}[g] &\sim& Normal(a_{全体平均}, \sigma_{ag}) \\
+b_{業界平均}[g] &\sim& Normal(b_{全体平均}, \sigma_{bg}) \\
+a[k] &\sim& Normal(a_{業界平均}[K2G[k]], \sigma_{a}) \\
+b[k] &\sim& Normal(b_{業界平均}[K2G[k]], \sigma_{b}) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+データから$\sigma_{Y}, a_{業界平均}[g], a_{全体平均}, \sigma_{ag}, b_{業界平均}[g], b_{全体平均}, \sigma_{bg}, a[k], \sigma_{a}, b[k], \sigma_{b}$を推定する。
+
+```{r}
+N <- nrow(d)
+K <- 30
+G <- 3
+K2G <- unique(d[ , c('KID','GID')])$GID
+data <- list(N = N, G = G, K = K, X = d$X, Y = d$Y, KID = d$KID, K2G = as.numeric(K2G))
+data
+```
+
+`K2G`の部分が直感的にわかりにくいかもしれないが、この変数は階層モデルにおける「企業と業界」をつなぐ調整役として機能する。
+
+```{r}
+# K2G <- unique(d[ , c('KID','GID')])$GID
+unique(d[ , c('KID','GID')])
+```
+
+## 8.2.4 Stanで実装ーその1
+
+Stanファイルは下記の通り。
+
+```
+data {
+  int N;
+  int G;
+  int K;
+  real X[N];
+  real Y[N];
+  int<lower=1, upper=K> KID[N];
+  int<lower=1, upper=G> K2G[K];
+}
+
+parameters {
+  real a0;
+  real b0;
+  real a1[G];
+  real b1[G];
+  real a[K];
+  real b[K];
+  real<lower=0> s_ag;
+  real<lower=0> s_bg;
+  real<lower=0> s_a;
+  real<lower=0> s_b;
+  real<lower=0> s_Y;
+}
+
+model {
+  s_ag ~ normal(0, 1e5);
+  s_bg ~ normal(0, 1e5);
+  s_a  ~ normal(0, 1e5);
+  s_b  ~ normal(0, 1e5);
+  s_Y  ~ normal(0, 1e5);
+  
+  for (g in 1:G) {
+    a1[g] ~ normal(a0, s_ag);
+    b1[g] ~ normal(b0, s_bg);
+  }
+
+  for (k in 1:K) {
+    a[k] ~ normal(a1[K2G[k]], s_a);
+    b[k] ~ normal(b1[K2G[k]], s_b);
+  }
+
+  for (n in 1:N)
+    Y[n] ~ normal(a[KID[n]] + b[KID[n]]*X[n], s_Y);
+}
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model85 <- stan_model('note_ahirubayes08-85.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model85, data = data, seed = 1989)
+```
+
+推定結果はこちら。`a1[g]`と`a[k]`についてまとめておく。
+
+- 業界ごとの平均切片`a1[g])`:
+
+`a1[g]`の事後平均は、各業界ごとに異なる年収のベースラインを示す。例えば、業界1(`g=1`)の平均切片は360.3で、業界2(`g=2`)は299.9、これは業界ごとに異なる年収の平均値が存在し、業界が異なると切片も異なることを示す。
+
+- 業界ごとの切片のばらつき`s_ag`:
+
+`s_ag`は業界ごとの切片の標準偏差を表す。この値が大きいほど、業界間で切片にばらつきがあり、業界ごとに異なる企業があることを示唆する。つまり、業界内でも企業による異なる年収の傾向が存在する可能性がある。
+
+
+- 企業ごとの切片`a[k]`:
+
+`a[k]`は企業ごとに異なる年収のベースラインを示す。企業ごとに切片が異なるため、同じ年齢でも異なる企業では異なる年収が期待される。
+
+- 企業ごとの切片のばらつき`s_a`:
+
+`s_a`は企業ごとの切片の標準偏差す。この値が大きいほど、企業間で切片にばらつきがあり、企業ごとに異なる年収の傾向が存在することを示唆する。
+
+```{r}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+前回同様、Stanの挙動を確認しておく。前回同様`a1[g],a[k]`に焦点を当てる。
+
+まず、この部分では「業界の全体平均」と「業界差」によって、各企業が属する業界の情報が作られる。
+
+```
+// Gは1-3
+for (g in 1:G) {
+  a1[g] ~ normal(a0, s_ag);
+  b1[g] ~ normal(b0, s_bg);
+}
+// image
+a1[1] -> A1g
+a1[2] -> A2g
+a1[3] -> A3g
+```
+
+次に、この部分では「各企業が属する業界の平均」と「企業差」によって各企業の情報が作られる。
+
+```
+// Kは1-30
+// K2G
+// [1] 1 1 1 1 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 3 3 3 3 3 3 3 3
+for (k in 1:K) {
+  a[k] ~ normal(a1[K2G[k]], s_a);
+  b[k] ~ normal(b1[K2G[k]], s_b);
+}
+
+// image: a[k] ~ normal(a1[K2G[k]], s_a)
+index01: K2G[ 1] -> 1 -> a1[1] -> A1g -> a[ 1] ~ normal(A1g, s_a) -> A01 
+index05: K2G[ 5] -> 2 -> a1[2] -> A2g -> a[ 5] ~ normal(A2g, s_a) -> A05
+index15: K2G[15] -> 2 -> a1[2] -> A2g -> a[15] ~ normal(A2g, s_a) -> A15
+index23: K2G[23] -> 3 -> a1[3] -> A3g -> a[23] ~ normal(A3g, s_a) -> A23
+index30: K2G[30] -> 3 -> a1[3] -> A3g -> a[30] ~ normal(A3g, s_a) -> A30
+```
+
+さらに、さきほどの情報を利用して、下記のイメージで$Y$が生成される。
+
+```
+// Nは1-300
+// KID
+// [1] 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 2 2 3 3 3 3 3 3 3 3 3 3 4 4 4
+for (n in 1:N){}
+    Y[n] ~ normal(a[KID[n]] + b[KID[n]]*X[n], s_Y);
+}
+
+            X    Y KID GID
+index1  :   7  457   1   1 | KID[  1] ->  1 -> a[ 1] -> A01 -> Y[  1] ~ normal(A01 + B01*X[  1], s_Y) 
+index40 :  22  728   4   1 | KID[ 40] ->  4 -> a[ 4] -> A04 -> Y[ 40] ~ normal(A04 + B04*X[040], s_Y)  
+index41 :  20  927   5   2 | KID[ 41] ->  5 -> a[ 5] -> A05 -> Y[ 41] ~ normal(A05 + B05*X[041], s_Y)  
+index250:  28 1070  22   2 | KID[250] -> 22 -> a[22] -> A22 -> Y[250] ~ normal(A22 + B22*X[250], s_Y)  
+index251:  25  824  23   3 | KID[251] -> 23 -> a[23] -> A23 -> Y[251] ~ normal(A23 + B23*X[251], s_Y)  
+index300:  20  727  30   3 | KID[300] -> 30 -> a[30] -> A30 -> Y[300] ~ normal(A30 + B30*X[300], s_Y)  
+```
+
+## 8.2.5 メカニズムの想像ーその2
+
+さきほどのモデルは、「新卒年収」と「年収昇給額」の平均は業界ごとに異なるが、「新卒年収」と「年収昇給額」の会社差のばらつきは共通としていた。ここでは、「新卒年収」と「年収昇給額」の会社差のばらつきは業界ごとに異なると仮定する。
+
+## 8.2.6 モデル式の記述ーその2
+
+ここで想定しているモデルは下記の通り。
+
+<div class="tbox">
+<th3>モデル8-6</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &\sim& Normal(a[KID[n]] + b[KID[n]] X[n], \sigma_{Y}[GID[n]]) \\
+a_{業界平均}[g] &\sim& Normal(a_{全体平均}, \sigma_{ag}) \\
+b_{業界平均}[g] &\sim& Normal(b_{全体平均}, \sigma_{bg}) \\
+a[k] &\sim& Normal(a_{業界平均}[K2G[k]], \sigma_{a}[K2G[n]]) \\
+b[k] &\sim& Normal(b_{業界平均}[K2G[k]], \sigma_{b}[K2G[n]]) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+## 8.2.7 Stanで実装ーその2
+
+先程のモデルとの違いは、`s_a[K2G[k]], s_b[K2G[k]]`の部分に現れている。
+
+```
+data {
+  int N;
+  int G;
+  int K;
+  real X[N];
+  real Y[N];
+  int<lower=1, upper=K> KID[N];
+  int<lower=1, upper=G> K2G[K];
+  int<lower=1, upper=G> GID[N];
+}
+
+parameters {
+  real a0;
+  real b0;
+  real a1[G];
+  real b1[G];
+  real a[K];
+  real b[K];
+  real<lower=0> s_ag;
+  real<lower=0> s_bg;
+  real<lower=0> s_a[G];
+  real<lower=0> s_b[G];
+  real<lower=0> s_Y[G];
+}
+
+model {
+  s_ag ~ normal(0, 1e5);
+  s_bg ~ normal(0, 1e5);
+
+  for (g in 1:G) {
+    a1[g] ~ normal(a0, s_ag);
+    b1[g] ~ normal(b0, s_bg);
+  }
+
+  for (k in 1:K) {
+    a[k] ~ normal(a1[K2G[k]], s_a[K2G[k]]);
+    b[k] ~ normal(b1[K2G[k]], s_b[K2G[k]]);
+  }
+
+  for (n in 1:N)
+    Y[n] ~ normal(a[KID[n]] + b[KID[n]]*X[n], s_Y[GID[n]]);
+}
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model86 <- stan_model('note_ahirubayes08-86.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+K2G <- unique(d[ , c('KID','GID')])$GID
+data <- list(N = N, G = G, K = K, X = d$X, Y = d$Y, KID = d$KID, K2G = as.numeric(K2G), GID = as.numeric(d$GID))
+fit <- sampling(object = model86, data = data, seed = 1989)
+```
+
+```{r}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+
+書籍のモデルでは、事前分布が省略されていたので、省略しないバージョンもメモしておく。結果は似たような結果となる。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model86_ <- stan_model('note_ahirubayes08-86_.stan')
+fit <- sampling(object = model86_, data = data, seed = 1989)
+```
+
+結果はこちら。
+
+```{r}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+
+先程と異なる点は標準偏差の部分だけではあるが、こちらのモデルでも`a`に関して同様に挙動を確認しておく。
+
+```
+// 事前分布
+a0 ~ normal(0, 1e5);
+b0 ~ normal(0, 1e5);
+s_ag ~ normal(0, 1e5);
+s_bg ~ normal(0, 1e5);
+```
+
+この部分で、`a1[1],a1[2],a1[3],s_a[1],s_a[2],s_a[3]`を生成する。
+
+```
+// G:1-3
+  for (g in 1:G) {
+    a1[g] ~ normal(a0, s_ag);
+    b1[g] ~ normal(b0, s_bg);
+    s_a[g] ~ normal(0, 1e5);
+    s_b[g] ~ normal(0, 1e5);
+    s_Y[g] ~ normal(0, 1e5);
+  }
+
+// image
+a1[1] -> A1g
+a1[2] -> A2g
+a1[3] -> A3g
+s_a[1] -> SA1g
+s_a[2] -> SA2g
+s_a[3] -> SA3g
+s_Y[1] -> SY1g
+s_Y[2] -> SY2g
+s_Y[3] -> SY3g
+```
+
+次に、この部分では「各企業が属する業界の平均」と「企業差」によって各企業の情報が作られる。このとき、業界ごとに標準偏差も異なるので注意。
+
+```
+// K:1-30
+// K2G
+// [1] 1 1 1 1 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 3 3 3 3 3 3 3 3
+for (k in 1:K) {
+  a[k] ~ normal(a1[K2G[k]], s_a[K2G[k]]);
+  b[k] ~ normal(b1[K2G[k]], s_b[K2G[k]]);
+}
+// image: a[k] ~ normal(a1[K2G[k]], s_a[K2G[k]])
+index01: K2G[ 1] -> 1 -> a1[1],s_a[1] -> A1g,SA1g -> a[ 1] ~ normal(A1g, SA1g) -> A01 
+index05: K2G[ 5] -> 2 -> a1[2],s_a[2] -> A2g,SA2g -> a[ 5] ~ normal(A2g, SA2g) -> A05
+index15: K2G[15] -> 2 -> a1[2],s_a[2] -> A2g,SA2g -> a[15] ~ normal(A2g, SA2g) -> A15
+index23: K2G[23] -> 3 -> a1[3],s_a[3] -> A3g,SA3g -> a[23] ~ normal(A3g, SA3g) -> A23
+index30: K2G[30] -> 3 -> a1[3],s_a[3] -> A3g,SA3g -> a[30] ~ normal(A3g, SA3g) -> A30
+```
+
+さらに、さきほどの情報を利用して、下記のイメージで$Y$が生成される。
+
+```
+// N:1-300
+for (n in 1:N)
+  Y[n] ~ normal(a[KID[n]] + b[KID[n]]*X[n], s_Y[GID[n]]);
+}
+
+// Nは1-300
+// KID
+// [1] 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 2 2 3 3 3 3 3 3 3 3 3 3 4 4 4
+            X    Y KID GID
+index1  :   7  457   1   1 | KID[  1] ->  1 -> a[ 1] -> A01 -> Y[  1] ~ normal(A01 + B01*X[  1], SY1g) 
+index40 :  22  728   4   1 | KID[ 40] ->  4 -> a[ 4] -> A04 -> Y[ 40] ~ normal(A04 + B04*X[040], SY1g)  
+index41 :  20  927   5   2 | KID[ 41] ->  5 -> a[ 5] -> A05 -> Y[ 41] ~ normal(A05 + B05*X[041], SY2g)  
+index250:  28 1070  22   2 | KID[250] -> 22 -> a[22] -> A22 -> Y[250] ~ normal(A22 + B22*X[250], SY2g)  
+index251:  25  824  23   3 | KID[251] -> 23 -> a[23] -> A23 -> Y[251] ~ normal(A23 + B23*X[251], SY3g)  
+index300:  20  727  30   3 | KID[300] -> 30 -> a[30] -> A30 -> Y[300] ~ normal(A30 + B30*X[300], SY3g)  
+
+```
+
+## 参考文献および参考資料
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+- [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)

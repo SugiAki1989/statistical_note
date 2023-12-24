@@ -1,0 +1,354 @@
+---
+title: "StanとRでベイズ統計モデリング06"
+pagetitle: "StanとRでベイズ統計モデリング06"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+前回に引き続き少し寄り道をして、下記、京都大学大学院地球環境学堂のウェブサイトの教材をもとに事後分布への理解を深めておく。
+
+- [事後分布を理解する](https://www.eeso.ges.kyoto-u.ac.jp/emm/materials/bayesian/posterior)
+
+## コイン投げ
+
+1枚のコインを3回投げるとする。表は$1$、裏は$0$として、1回目の試行$y_{1} \in \{ 0, 1\}$とすると、$y = (y_{1},y_{2},y_{3}) = (1,1,0)$となる。表が2回、裏が1回出た時、このコインの表が出る確率はいくらか。このような問題を考える。
+
+今回の目的である事後分布についておさらいしておく。事後分布$p(\theta|y)$は確率変数$y$が観察された場合に、パラメータ$\theta$をが取りうる値の確率のこと。
+
+事後分布は尤度と事前分布に比例するので、尤度と事前分布もおさらいしておく。尤度$p(y|\theta)$は、パラメタ$\theta$を前提とした場合に確率変数$y$が生じる確率で、事前分布$p(\theta)$は、$y$は関係なくは，$\theta$の確率分布である。
+
+順を追って事後分布への理解を深める。
+
+## 尤度
+
+コイン投げの問題では尤度は下記の通り構成できる。
+
+$$
+\begin{eqnarray}
+p(y|\theta) &=& p(y_1|\theta) p(y_2|\theta) p(y_3|\theta) \\
+&=& \prod_{i=1}^3 p(y_i|\theta) \\
+&=& \prod_{i=1}^3 \theta^y_i(1-\theta)^{1-y_i} \\
+&=& \theta^{2}(1-\theta) \ ※y=(1,1,0)
+\end{eqnarray}
+$$
+$y$の考えられる事象は8通り。この8通りは$\theta$の確率に応じて変化する。例えば、$\theta=1/3$であれば、それぞれの確率は、全て表が1/27、2回表は３通すべて2/27、1回表も3通すべて4/27、全て裏は8/27となる。これを$\theta(0, 1/3, 1/2, 2/3 1)$の場合で確率を計算したものが下記の表である。
+
+```{r}
+options(width = 300)
+library(tidyverse)
+# y1 <- y2 <- y3 <- c(0, 1)
+# expand.grid(y1, y2, y3)
+coin <- tribble(
+  ~y1, ~y2, ~y3,
+    1,   1,   1,
+    1,   1,   0,
+    1,   0,   1,
+    0,   1,   1,
+    1,   0,   0,
+    0,   1,   0,
+    0,   0,   1,
+    0,   0,   0,
+)
+
+prod2 <- function(row, theta, prior) {
+  res <- prod(ifelse(row == 1, theta, 1-theta))
+  res <- res * prior
+  return(res)
+}
+
+`p(y|θ=0)`   <- apply(coin, 1, prod2, theta = 0  , prior = 1)
+`p(y|θ=1/3)` <- apply(coin, 1, prod2, theta = 1/3, prior = 1)
+`p(y|θ=1/2)` <- apply(coin, 1, prod2, theta = 1/2, prior = 1)
+`p(y|θ=2/3)` <- apply(coin, 1, prod2, theta = 2/3, prior = 1)
+`p(y|θ=1)`   <- apply(coin, 1, prod2, theta = 1  , prior = 1)
+
+tmp <- cbind(`p(y|θ=0)`, `p(y|θ=1/3)`, `p(y|θ=1/2)`, `p(y|θ=2/3)`, `p(y|θ=1)`)
+tmp <- t(tmp)
+nm <- paste0('y=(',coin$y1,',',coin$y2,',',coin$y3,')')
+colnames(tmp) <- nm
+round(tmp, 3)
+
+```
+
+
+## 最尤法
+
+さきほどの表にもある通り、表と裏が出る可能性は8通りあるけど、今回は表が2回$y=(1,1,0)$出ている。つまり、表が2回$y=(1,1,0)$出ていることを前提にすると、表が出る確率$\theta$はいくらだと考えるのが最も尤もらしいか。
+
+```{r}
+round(tmp, 3)
+```
+
+表が出る確率$\theta=0$と$\theta=1/3$だと、
+
+$$
+\begin{eqnarray}
+p(y&=&(1,1,0)|\theta=0)   = 0^{2} 0^{1} = 0 \\
+p(y&=&(1,1,0)|\theta=1/3) = (1/3)^{2} (2/3)^{1} = 2/27 = 0.074 \\
+\end{eqnarray}
+$$
+
+
+この表をもとに考えると、表が2回$y=(1,1,0)$出ているのはこの部分。
+
+```{r}
+tmp[,2]
+```
+
+このようにどんな$\theta$を仮定するかで尤度は変わってくる。尤度が最も高くなる$\theta=2/3$が最も尤もらしいと考える。これが最尤法、最尤推定法。
+
+```{r}
+mle <- function(theta) (theta)^2 * (1-theta)^1
+mle_res <- map_dbl(
+  .x = c(0, 1/3, 1/2, 2/3, 1), 
+  .f = function(x){mle(theta = x)})
+
+names(mle_res) <- rownames(tmp)
+mle_res
+```
+
+通常は尤度の対数を取ることで対数尤度に変換し、微分して傾きが0の値の$\theta$を最尤推定値とする。
+
+## 事前分布
+
+尤度$p(y|\theta)$をもとに考える最尤法は、表が出る確率$\theta$を前提とした場合に表がどう出るかという$y$の確率を計算する。考え方として、$\theta$はいくつもの値を取る可能性があり、$\theta$は結局のところはわからない一方で、$y$は実際に観測できているので、$y$の値をもとに$\theta$はどのような値になるかを考えるほうが素直(考え方の話)。つまり、この考え方が事後分布$p(\theta|y)$の考え方。
+
+事後分布$p(\theta|y)$は、尤度$p(y|\theta)$に事前分布$p(\theta)$に比例して計算できるが、その前に事前分布$p(\theta)$をおさらいする。事前分布$p(\theta)$は$\theta$のでやすさの分布で、コインの製造過程によっては下記の通りばらついてしまうとする。
+
+- $\theta=0$のコインを作れる場合が$p(\theta=0)=0.05$
+- $\theta=1/3$のコインを作れる場合が$p(\theta=1/3)=0.2$
+- $\theta=1/2$のコインを作れる場合が$p(\theta=1/2)=0.5$
+- $\theta=2/3$のコインを作れる場合が$p(\theta=2/3)=0.2$
+- $\theta=1$のコインを作れる場合が$p(\theta=1)=0.05$
+
+さきほどの尤度の表にこの事前確率を乗じることで同時分布$p(\theta,y)=p(y|\theta)p(\theta)$が計算できる。
+
+```{r}
+`p(θ=0,y)`   <- apply(coin, 1, prod2, theta = 0  , prior = 0.05)
+`p(θ=1/3,y)` <- apply(coin, 1, prod2, theta = 1/3, prior = 0.20)
+`p(θ=1/2,y)` <- apply(coin, 1, prod2, theta = 1/2, prior = 0.50)
+`p(θ=2/3,y)` <- apply(coin, 1, prod2, theta = 2/3, prior = 0.20)
+`p(θ=1,y)`   <- apply(coin, 1, prod2, theta = 1  , prior = 0.05)
+
+tmp2 <- cbind(`p(θ=0,y)`, `p(θ=1/3,y)`, `p(θ=1/2,y)`, `p(θ=2/3,y)`, `p(θ=1,y)`)
+tmp2 <- t(tmp2)
+nm2 <- paste0('p(θ,y=(',coin$y1,',',coin$y2,',',coin$y3,'))')
+colnames(tmp2) <- nm2
+round(tmp2, 3)
+```
+
+行の合計は事前分布$p(\theta)$となる。
+
+```{r}
+apply(tmp2,1,sum)
+```
+
+同時分布$p(\theta,y)$は、$\theta,y$も前提とせず、$\theta,y$の両方が事象として生じる可能性を評価した確率。そのため、表を合計すると、1になる。同時分布$p(\theta,y)$は同時分布$p(y,\theta)$でも同じ。
+
+```{r}
+sum(tmp2)
+```
+
+同時分布$p(\theta,y)=p(y|\theta)p(\theta), p(\theta,y)=p(\theta|y)p(y), $の関係性から、おなじみの乗法定理が導かれる。
+
+$$
+\begin{eqnarray}
+p(y|\theta)=\frac{p(\theta,y)}{p(\theta)} \\
+p(\theta|y)=\frac{p(\theta,y)}{p(y)} \\
+\end{eqnarray}
+$$
+
+## 事後分布
+
+事後分布は下記の通り定義される。$y$が生じたことがわかっていて、そのうちのどの$\theta$が生じたかという確率分布。
+
+$$
+p(\theta|y) = \frac{p(y|\theta) p(\theta)}{p(y)}
+$$
+
+ここでは$y=(1,1,0)$が起こった場合の$\theta$の事後分布$p(\theta|y)$を計算する。
+
+$$
+\begin{eqnarray}
+p(\theta|y=(1,1,0)) &=& \frac{p(\theta,y=(1,1,0))}{p(y=(1,1,0))} \\ 
+&=& \frac{p(y=(1,1,0)|\theta)p(\theta)}{p(y=(1,1,0))}
+\end{eqnarray}
+$$
+
+分母の部分は$y=(1,1,0)$が起こった場合の確率なので、列方向にすべて足し合わせることで計算できる。
+
+$$
+{\Pr(y=(1,1,0)}
+=\left(0\times 0.05\right)
++\left(\frac{2}{27}\times 0.2\right)
++\left(\frac{1}{8}\times 0.5\right)
++\left(\frac{4}{27}\times 0.2\right)
++\left(0\times 0.05\right)
+=0.106944
+$$
+
+つまり、同時分布の表から計算しても、もちろん同じ結果が得られる。
+
+```{r}
+# apply(tmp2,2,sum)[2]
+sum(tmp2[,2])
+```
+
+分母が計算できたので、各$\theta$の事後分布は下記の通り計算できる。
+
+$$
+\begin{eqnarray}
+p(\theta=0|y=(1,1,0)) &=& \frac{0 \times 0.05}{0.106944}=0 \\
+p(\theta=\frac{1}{3}|y=(1,1,0)) &=& \frac{\frac{2}{27}\times 0.20}{0.106944}=0.138528 \\
+p(\theta=\frac{1}{2}|y=(1,1,0)) &=& \frac{\frac{1}{8} \times 0.50}{0.106944}=0.584416 \\
+p(\theta=\frac{2}{3}|y=(1,1,0))&=& \frac{\frac{4}{27} \times 0.20}{0.106944}=0.277056 \\
+p(\theta=1|y=(1,1,0)) &=& \frac{0 \times 0.05}{0.106944}=0 \\
+\end{eqnarray}
+$$
+
+同時分布の表から計算しても、もちろん同じ結果が得られる。
+
+```{r}
+post <- tmp2[,2]/sum(tmp2[,2])
+names(post) <- gsub('y', 'y=(1,1,0)',　row.names(tmp2))
+post
+# sum(post)
+# [1] 1
+```
+
+ただ、見てわかる通り、分母には同じ値が入っているので、分布を求めるには不要と言える。この部分は比例$\propto$するという処理で置き換えればよい。合計は1にはならない。
+
+```{r}
+post2 <- tmp2[,2]
+names(post2) <- gsub('y', 'y=(1,1,0)',　row.names(tmp2))
+post2
+# sum(post2)
+# [1] 0.1069444
+```
+
+分母は全部同じ値なので、分布の形状は変わらない。この値のことを規格化定数と呼ぶ。これまでの話をまとめると、事後分布は下記の通り表現できる。
+
+$$
+\begin{eqnarray}
+p(\theta|y) = \frac{p(y|\theta) p(\theta)}{p(y)} \propto p(y|\theta) p(\theta)
+\end{eqnarray}
+$$
+
+## 事後分布の一般化
+
+これまでは$\theta$が離散の場合を考えていたので、連続の場合を考える。先程の離散分布の特徴をそのままで、$\theta=0.5$が出やすい山なりの分布をここからは使用する。分布関数として、下記の関数を考える。
+
+$$
+F(\le \theta) = 3\theta^{2} - 2\theta^{3}
+$$
+
+この分布関数の形状は下記の通り。
+
+```{r}
+F <- function(theta) 3*theta^2 -2*theta^3
+theta <- seq(0,1,0.01)
+plot(theta, F(theta), type = 'l')
+```
+
+分布関数$F$を微分すれば確率密度関数$f$が得られる。これを$\theta$の事前分布とする。
+
+$$
+\frac{df(\theta)}{\theta} = 6\theta - 6\theta^{2} = 6\theta(1-\theta)
+$$
+
+$\theta=0.5$が出やすい山なりの形状かどうか確認しておく。
+
+```{r}
+f <- function(theta) 6*theta*(1-theta)
+
+# integrate(f, 0, 1)
+# 1 with absolute error < 0.000000000000011
+plot(theta, f(theta), type = 'l')
+```
+
+連続の確率分布を使うので、事後分布は下記に書き換わる。
+
+$$
+\begin{eqnarray}
+p(\theta|y=(1,1,0)) &=& \frac{p(y|\theta)f(\theta)}{\int_{0}^{1}p(y|\theta)f(\theta)d\theta} \\ 
+&\propto& p(y|\theta)f(\theta) \\
+&=& \theta^{2} (1 - \theta) 6\theta(1-\theta) \\
+&\propto& \theta^{2} (1 - \theta) \theta(1-\theta) \\
+&\propto& \theta^{3} (1 - \theta)^{2}
+\end{eqnarray}
+$$
+
+比例させたままで計算しているので、累積分布は1にならないが、形状は同じ。
+
+```{r}
+postf <- function(theta) theta^3*(1-theta)^2
+postF <- function(theta) theta^6/6 - 2*theta^5/5 + theta^4/4
+
+plot(theta, postf(theta), type = 'l', col = 'royalblue')
+lines(theta, postF(theta), col = 'tomato')
+abline(v = 0.6, lty = 2)
+```
+
+規格化定数$\int_{0}^{1}p(y|\theta)f(\theta)d\theta = 0.1$を使えば1にできる。
+
+```{r}
+normalizef <- function(theta) 6*theta^3*(1-theta)^2
+normalize_res <- integrate(normalizef, 0, 1)
+normalize_res
+```
+
+規格化定数分の$0.1$、$6$を比例の都合で除外するために乗じた$1/6$、つまり$6/0.1=60$を乗じることで、確率分布を1にできる。
+
+$$
+\begin{eqnarray}
+p(\theta|y=(1,1,0)) &=& \frac{p(y|\theta)f(\theta)}{\int_{0}^{1}p(y|\theta)f(\theta)d\theta} \\ 
+&=& \frac{\theta^{2} (1 - \theta) 6\theta(1-\theta)}{0.1} \\
+&=& \theta^{2} (1 - \theta) \theta(1-\theta) \ 60 \\
+&=& 60 \ \theta^{3} (1 - \theta)^{2}  \\
+\end{eqnarray}
+$$
+
+
+```{r}
+plot(theta, postf(theta)*60, type = 'l', col = 'royalblue')
+lines(theta, postF(theta)*60, col = 'tomato')
+abline(v = 0.6, lty = 2)
+abline(h = 1, lty = 2)
+```
+## 参考文献および参考資料
+
+- [事後分布を理解する](https://www.eeso.ges.kyoto-u.ac.jp/emm/materials/bayesian/posterior)

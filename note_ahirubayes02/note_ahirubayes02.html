@@ -623,7 +623,7 @@ display: none;
 </div>
 
 <div class="update-right">
-<p>UPDATE: 2023-12-14 11:31:10.258357</p>
+<p>UPDATE: 2023-12-14 17:08:08.099969</p>
 </div>
 <div id="はじめに" class="section level1">
 <h1>はじめに</h1>
@@ -634,7 +634,7 @@ display: none;
 サポートページ</a></li>
 </ul>
 <p>基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。</p>
-<p>今回は第5章「StanとRStanをはじめよう」のチャプターを写経していく。</p>
+<p>今回は第5章「基本的な回帰とモデルのチェック」のチャプターの前半を写経していく。</p>
 <div id="モデル式の記述" class="section level2">
 <h2>5.1.4 モデル式の記述</h2>
 <p>第5章では重回帰分析から一般化線形モデルを扱う章となっている。まずは重回帰分析から前回同様、気になった点をメモしていく。この章でも複数の等価なモデル式が下記の通り、紹介されている。どのモデルであっても、データ1人ごとに平均<span class="math inline">\(\mu[n] = b_{1} + b_{2}A[n] +
@@ -912,7 +912,7 @@ quantitiesブロック平均mu[n]、標準偏差sigmaの正規分布からの乱
 ## noise[50]    0.09    0.00 0.01   0.07   0.08   0.09   0.10   0.12  2746    1
 ## lp__       120.89    0.03 1.39 117.41 120.19 121.17 121.93 122.70  1603    1
 ## 
-## Samples were drawn using NUTS(diag_e) at Thu Dec 14 11:31:36 2023.
+## Samples were drawn using NUTS(diag_e) at Thu Dec 14 17:08:34 2023.
 ## For each parameter, n_eff is a crude measure of effective sample size,
 ## and Rhat is the potential scale reduction factor on split chains (at 
 ## convergence, Rhat=1).</code></pre>
@@ -971,33 +971,33 @@ quantitiesブロック平均mu[n]、標準偏差sigmaの正規分布からの乱
 <span id="cb13-14"><a href="#cb13-14" tabindex="-1"></a>)</span></code></pre></div>
 <pre><code>## $head
 ## # A tibble: 10 × 3
-##    Parameter  value PersonID
-##    &lt;chr&gt;      &lt;dbl&gt;    &lt;dbl&gt;
-##  1 1         0.0830        1
-##  2 1         0.0317        1
-##  3 1         0.0521        1
-##  4 1         0.0552        1
-##  5 1         0.0473        1
-##  6 1         0.0791        1
-##  7 1         0.0553        1
-##  8 1         0.0343        1
-##  9 1         0.0374        1
-## 10 1         0.0438        1
+##    Parameter   value PersonID
+##    &lt;chr&gt;       &lt;dbl&gt;    &lt;dbl&gt;
+##  1 1         0.0451         1
+##  2 1         0.0465         1
+##  3 1         0.0569         1
+##  4 1         0.0548         1
+##  5 1         0.0317         1
+##  6 1         0.0417         1
+##  7 1         0.0494         1
+##  8 1         0.0440         1
+##  9 1         0.0928         1
+## 10 1         0.00902        1
 ## 
 ## $tail
 ## # A tibble: 10 × 3
 ##    Parameter  value PersonID
 ##    &lt;chr&gt;      &lt;dbl&gt;    &lt;dbl&gt;
-##  1 50        0.0644       50
-##  2 50        0.0995       50
-##  3 50        0.0932       50
-##  4 50        0.0957       50
-##  5 50        0.104        50
-##  6 50        0.109        50
-##  7 50        0.102        50
-##  8 50        0.0887       50
-##  9 50        0.0851       50
-## 10 50        0.0940       50</code></pre>
+##  1 50        0.0999       50
+##  2 50        0.0890       50
+##  3 50        0.109        50
+##  4 50        0.104        50
+##  5 50        0.0892       50
+##  6 50        0.0954       50
+##  7 50        0.0857       50
+##  8 50        0.0909       50
+##  9 50        0.110        50
+## 10 50        0.116        50</code></pre>
 <p>次は、図に書き足す分布のMAP推定値を計算する。列(=学生の予測分布)ごとにカーネル密度推定を行い、密度が最大となる<code>(x,y)</code>座標を計算している。</p>
 <div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a><span class="co"># MAP推定</span></span>
 <span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a>d_mode <span class="ot">&lt;-</span> <span class="fu">apply</span>(noise_mcmc, <span class="dv">2</span>, <span class="cf">function</span>(x) {</span>

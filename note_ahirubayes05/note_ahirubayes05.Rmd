@@ -1,0 +1,437 @@
+---
+title: "StanとRでベイズ統計モデリング05"
+pagetitle: "StanとRでベイズ統計モデリング05"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+今回は少し寄り道をして、緑本でおなじみ「[データ解析のための統計モデリング入門](https://kuboweb.github.io/-kubo/ce/IwanamiBook.html#ch10)」の第10章を写経していく。次回以降、「StanとRでベイズ統計モデリング」では階層ベイズモデルのチャプターに突入するので、「データ解析のための統計モデリング入門」の階層ベイズモデルも合わせて学習しておきたい。
+
+
+## 10.1 例題：個体差と生存種子数(個体差あり)
+
+ここで使用するデータは架空の植物の種子の生存確率のデータ。調査個体数は$n=100$で、各固体から8個の種子を取り出し、生存している種子数$y_{i}$を記録している。つまり、各個体$i$のデータは「8個の種子のうち$y_{i}$個がパラメタ$q_{i}$の確率で生存」しており、各個体は独立に生成されると仮定する。
+
+```{r}
+library(tidyverse)
+library(rstan)
+
+d <- read_csv('~/Desktop/data7a.csv')
+d
+```
+
+ただ、観測された個体(ブラック)ごとの個体差が大きく、過分散が発生し、二項分布(グレー)で近似できるはずが、そのようになってはいない。つまり、100個体を共通の生存確率$q=0.504$では、データを説明できない。
+
+```{r}
+# 二項分布のデータを生成
+binom_df <- tibble(x = 0:8, y = dbinom(0:8, 8, 0.504)*length(d$y))
+
+d %>% 
+  group_by(y) %>% 
+  count() %>% 
+  ggplot(., aes(y, n)) + 
+  geom_point(size = 3) + 
+  geom_path() + 
+  geom_point(data = binom_df, aes(x, y), col = 'gray', size = 3, alpha = 1/2) + 
+  geom_path(data = binom_df, aes(x, y), col = 'gray', alpha = 1/2) + 
+  labs(x = '生存種子数 y_i', y = '観測された個体数', title = '生存種子別の個体数') + 
+  theme_bw()
+```
+
+## 10.2 GLMMの階層ベイズモデル化
+
+種子生存確率$q$が全固体で共通していると仮定する統計モデルでは、今回のデータは説明できない。そのため、個体差を取り込んだGLMMなどで分析する必要が出てくる。まずはリンク関数と線形予測子のメカニズムを考える。リンク関数と線形予測子は$logit(q_{i})= \beta + r_{i}$で切片$\beta$は全固体共通のパラメタで、個体差は$r_{i}$で表す。個体差$r_{i}$は$r_{i} \sim Normal(0, s)$に従うとする。尤度は、
+
+$$
+p(\boldsymbol{Y}| \beta, r_{i}) = \prod_{i=1}^{n} \binom{8}{y_{i}} q_{i}^{y_{i}}(1 - q_{i})^{8-y_{i}}
+$$
+
+となり、切片$\beta$の事前分布は平均0、標準偏差100の無情報事前分布を仮定する。
+
+$$
+p(\beta) = \frac{1}{\sqrt{2\pi \cdot 100^2}} \exp \left[ \frac{-\beta^{2}}{2 \cdot 100^2}  \right] 
+$$
+
+そして、個体差$r_{i}$のパラメタの事前分布も必要になるので、平均0、標準偏差$s$の無情報事前分布を仮定する。標準偏差$s$は個体差を表す100個体の$r_{i}$がどのくらいばらつくのかをコントロールするパラメタとなる。
+
+$$
+p(r_{i}|s) = \frac{1}{\sqrt{2\pi s^2}} \exp \left[ \frac{-r^{2}}{2s^2}  \right] 
+$$
+さらに$s$の事前分布には、正であればよいので、無情報事前分布を仮定する。
+
+$$
+p(s) \sim unif(0, 10^4)
+$$
+
+このような形で個体差$r_{i}$の事前分布$p(r_{i}|s)$の形を決める$s$という未知パラメタがあって、さらに$s$についても事前分布$p(s)$が設定されている時、$p(r_{i}|s)$を階層事前分布と呼ぶ。$s$は超パラメタ、$p(s)$は超事前分布と呼ばれる。
+
+
+まとめると下記の図の様になる。画像は[こちら](https://www.google.com/url?sa=i&url=https%3A%2F%2Fkuboweb.github.io%2F-kubo%2Fstat%2F2017%2FEes%2Fa%2FHOkubostat2017a.pdf&psig=AOvVaw1sv4jGDuPbxozbqNLOkweI&ust=1702872449350000&source=images&cd=vfe&opi=89978449&ved=0CBUQtaYDahcKEwjo3ta2zJWDAxUAAAAAHQAAAAAQBg)よりお借りした。
+
+![](/Users/aki/Documents/statistical_note/note_ahirubayes05/階層ベイズモデル.png)
+
+最終的に事後分布は下記となり、これをMCMCでサンプリングすることで事後分布を推定する。ベイズモデルでは、推定したいパラメタは、事前分布とデータに基づいて事後分布が生成される。
+
+$$
+\overbrace{p(\beta, s, r_{i}|\boldsymbol{Y})}^{Posterior} \propto \overbrace{p(\boldsymbol{Y}| \beta, r_{i})}^{Likelihood} \overbrace{ p(\beta) \prod_{i=1}^{n}p(r_{i}|s)p(s)}^{Prior}
+$$
+
+## 10.3.1 階層ベイズモデルのMCMCサンプリング
+
+ここではパラメタの事後分布を推定する。まずはStanにわたすためにデータをリスト形式に変換する。
+
+```{r}
+data <- list(
+  N = nrow(d),
+  Y = d$y
+)
+```
+
+階層ベイズモデルのモデル式は下記の通り。
+
+```
+data {
+  int<lower=0> N;     // sample size
+  int<lower=0> Y[N];  // response variable
+}
+parameters {
+  real beta;
+  real r[N];
+  real<lower=0> sigma;
+}
+transformed parameters {
+  real q[N];
+
+  for (i in 1:N) {
+    q[i] <- inv_logit(beta + r[i]);
+  }
+}
+model {
+  for (i in 1:N) {
+		Y[i] ~ binomial(8, q[i]); // binom
+  }
+  
+  beta ~ normal(0, 100);      // non-informative prior
+  r ~ normal(0, sigma);       // hierarchical prior 
+  sigma ~ uniform(0, 10000);  // non-informative prior
+}
+generated quantities {
+  real y_pred[N];
+  for (i in 1:N)
+    y_pred[i] = binomial_rng(8, q[i]);
+}
+
+//
+// ベクトル化させたものでも同じはず
+// data {
+//   int<lower=0> N;
+//   int y[N];
+// }
+// 
+// parameters {
+//   real beta;           
+//   vector[N] r;      
+//   real<lower=0> sigma;  
+// }
+// 
+// model {
+//   y ~ binomial(8, inv_logit(beta + r));
+//   beta ~ normal(0, 100);
+//   r ~ normal(0, sigma);
+//   sigma ~ uniform(0, 10000);
+// }
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model1031 <- stan_model('note_ahirubayes05.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model1031, data = data, seed = 1989)
+```
+
+推定結果はこちら。各個体の個体差$r_{i}$や生存確率$q_{i}$の事後分布が推定されている。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 2)
+```
+## 10.3.2 階層ベイズモデルの事後分布推定と予測
+
+得られたMCMCサンプルを利用して、推定された事後分布を組み合わせて、生存種子ごとの個体数の分布を予測する。つまり、生存種子数$y$個の確率分布$p(y|...)$の計算を行う。
+
+生存種子数$y$の確率分布は、二項分布$p(y|\beta,r)$と正規分布$p(r|s)$の無限混合分布であり、下記の式で表現できると仮定する。$r$についての積分は、事後分布$p(r|s)$に従うような個体を無限個集めてきて、その平均を計算している、という意味合い。
+
+$$
+p(y|\beta,s) = \int p(y|\beta,r)p(r|s) dr
+$$
+
+生存種子数$y$の確率分布を決めるパラメタ$\beta,s$は、$\beta,s$ペアのすべてのMCMCサンプルごとに$p(\beta,s)$を評価し、$y$ごとにパーセンタイル点を示す。以下のコードは久保先生のサイトの[図 10.4: fig10_04.R](https://kuboweb.github.io/-kubo/stat/iwanamibook/fig/hbm/fig10_04.R)を参考にしている。
+
+```{r}
+n <- nrow(d)
+size <- 8 
+
+d_est <- rstan::extract(fit, permuted = TRUE)
+beta_vals <- d_est$beta
+sd_vals <- d_est$s
+
+logistic <- function(z){1 / (1 + exp(-z))}
+
+gaussian_binom <- function(r, y, size, beta, sd) {
+  dbinom(y, size, logistic(beta + r)) * dnorm(r, 0, sd)
+}
+
+# integrate_gaussian_binom <- function(y, size, beta, sd) {
+#   sapply(y, function(y) {
+#     integrate(
+#       f = gaussian_binom,
+#       lower = -sd * 10,
+#       upper = sd * 10,
+#       y = y,
+#       size = size,
+#       beta = beta,
+#       sd = sd
+#     )$value
+#   })
+# }
+# 
+# 
+# survive_prob <- sapply(
+#   X = 1:nrow(beta_vals), 
+#   FUN = function(i) {
+#     integrate_gaussian_binom(
+#       y = 0:size, 
+#       size = size,
+#       beta = beta_vals[i],
+#       sd = sd_vals[i]
+#     )
+#   }
+# )
+# 積分を計算する関数
+integrate_gaussian_binom <- function(y, size, beta, sd) {
+  map_dbl(
+    # yの各値(0:8)を渡して積分する
+    .x = y, 
+    .f = function(x) {
+      integrate(
+        f = gaussian_binom,
+        # 下記はrの積分範囲
+        lower = -sd * 10,
+        upper = sd * 10,
+        # 下記はgaussian_binom()への引数
+        y = x,
+        size = size,
+        beta = beta,
+        sd = sd
+      )$value
+    })
+}
+
+survive_prob <- map2_dfc(
+  .x = beta_vals,
+  .y = sd_vals,
+  .f = function(x, y) {
+    integrate_gaussian_binom(
+      y = 0:size,
+      size = size,
+      beta = x,
+      sd = y
+    )}
+)
+
+sample <- apply(
+  X = survive_prob, 
+  MARGIN = 2, 
+  FUN = function(prob) {
+    summary(factor(
+      sample(0:size, n, replace = TRUE, prob = prob), levels = 0:size
+            )
+    )
+})
+
+median <- tibble(survive = 0:size, number = apply(X = survive_prob * n, MARGIN = 1, FUN = median))
+obs <- tibble(survive = 0:size, number = summary(as.factor(d$y)))
+pred_val <- apply(sample, 1, quantile, probs = c(0.025, 0.975))
+pred_interval <- tibble(survive = c(0:size, size:0), number = c(pred_val[1, ], rev(pred_val[2, ])))
+
+ggplot() +
+  geom_line(data = median,　aes(x = survive, y = number)) +
+  geom_point(data = median, aes(x = survive, y = number), shape = 1, size = 2) +
+  geom_point(data = obs,    aes(x = survive, y = number), size = 2) +
+  geom_polygon(data = pred_interval, aes(x = survive, y = number), alpha = 0.2) +
+  labs(x = '生存種子数y', y = '個体数', title = '生存種子数yの予測分布p(y|β,r)') +
+  theme_bw(base_family = 'HiraKakuPro-W3')
+```
+
+## 作図の補足
+
+作図の部分について補足を書き足しておく。ここではデータサイズを100から10に変更し、MCMCサンプルも4000から3個に減らすことで、計算の過程を追いやすくしておく。[こちら](https://speakerdeck.com/yusumi/10-11zhang-detajie-xi-falsetamefalsetong-ji-moderinguru-men-shi-zhuang?slide=33)のスライドが詳しいので非常に参考になる。
+
+```{r}
+n <- 10
+size <- 8 
+
+# パラメタの事後分布を取り出す
+d_est <- rstan::extract(fit, permuted = TRUE)
+beta_vals <- d_est$beta[1:3]
+sd_vals <- d_est$s[1:3]
+```
+
+被積分関数を定義する。被積分関数は二項分布と個体差を表す正規分布の無限混合分布。
+
+$$
+p(y|\beta,s) = \int \overbrace{p(y|\beta,r)}^{二項分布} \overbrace{p(r|s)}^{個体差の事後分布} dr
+$$
+```{r}
+# ロジスティック関数
+logistic <- function(z){1 / (1 + exp(-z))}
+
+# 被積分関数は二項分布と正規分布の無限混合分布
+gaussian_binom <- function(r, y, size, beta, sd) {
+  dbinom(x = y, size = size, prob = logistic(beta + r)) * 
+    dnorm(x = r, mean = 0, sd = sd)
+}
+```
+
+
+さきほど定義した`gaussian_binom()`関数を使って、$y$の値ごとに、MCMCサンプリングされたパラメタの事後分布の値を使って、`integrate_gaussian_binom()`関数で積分する。
+
+```{r}
+# 積分を計算する関数
+integrate_gaussian_binom <- function(y, size, beta, sd) {
+  map_dbl(
+    # yの各値(0:size)を渡して積分する
+    .x = y, 
+    .f = function(x) {
+      integrate(
+        f = gaussian_binom,
+        # 下記はrの積分範囲
+        lower = -sd * 10,
+        upper = sd * 10,
+        # 下記はgaussian_binom()への引数
+        y = x,
+        size = size,
+        beta = beta,
+        sd = sd
+      )$value
+    })
+}
+```
+
+本来、MCMCサンプルは4000個あるので4000列できるが、ここでは3つに絞っているの3列しかない。
+
+```{r}
+# MCMCサンプリングされたパラメタの事後分布で積分
+survive_prob <- map2_dfc(
+  .x = beta_vals,
+  .y = sd_vals,
+  .f = function(x, y) {
+    integrate_gaussian_binom(
+      y = 0:size,
+      size = size,
+      beta = x,
+      sd = y
+    )}
+)
+# apply(survive_prob, 2, sum)
+# [1] 1 1 1
+survive_prob
+```
+
+計算している内容としては、まず$\beta,s$の事後分布から値を1つずつ取り出して、
+
+```{r}
+beta_vals[1];sd_vals[1]
+```
+
+定義済みの無限混合分布である`gaussian_binom`を$r$で積分することで。$y$の$[0,8]$に対する確率が返される。
+
+```{r}
+integrate_gaussian_binom(
+  y = 0:size, 
+  size = size, 
+  beta = beta_vals[1], 
+  sd = sd_vals[1]
+  )
+```
+
+積分して得た確率分布`survive_prob`を使って生存種子数をサンプリングする。1列ごとにパラメタの事後分布がセットになっている。再三にはなるが、本来、MCMCサンプルは4000個あるので4000列できるが、ここでは3つに絞っているの3列しかない。
+
+```{r}
+sample <- apply(
+  X = survive_prob, 
+  MARGIN = 2, 
+  FUN = function(prob) {
+    summary(factor(sample(0:size, n, replace = TRUE, prob = prob), levels = 0:size))
+})
+sample
+```
+
+あとは可視化に必要なデータを計算していく。`obs`は観測データを生存種子ごとにカウントしたもので、`median`は各事後分布のパラメタの組から生成した無限混合分布の生存種子$y$に対する確率を、生存種子ごとにパラメタの組から生成した確率を横断して、中央値を計算している。また、カウント数に対応させるよに$n$倍している。
+
+```{r}
+obs <- tibble(survive = 0:size, number = summary(as.factor(d$y)))
+median <- tibble(survive = 0:size, number = apply(X = survive_prob * n, MARGIN = 1, FUN = median))
+list(
+  obs = obs,
+  median = median
+)
+```
+
+予測区間を計算するために、各パラメタの組から生成された生存確率を使ってサンプリングされた生存種子の分布を横断して、生存種子ごとにパーセンタイルを計算している。
+
+```{r}
+pred_val <- apply(X = sample, MARGIN = 1, FUN = quantile, probs = c(0.025, 0.975))
+pred_interval <- tibble(
+  survive = c(0:size, size:0), 
+  number = c(pred_val[1, ], rev(pred_val[2, ])))
+```
+
+あとはこれを使って可視化すれば、さきほどの図が出来上がる。
+
+## 参考文献および参考資料
+
+- [【10, 11章】データ解析のための統計モデリング入門実装](https://speakerdeck.com/yusumi/10-11zhang-detajie-xi-falsetamefalsetong-ji-moderinguru-men-shi-zhuang?slide=33)
+- [データ解析のための統計モデリング入門](https://kuboweb.github.io/-kubo/ce/IwanamiBook.html#ch10)
+- [R: Stanをためす](https://ito-hi.blog.ss-blog.jp/2012-09-03)
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+- [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)

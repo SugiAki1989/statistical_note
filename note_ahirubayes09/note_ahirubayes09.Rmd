@@ -1,0 +1,397 @@
+---
+title: "StanとRでベイズ統計モデリング09"
+pagetitle: "StanとRでベイズ統計モデリング09"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+今回は第8章「階層モデル」のチャプターを写経していく。非線形モデルのところから。
+
+## 8.3 非線形モデルの階層モデル
+
+
+```{r}
+options(max.print = 999999)
+library(dplyr)
+library(ggplot2)
+library(rstan)
+
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap08/input/data-conc-2.txt')
+N <- nrow(d)
+Time <- c(1, 2, 4, 8, 12, 24)
+T_new <- 60
+Time_new <- seq(from = 0, to = 24, length = T_new)
+data <- list(N = N, T = length(Time), Time = Time, Y = d[,-1],
+             T_new = T_new, Time_new = Time_new)
+
+head(d, 10)
+```
+
+
+## 8.3.1 解析の目的とデータの分布の確認
+
+
+```{r}
+dd <- d %>% 
+  tidyr::pivot_longer(cols=-PersonID, values_to='Y') %>% 
+  mutate(Time=readr::parse_number(name)) %>% 
+  select(-name)
+
+ggplot(data=dd, aes(x=Time, y=Y)) +
+  theme_bw(base_size=18) +
+  facet_wrap(~PersonID) +
+  geom_line(linewidth=1) +
+  geom_point(size=3) +
+  labs(x='Time (hour)', y='Y') +
+  scale_x_continuous(breaks=c(0,6,12,24), limit=c(0,24)) +
+  scale_y_continuous(breaks=seq(0,40,10), limit=c(-3,37))
+```
+
+
+
+```{r}
+d_last <- d[ncol(d)]
+
+bw <- 3.0
+ggplot(data=d_last, aes(x=Time24)) +
+  theme_bw(base_size=18) +
+  geom_histogram(binwidth=bw, color='black', fill='white') +
+  geom_density(aes(y=after_stat(count)*bw), alpha=0.2, color='black', fill='gray20') +
+  geom_rug(sides='b') +
+  labs(x='Time24', y='count') +
+  xlim(range(density(d_last$Time24)$x))
+```
+
+## 8.3.2 メカニズムの想像
+
+
+
+## 8.3.3 モデル式の記述
+
+ここで想定しているモデルは下記の通り。
+
+<div class="tbox">
+<th3>モデル8-7</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n,t] &\sim& Normal(a[n]\{1 -\exp(-b[n] Time[t]) \}, \sigma_{Y}) \\
+log(a[n]) &\sim& Normal(a_{全体平均}, \sigma_{a}) \\
+log(b[n]) &\sim& Normal(b_{全体平均}, \sigma_{b})
+\end{eqnarray}
+$$
+</div>
+</div>
+
+データから$\sigma_{Y}, a[n], a_{全体平均}, \sigma_{a}, b[n], b_{全体平均}, \sigma_{b}$を推定する。
+
+## 8.3.4 Stanで実装
+
+Stanファイルは下記の通り。
+
+```
+data {
+  int N;
+  int T;
+  real Time[T];
+  real Y[N,T];
+  int T_new;
+  real Time_new[T_new];
+}
+
+parameters {
+  real a0;
+  real b0;
+  real log_a[N];
+  real log_b[N];
+  real<lower=0> s_a;
+  real<lower=0> s_b;
+  real<lower=0> s_Y;
+}
+
+transformed parameters {
+  real a[N];
+  real b[N];
+  for (n in 1:N) {
+    a[n] = exp(log_a[n]);
+    b[n] = exp(log_b[n]);
+  }
+}
+
+model {
+  for (n in 1:N) {
+    log_a[n] ~ normal(a0, s_a);
+    log_b[n] ~ normal(b0, s_b);
+  }
+  for (n in 1:N)
+    for (t in 1:T)
+      Y[n,t] ~ normal(a[n]*(1 - exp(-b[n]*Time[t])), s_Y);
+}
+
+generated quantities {
+  real y_new[N,T_new];
+  for (n in 1:N)
+    for (t in 1:T_new)
+      y_new[n,t] = normal_rng(a[n]*(1 - exp(-b[n]*Time_new[t])), s_Y);
+}
+
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model87 <- stan_model('note_ahirubayes09-87.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model87, data = data, seed = 1989)
+```
+
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+
+```{r}
+ms <- rstan::extract(fit)
+d_est <- data.frame()
+for (n in 1:nrow(d)) {
+  qua <- apply(ms$y_new[,n,], 2, quantile, prob  =  c(0.025, 0.5, 0.975))
+  d_est <- rbind(d_est, data.frame(PersonID = n, Time = Time_new, t(qua), check.names = FALSE))
+}
+
+d <- d %>% 
+  tidyr::pivot_longer(cols = -PersonID, values_to = 'Y') %>% 
+  mutate(Time = readr::parse_number(name)) %>% 
+  select(-name)
+
+ggplot(data = d_est, aes(x = Time, y = `50%`)) +
+  theme_bw(base_size = 18) +
+  facet_wrap(~PersonID) +
+  geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), fill = 'black', alpha = 1/5) +
+  geom_line(linewidth = 0.5) +
+  geom_point(data = d, aes(x = Time, y = Y), size = 3) +
+  labs(x = 'Time (hour)', y = 'Y') +
+  scale_x_continuous(breaks = Time, limit = c(0,24)) +
+  scale_y_continuous(breaks = seq(0,40,10), limit = c(-3,37))
+```
+
+
+```{r}
+
+```
+
+
+
+```{r}
+
+```
+
+## 8.4 ロジスティック回帰の階層モデル
+
+
+```{r}
+d1 <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap08/input/data-attendance-4-1.txt')
+d2 <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap08/input/data-attendance-4-2.txt')
+N <- 50
+C <- 10
+I <- nrow(d2)
+conv <- c(0, 0.2, 1)
+names(conv) <- c('A', 'B', 'C')
+data <- list(N = N, C = C, I = I, A = d1$A, Score = d1$Score/200,
+             PID = d2$PersonID, CID = d2$CourseID, W = conv[d2$Weather], Y = d2$Y)
+```
+
+## 8.4.2 メカニズムの想像
+
+
+
+## 8.4.3 モデル式の記述
+
+ここで想定しているモデルは下記の通り。
+
+<div class="tbox">
+<th3>モデル8-8</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+x[i] &=& b_{1} + x_{学生}[PersonID[i]] + x_{科目}[CourseID[i]] + x_{授業}[i] \\
+q[i] &=& inv\_logit(x[i]) \\
+Y[i] &\sim& Bernoulli(q[i]) \\
+x_{学生}[n] &=& b_{2}A[n] + b_{3}Score[n] + b_{学生差}[n] \\
+b_{学生差}[n] &\sim& Normal(0, \sigma_{P}) \\
+x_{科目}[c] &=& b_{科目差}[c] \\
+b_{科目差}[c] &\sim& Normal(0, \sigma_{C}) \\
+x_{授業}[i] &=& b_{4}Weather[i] \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+## 8.4.4 Stanで実装
+
+Stanファイルは下記の通り。
+
+```
+data {
+  int N;
+  int C;
+  int I;
+  int<lower=0, upper=1> A[N];
+  real<lower=0, upper=1> Score[N];
+  int<lower=1, upper=N> PID[I];
+  int<lower=1, upper=C> CID[I];
+  real<lower=0, upper=1> W[I];
+  int<lower=0, upper=1> Y[I];
+}
+
+parameters {
+  real b[4];
+  real b_P[N];
+  real b_C[C];
+  real<lower=0> s_P;
+  real<lower=0> s_C;
+}
+
+transformed parameters {
+  real x_P[N];
+  real x_C[C];
+  real x_J[I];
+  real x[I];
+  real q[I];
+  for (n in 1:N)
+    x_P[n] = b[2]*A[n] + b[3]*Score[n] + b_P[n];
+  for (c in 1:C)
+    x_C[c] = b_C[c];
+  for (i in 1:I) {
+    x_J[i] = b[4]*W[i];
+    x[i] = b[1] + x_P[PID[i]] + x_C[CID[i]] + x_J[i];
+    q[i] = inv_logit(x[i]);
+  }
+}
+
+model {
+  for (n in 1:N)
+    b_P[n] ~ normal(0, s_P);
+  for (c in 1:C)
+    b_C[c] ~ normal(0, s_C);
+  for (i in 1:I)
+    Y[i] ~ bernoulli(q[i]);
+}
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model88 <- stan_model('note_ahirubayes09-88.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model88, data = data, seed = 1989)
+```
+
+
+```{r, class.output="scroll-1000"}
+# fit <- stan(file = 'model/model8-8.stan', data = data,
+#             pars = c('b', 'b_P', 'b_C', 's_P', 's_C', 'q'), seed = 1234)
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1,
+      pars = c('b', 'b_P', 'b_C', 's_P', 's_C', 'q'))
+```
+
+
+```{r}
+ms <- rstan::extract(fit)
+N_mcmc <- length(ms$lp__)
+
+param_names <- c('mcmc', paste0('b', 1:4), 's_P', 's_C')
+d_mcmc <- data.frame(1:N_mcmc, ms$b, ms$s_P, ms$s_C)
+colnames(d_mcmc) <- param_names
+
+qua <- apply(d_mcmc[,-1], 2, quantile, probs = c(0.025, 0.25, 0.5, 0.75, 0.975))
+d_est <- data.frame(X = param_names[-1], t(qua), check.names = FALSE)
+
+d_long <- d_mcmc %>% 
+  tidyr::pivot_longer(cols = -mcmc, names_to = 'X') %>%
+  mutate(X  =  factor(X, levels = rev(param_names[-1])))
+
+ggplot() +
+  theme_bw(base_size = 18) +
+  coord_flip() +
+  geom_violin(data = d_long, aes(x = X, y = value), fill = 'white', color = 'grey80', linewidth = 2, alpha = 0.3, scale = 'width') +
+  geom_pointrange(data = d_est, aes(x = X, y = `50%`, ymin = `2.5%`, ymax = `97.5%`), size = 1) +
+  labs(x = 'parameter', y = 'value') +
+  scale_y_continuous(breaks = seq(from = -2, to = 6, by = 2))
+```
+
+
+```{r}
+d_mcmc <- data.frame(1:N_mcmc, ms$b_C)
+colnames(d_mcmc) <- c('mcmc', paste0('b_C', 1:10))
+d_mode <- apply(ms$b_C, 2, function(x) {
+  dens <- density(x)
+  mode_i <- which.max(dens$y)
+  mode_x <- dens$x[mode_i]
+  mode_y <- dens$y[mode_i]
+  c(mode_x, mode_y)
+}) %>% 
+  t() %>% 
+  data.frame() %>% 
+  magrittr::set_colnames(c('X', 'Y'))
+
+d_long <- d_mcmc %>% tidyr::pivot_longer(cols = -mcmc, names_to = 'X')
+
+ggplot() +
+  theme_bw(base_size = 18) +
+  geom_density(data = d_long, aes(x = value, group = X), fill = 'black', color = 'black', alpha = 0.15) +
+  geom_segment(data = d_mode, aes(x = X, xend = X, y = Y, yend = 0), color = 'black', linetype = 'dashed', alpha = 0.6) +
+  geom_rug(data = d_mode, aes(x = X), sides = 'b') +
+  labs(x = 'value', y = 'density') +
+  scale_x_continuous(breaks = seq(from = -4, to = 4, by = 2))
+```
+
+
+
+## 参考文献および参考資料
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+- [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)

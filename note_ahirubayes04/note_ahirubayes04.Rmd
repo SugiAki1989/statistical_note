@@ -1,0 +1,385 @@
+---
+title: "StanとRでベイズ統計モデリング04"
+pagetitle: "StanとRでベイズ統計モデリング04"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+今回は第7章「回帰分析の悩みどころ」のチャプターを写経していく。
+
+
+## 7.2 対数を取るか否か
+
+対数を取らない通常の回帰の例は書籍を見るとして、ここでは対数を取る場合のメモを残しておく。対数変換を取る場合のモデル式は下記の通り。
+
+$log_{10} (Area[n])$から$\mu$が決まり、$\mu$にノイズが乗って$log_{10} (Y[n])$が生成される。
+
+<div class="tbox">
+<th3>モデル7-2</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+\mu[n] &=& b_{1} + b_{2} log_{10} (Area[n]) \\
+log_{10} (Y[n]) &\sim& Normal(\mu[n], \sigma)
+\end{eqnarray}
+$$
+</div>
+</div>
+
+対数を取るので、Stanに渡すデータを対数変換(`Area = log10(d$X), Y = log10(d$Y), Area_new = log10(X_new)`)してから渡している。こちらで対数変換せずに渡すのであれば、Stanのモデル式で変換を施せば良いと思われる。
+
+```{r}
+options(max.print = 999999)
+library(dplyr)
+library(ggplot2)
+library(rstan)
+
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap07/input/data-rental.txt')
+colnames(d) <- c('Y', 'X')
+X_new <- seq(from = 10, to = 120, length = 50)
+data <- list(N = nrow(d), Area = log10(d$X), Y = log10(d$Y), N_new = 50, Area_new = log10(X_new))
+data
+```
+
+モデルは下記の通り。
+
+```
+data {
+  int N;
+  real Area[N];
+  real Y[N];
+  int N_new;
+  real Area_new[N_new];
+}
+
+parameters {
+  real b1;
+  real b2;
+  real<lower=0> sigma;
+}
+
+transformed parameters {
+  real mu[N];
+  for (n in 1:N){
+    mu[n] = b1 + b2*Area[n];
+  }
+}
+
+model {
+  for (n in 1:N)
+    Y[n] ~ normal(mu[n], sigma);
+}
+
+generated quantities {
+  real y_pred[N];
+  real y_new[N_new];
+  for (n in 1:N){
+    y_pred[n] = normal_rng(mu[n], sigma);
+  }
+  for (n in 1:N_new){
+    y_new[n] = normal_rng(b1 + b2*Area_new[n], sigma);
+  }
+}
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model72 <- stan_model('note_ahirubayes04.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model72, data = data, seed = 1989)
+```
+
+推定結果はこちら。`y_pred[n]`が1つの物件ごとの物件価格の予測分布で、`y_new[n]`が各エリアサイズごとの予測区間を計算したもの。
+
+```{r}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+まずは各エリアサイズごとの予測区間を可視化する。`ms$y_new`はMCMCサンプル4000行、エリアサイズの範囲(10-120)を50分割した50列が保存されている。`ms$y_new`の値は対数のままなので、元に戻すために`10^ms$y_new`としている。
+
+```{r}
+ms <- rstan::extract(fit)
+
+qua <- apply(10^ms$y_new, 2, quantile, probs = c(0.1, 0.25, 0.50, 0.75, 0.9))
+d_est <- data.frame(X = X_new, t(qua), check.names = FALSE)
+
+ggplot() +  
+  theme_bw(base_size = 18) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `10%`, ymax = `90%`), fill = 'black', alpha = 1/6) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `25%`, ymax = `75%`), fill = 'black', alpha = 2/6) +
+  geom_line(data = d_est, aes(x = X, y = `50%`), size = 1) +
+  geom_point(data = d, aes(x = X, y = Y), shape = 1, size = 2) +
+  coord_cartesian(xlim = c(11, 118), ylim = c(-50, 1900)) +
+  labs(x = 'Area', y = 'Y')
+```
+
+次は観測値と予測分布の関係に関する散布図。`ms$y_pred`の値は対数のままなので、元に戻すために`10^ms$y_pred`としている。
+
+```{r}
+qua <- apply(10^ms$y_pred, 2, quantile, probs = c(0.1, 0.25, 0.50, 0.75, 0.9))
+d_est <- data.frame(X = d$Y, t(qua), check.names = FALSE)
+
+ggplot(data = d_est, aes(x = X, y = `50%`)) +
+  theme_bw(base_size = 18) +
+  coord_fixed(ratio = 1, xlim = c(-50, 1900), ylim = c(-50, 1900)) +
+  geom_pointrange(aes(ymin = `10%`, ymax = `90%`), col = 'grey5', fill = 'grey95', shape = 21) +
+  geom_abline(aes(slope = 1, intercept = 0), col = 'black', alpha = 3/5, linetype = 'dashed') +
+  labs(x = 'Observed', y = 'Predicted')
+```
+
+これら2つの可視化から、物件価格がマイナスを取らないようになったことやモデルの当てはまりが改善されていることがわかる。ただ、書籍に書かれている通り、逆にエリアサイズが大きい部分での予測は悪くなっている。
+
+## 7.3 非線形な関係
+
+Stanは自由にモデリングできるのも特徴の一つ。下記の通り、非線形なモデリングも計算可能である。このモデルでは、1時点ごとの$Y[t]$は平均$a \{1 - exp(-b \ Time[t]) \}$、標準偏差$\sigma$から生成されると仮定している(はず)。(はず)と書いたのは、書籍では微分方程式の解として出てくるモデルであり、経過時間と血中濃度の関係を例として書かれている。経過時点ごとに血中濃度は独立として良いのだろうかという疑問があったため・・・このモデルは独立に生成されていると解釈するほうが誤りなのだろうか。そのあたりのよくわかってない。
+
+<div class="tbox">
+<th3>モデル7-4</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[t] &\sim& Normal(a \{1 - exp(-b \ Time[t]) \}, \sigma)
+\end{eqnarray}
+$$
+</div>
+</div>
+
+ここで$a$は$Y$の上限を決めるパラメタであり、$b$は$Y$の曲線の立ち上がりの強さを決めるパラメタ。増減表を書けばそうなっている(矢印は上に凸な矢印)。
+
+$$
+\begin{array}{c|ccccc}
+  x       & 0  & \cdots & + \infty \\ 
+  \hline 
+  f’(x)   & ab & \cdots & 0 \\ 
+  \hline
+   f’’(x) & -ab^{2}  & \cdots & 0 \\ 
+  \hline
+  f(x)    & 0 & \curvearrowright & a 
+\end{array}
+$$
+
+時点ごとの予測区間を算出するため、`Time_new`を定義している。
+
+```{r}
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap07/input/data-conc.txt')
+T_new <- 60
+Time_new <- seq(from = 0, to = 24, length = T_new)
+data <- list(T = nrow(d), Time = d$Time, Y = d$Y, T_new = T_new, Time_new = Time_new)
+data
+```
+
+モデル式は下記の通り。
+
+```
+data {
+  int T;
+  real Time[T];
+  real Y[T];
+  int T_new;
+  real Time_new[T_new];
+}
+
+parameters {
+  real<lower=0, upper=100> a; // 制限がないと収束しない
+  real<lower=0, upper=5> b;   // 制限がないと収束しない
+  real<lower=0> s_Y;
+}
+
+model {
+  for (t in 1:T){
+    Y[t] ~ normal(a*(1 - exp(-b*Time[t])), s_Y);
+  }
+}
+
+generated quantities {
+  real y_new[T_new];
+  
+  for (t in 1:T_new){
+    y_new[t] = normal_rng(a*(1 - exp(-b*Time_new[t])), s_Y);
+  }
+}
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model74 <- stan_model('note_ahirubayes041.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model74, data = data, seed = 1989)
+```
+
+推定結果はこちら。`y_new[n]`が1時点ごとの血中濃度の予測分布。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+予測分布の可視化を行いたいので、これまで通り、MCMCサンプルを取り出して、パーセンタイルを計算する。そのあとは可視化するだけ。
+
+```{r}
+ms <- rstan::extract(fit)
+qua <- apply(ms$y_new, 2, quantile, prob = c(0.025, 0.25, 0.5, 0.75, 0.975))
+d_est <- data.frame(X = Time_new, t(qua), check.names = FALSE)
+
+ggplot() +
+  theme_bw(base_size = 18) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `2.5%`, ymax = `97.5%`), fill = 'black', alpha = 1/6) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `25%`, ymax = `75%`), fill = 'black', alpha = 2/6) +
+  geom_line(data = d_est, aes(x = X, y = `50%`), size = 0.5) +
+  geom_point(data = d, aes(x = Time, y = Y), size = 3) +
+  labs(x = 'Time (hour)', y = 'Y') +
+  scale_x_continuous(breaks = d$Time, limit = c(0, 24)) +
+  ylim(-2.5, 16)
+```
+
+## 7.8 打ち切り
+
+打ち切りデータと聞くと「生存時間分析」が思い浮かぶが、センサーや機器、時間の上限によって打ち切られているデータを分析することもベイズでは融通が効く。
+
+書籍のデータにあるように検出限界値が25で、それより小さい場合は「不等号つき`<25`」で表されるようなデータがあったとする。このようなデータから平均と標準偏差を計算したい。不等号つきデータを削除して分析すれば、平均は過大評価され、不等号を外して25として扱えば、平均は過小評価される可能性がある。
+
+```{r}
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap07/input/data-protein.txt')
+d
+```
+
+
+モデルのメカニズムとして、平均$\mu$、標準偏差$\sigma$から潜在的な値$y$が生成されたと考える。閾値$L$とすると、$y>L$であれば、そのまま測定値$Y$となるが、$y<L$であれば測定値は$<L$となる。
+
+<div class="tbox">
+<th3>モデル7-7</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Not \ Censor \ \ \ \ Y[n] &\sim& Normal(\mu, \sigma_Y) \\
+Censor \ \ \ \ y[n] &\sim& Normal(\mu, \sigma_Y) \ \ \ \ \ ※y[n] < L
+\end{eqnarray}
+$$
+</div>
+</div>
+
+サンプリングするためには尤度が必要なので、尤度を考える。打ち切りがない場合は$Normal(Y|\mu,\sigma_Y)$でよく、打ち切りがある場合の尤度は$y < L$である確率$Prob[y < L]$である。尤度$Prob[y < L]$はよくよく見ると、これは分布関数なので、分布関数を尤度に利用すればよい。
+
+$$
+\begin{eqnarray}
+Prob[y < L] &=& \int_{-\infty}^{L} Normal(Y|\mu,\sigma_Y) \\
+&=& \int_{-\infty}^{L} \frac{1}{\sqrt{2 \pi} \sigma} exp \left[ -\frac{1}{2}\left(\frac{y - \mu}{\sigma} \right)^2\right] dy \\
+&=& \int_{-\infty}^{\frac{L-\mu}{\sigma}} \frac{1}{\sqrt{2 \pi}}exp \left[-\frac{z^{2}}{2} \right] dz \\
+&=& \Phi \left( \frac{L-\mu}{\sigma} \right)
+\end{eqnarray}
+$$
+
+2行目から3行目にかけて、積分変数を$y$から$z$に変更するために、下記の変数変換を行っている。積分範囲は$y$が$-\infty \rightarrow L$のとき、$z$は$-\infty \rightarrow \frac{L-\mu}{\sigma}$となる。
+
+$$
+\begin{eqnarray}
+z &=& \frac{y - \mu}{\sigma} \\
+dy &=& \sigma dz \\
+\end{eqnarray}
+$$
+
+モデル式は下記の通り。打切りがある場合は、対数を取って`target`に足し込めば良い。こうすることで、`__lp`に打ち切り分の対数尤度を加えることが可能になる。`normal_lcdf`は$log \Phi \left( \frac{L-\mu}{\sigma} \right)$を意味する。
+
+```
+data {
+  int N_obs;
+  int N_cens;
+  real Y_obs[N_obs];
+  real L;
+}
+
+parameters {
+  real mu;
+  real<lower=0> s_Y;
+}
+
+model {
+  for (n in 1:N_obs){
+    Y_obs[n] ~ normal(mu, s_Y);
+  }
+  for (n in 1:N_cens){
+    target += normal_lcdf(L | mu, s_Y);
+  }
+  // 上3行のかわりに下記だけでも良い。N_censの分だけnormal_lcdfを加える
+  // target += N_cens * normal_lcdf(L | mu, s_Y); 
+}
+
+```
+
+データは打ち切りがある場合とない場合に分けて渡せばよい。
+
+```{r}
+idx <- grep('<', d$Y)
+Y_obs <- as.numeric(d[-idx, ])
+L <- as.numeric(sub('<', '', d[idx,]))[1]
+data <- list(N_obs = length(Y_obs), N_cens = length(idx), Y_obs = Y_obs, L = L)
+data
+```
+
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model77 <- stan_model('note_ahirubayes042.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model77, data = data, seed = 1989)
+```
+
+推定結果はこちら。サンプルが少ないので、平均$\mu$の信用区間がマイナスとなっているが、今回は問題ない。
+
+```{r}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+## 参考文献および参考資料
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+- [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)

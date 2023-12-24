@@ -42,7 +42,6 @@ UPDATE: `r Sys.time()`
 ## 5.5章: HMC法(ハミルトニアンモンテカルロ法)
 ### リープフロッグ法
 
-
 ```{r}
 library(tidyverse)
 library(patchwork)
@@ -369,101 +368,11 @@ ggplot() +
 
 ```
 
-### HMC法の計算例(正規分布モデル)
 
-```{r}
-hmc <- function(N,ini,E,D,L=100,epsi=0.01){
-  leapfrog <- function(r,z2,e){
-    r2 <- r  - e * D(z2) / 2
-    z2 <- z2 + e * r2
-    r2 <- r2 - e * D(z2) / 2
-    list(r2=r2,z2=z2)
-  }
-  p<-length(ini)
-  z<- matrix(0,N,p); rr<- matrix(0,N,p);
-  z[1,] <- ini
-  co<- 1; #最初は採択
-  for(i in 2:N) {
-    r <- rr[i-1,]<-rnorm(p)
-    H <- sum(r^2)/2 + E(z[i-1,])
-    #e <- sample(c(-1,1), 1) * runif(1, 0.9, 1.1) * epsi
-    e <- epsi
-    z2 <- z[i-1,]
-    #LL <- sample(L:(L*2),1)
-    LL <- L
-    for(j in 1:LL) {
-      rz<-leapfrog(r,z2,e)
-      r <- rz$r2
-      z2<- rz$z2
-    }
-    dH <- H - (sum(r^2)/2 + E(z2));
-    if (runif(1) < exp(dH)) {
-      z[i,]<-z2; co<-co+1
-    }else{
-      z[i,]<-z[i-1,]
-    }
-  }
-  ac<-co/N
-  return(list(z=z,rr=rr,ac=ac))
-}
-
-#データの用意
-set.seed(1234)
-n<-100
-x<-round(rnorm(n,170,7.0))
-(m<-mean(x))
-(v<-sum((x-m)^2)/n)
-x
-n<-length(x)
-
-#対数尤度関数のマイナス
-lognorm<-function(theta){   mu<-theta[1];   sigma2<-theta[2];
-return(((n*log(sigma2)/(-2))-(sum((x-mu)^2)/(2*sigma2)))*(-1))}
-#対数尤度関数の微分のマイナス
-dmu    <-function(theta){   mu<-theta[1];sigma2<-theta[2];
-return(sum(x-mu)/sigma2)}
-dsigma2<-function(theta){   mu<-theta[1];sigma2<-theta[2];
-return((-1*n)/(2*sigma2) + sum((x-mu)^2)/(2*sigma2*sigma2))}
-Dlognorm<-function(theta){
-  return(c(dmu(theta),dsigma2(theta))*(-1))}
-
-#ハミルトニアンサンプリング（今までの計算と比べると時間がかかります）
-fit<-hmc(N=10000,ini=c(168,49),E=lognorm,D=Dlognorm,L=100,epsi=0.01)
-z<-fit$z
-r<-fit$rr
-print(fit$ac); #採用率
-zzz<-c(1001:10000)
-
-#MAP推定値　先頭に来るものが経験的なMAP
-rev(sort(table(round(z[zzz,1],1))))[1:5]
-rev(sort(table(round(z[zzz,2],1))))[1:5]
-hist(z[zzz,2],breaks = 50,freq =T)
-
-#EAP推定値、MED推定値
-summary(z[zzz,1])
-summary(z[zzz,2])
-
-#事後標準偏差
-sd(z[zzz,1])
-sd(z[zzz,2])
-
-
-#図5.9　正規分布モデルのトレースライン
-par(mfrow=c(2,1))
-plot(z[,1],type="l",cex.axis=1.5,xlab="t",ylab="μ",cex.lab=1.5)
-plot(z[,2],type="l",cex.axis=1.5,xlab="t",ylab="σ2",cex.lab=1.5)
-par(mfrow=c(1,1))
-#dev.copy2eps(file="z05tore09.eps",family='Japan1')
-
-
-#図5.10　平均と分散の10万個の同時分布
-plot(z,type="p",cex.axis=1.5,xlab="μ",ylab="σ2",cex.lab=1.5)
-#dev.copy2eps(file="z05norm10.eps",family='Japan1')
-```
 
 ## 5.7: 章末問題
 
-下記の方が回答を作成したので参考にさせていただく。
+下記の方が回答を作成したので参考にさせていただいた。
 
 -[基礎からのベイズ統計学 章末問題解答](https://github.com/yukirin/Bayesianstatistics)
 

@@ -1,0 +1,279 @@
+---
+title: "ハミルトニアンモンテカルロ法について"
+pagetitle: "ハミルトニアンモンテカルロ法について"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+
+## ハミルトニアンモンテカルロ法について
+
+ここではハミルトニアンモンテカルロ法について、下記の書籍に記載されている第5章の正規分布からサンプリングする事例を写経することで、ハミルトニアンモンテカルロ法についての理解を深める。
+
+- [基礎からのベイズ統計学―ハミルトニアンモンテカルロ法による実践的入門―](https://www.asakura.co.jp/detail.php?book_code=12212)
+
+第5章で使用されているコードや演習問題の解答は、[出版社のサイト](https://www.asakura.co.jp/user_data/contents/12212/1.zip)のファイルから確認できる。
+
+## 多次元のハミルトニアンモンテカルロ法
+
+$d$次元の母数ベクトル$\boldsymbol{\theta} = (\theta_{1},\theta_{2},...,\theta_{d})$を推定する場合を考える。
+
+母数が1つの場合、事後分布$f(\theta|\boldsymbol{x})$と独立な標準正規分布$f(p)$との同時分布は、
+
+$$
+f(\theta, p|\boldsymbol{x}) = f(\theta|\boldsymbol{x})f(p)
+$$
+と書ける。これの$d$次元への拡張を考える。事後分布は母数ベクトルを用いて$f(\boldsymbol{\theta}|\boldsymbol{x})$と表記する。独立な$d$個の標準正規乱数$\boldsymbol{p} = (p{1},p{2},...,p{d})$との同時事後分布は、
+
+$$
+f(\boldsymbol{\theta}, \boldsymbol{p}|\boldsymbol{x}) = f(\boldsymbol{\theta}|\boldsymbol{x})f(\boldsymbol{p}) = f(\boldsymbol{\theta}|\boldsymbol{x}) \prod_{i=1}^{d} f(p_{i})
+$$
+
+となる。また、独立な$d$個の標準正規分布のカーネルは下記となる。
+
+$$
+f(\boldsymbol{p}) \propto \exp \left[ \frac{-1}{2} \sum_{i=1}^{d} p_{i}^{2} \right]
+$$
+
+よって、ハミルトニアン$H(\boldsymbol{\theta}, \boldsymbol{p})$は
+
+$$
+H(\boldsymbol{\theta}, \boldsymbol{p}) = h(\boldsymbol{\theta}) + \frac{1}{2} \sum_{i=1}^{d} p_{i}^{2}
+$$
+
+となり、$h(\boldsymbol{\theta})$がカーネル部分の対数確率の符号を反転させたものであることは変わらないので、同時事後分布のカーネルは、
+
+$$
+f(\boldsymbol{\theta}, \boldsymbol{p}|\boldsymbol{x}) \propto \exp \left[ -H(\boldsymbol{\theta}, \boldsymbol{p})\right]
+$$
+となる。リープブロック法も多次元に拡張する必要があり、運動量$\boldsymbol{p}$、母数$\boldsymbol{\theta}$、微分$h^{'}(\boldsymbol{\theta}) = \left( \frac{dh(\boldsymbol{\theta})}{d\theta_{1}}, ..., \frac{dh(\boldsymbol{\theta})}{d\theta_{d}}\right)$であり、$\epsilon$、$\tau$、$L$はスカラのまま。補正係数は$r = \exp \left[ H(\boldsymbol{\theta}^{(t)}, \boldsymbol{p}^{(t)}) - H(\boldsymbol{\theta}^{(\alpha)}, \boldsymbol{p}^{(\alpha)}) \right]$となる。
+
+母数が$d$個のハミルトニアンモンテカルロ法のアルゴリズムは下記となる。
+
+<div class="tbox">
+<th3>母数が$d$個のハミルトニアンモンテカルロ法</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+1 &.& 初期値\boldsymbol{\theta}^{(1)}, \epsilon, L, T, バーンイン期間を決める(t=1) \\
+2 &.& 独立なd個の標準正規乱数\boldsymbol{p}^{(t)}を生成する \\
+3 &.& リープブロック法で遷移させ、候補点\boldsymbol{\theta}^{(\alpha)}, \boldsymbol{p}^{(\alpha)}を得る \\
+4 &.& 確率min(1, r)で受容(\boldsymbol{\theta}^{(t+1)} = \boldsymbol{\theta}^{(\alpha)})し、受容しない場合はその場にとどまる(\boldsymbol{\theta}^{(t+1)} = \boldsymbol{\theta}^{(t)}) \\
+5 &.& T=tなら終了。終了しない場合はt=t+1として手順2に戻る
+\end{eqnarray}
+$$
+</div>
+</div>
+
+### ハミルトニアンモンテカルロ法の計算例(正規分布モデル)
+
+$\boldsymbol{x} = (x_{1}, x_{2},...,x_{n})$が互いに独立に観測されたとする。正規分布の$\mu, \sigma^{2}$を推定するので、位相空間は4次元(母数が2つ$\mu, \sigma^{2}$、位置$q$、運動量$p$)となる。
+
+事後確率の対数は、
+
+$$
+\begin{eqnarray}
+f(\boldsymbol{x}|\mu, \sigma^2) &=& \prod_{i=1}^{n} f(x_{i}|\mu, \sigma^2) = \prod_{i=1}^{n} \frac{1}{\sqrt{2\pi}\sigma} \exp \left[ \frac{-1}{2 \sigma^{2}} (x_{i} - \mu)^{2} \right] \\
+\log f(\boldsymbol{x}|\mu, \sigma^2) 
+&=& \frac{-n}{2} log 2\pi + \frac{-n}{2} log \sigma^{2} + \frac{-1}{2\sigma^{2}}\sum_{i=1}^{n}  (x_{i} - \mu)^{2}  \\ 
+&=&  \frac{-n}{2} log \sigma^{2} + \frac{-1}{2\sigma^{2}} \sum_{i=1}^{n}  (x_{i} - \mu)^{2} + const
+\end{eqnarray}
+$$
+
+であり、母数$\mu, \sigma^{2}$の微分は、
+
+$$
+\begin{eqnarray}
+\frac{d}{d\mu} \log f(\boldsymbol{x}|\mu, \sigma^2) &=& \frac{1}{\sigma^{2}} \sum_{i=1}^{n}  (x_{i} - \mu) \\
+\frac{d}{d\sigma^2} \log f(\boldsymbol{x}|\mu, \sigma^2) &=& \frac{-n}{2\sigma^{2}} + \frac{1}{2\sigma^4}\sum_{i=1}^{n}  (x_{i} - \mu)^{2} \\
+\end{eqnarray}
+$$
+
+である。Rで先に関数として、定義しておく。このあとのハミルトニアンモンテカルロ法の`hmc()`関数で利用する`D`は、正規分布の尤度関数のlogをとり、マイナス1倍したもので、`E`は$\mu,\sigma^{2}$を微分してlogをとり、マイナス1倍して2つの関数を組み合わせたもの。
+
+```{r}
+# hmc(N = 10000, ini = c(168, 49),E = lognorm, D = Dlognorm, L = 100, eps = 0.01)
+#対数尤度関数のマイナス`* (-1)`
+lognorm <- function(theta) {
+  mu <- theta[1]
+  sigma2 <- theta[2]
+  res <- ((n*log(sigma2)/(-2)) - (sum((x-mu)^2)/(2*sigma2))) * (-1)
+  return(res)
+}
+
+#対数尤度関数の微分をまとめた関数のマイナス`* (-1)`
+Dlognorm <- function(theta) {
+  res <- c(dmu(theta), dsigma2(theta)) * (-1)
+  return(res)
+}
+
+#対数尤度関数の微分(mu)
+dmu <- function(theta) {
+  mu <- theta[1]
+  sigma2 <- theta[2]
+  res <- sum(x - mu) / sigma2
+  return(res)
+}
+
+#対数尤度関数の微分(sigma2)
+dsigma2 <- function(theta) {
+  mu <- theta[1]
+  sigma2 <- theta[2]
+  res <- (-1*n) / (2*sigma2) + sum((x - mu)^2) / (2*sigma2*sigma2)
+  return(res)
+}
+```
+
+リープフロッグ法もあわせて定義しておく。
+
+```{r}
+# hmc(N = 10000, ini = c(168, 49),E = lognorm, D = Dlognorm, L = 100, eps = 0.01)
+# leapfrog(r[i-1,], z[i-1,], D = D, eps = eps, L = L) 
+# p: 運動量
+# q: 座標
+# D: 運動量の勾配関数
+# eps: ステップの幅
+# L: 遷移回数
+# lf: leapfrog
+leapfrog <- function(p, q, D, L, eps) {
+  
+  lf_step <- function(p, q, eps){
+    p_new <- p  - eps * D(q) * 0.5
+    q_new <- q  + eps * p_new
+    p_new <- p_new - eps * D(q_new) * 0.5
+    list(p = p_new, q = q_new) 
+  }
+  
+  lf_result <- list(p = p, q = q)
+  
+  for(i in 1:L) {
+    lf_result <- lf_step(p = lf_result$p, q = lf_result$q, eps = eps)
+  }
+  return(lf_result)
+}
+```
+
+対数尤度関数のマイナス`E`は、サンプリングしたい確率分布の位置エネルギーに対応する関数で、計算効率性の観点から対数を取っている。確率の「高さ」を力学的空間の「低さ」に対応づけるためにマイナス1倍している。対数尤度関数の微分のマイナス`D`は、サンプリングしたい確率分布の勾配に対応する(対数、マイナス1倍処理も同様)。
+
+```{r}
+# N: サンプリング数
+# init: 母数ベクトルの初期値
+# E: 対数尤度関数のマイナス
+# D: 対数尤度関数の微分のマイナス
+# eps: ステップの幅
+# L: 遷移回数
+hmc <- function(N, init, E, D, L = 100, eps = 0.01){
+  
+  # ハミルトニアン
+  # E: 座標ベクトルから位置エネルギーを算出する関数(hmcのEと同じ)
+  Hamiltonian <- function(p, q, E) {
+    # sum(p^2)/2: 運動エネルギー, E(q): 位置エネルギー
+    sum(p^2)/2 + E(q) 
+  }
+  
+  # 初期化
+  # 母数ベクトルの次元d、母数ベクトルq、運動量ベクトルp
+  d <- length(init) 
+  q <- matrix(0, N, d) 
+  p <- matrix(0, N, d) 
+  q[1, ] <- init
+  count <- 1 
+  
+  for(i in 2:N) { 
+    # 運動量pは独立な標準正規乱数
+    p[i-1, ] <- rnorm(d)
+    
+    # ハミルトニアン(移動前)
+    hamiltonian <- Hamiltonian(p = p[i-1,], q = q[i-1,], E = E)
+    # リープフロッグ法で遷移
+    lf_result <- leapfrog(p = p[i-1,], q = q[i-1,], D = D, L = L, eps = eps) 
+    # 運動量pと座標q`(移動後)
+    p_new <- lf_result$p 
+    q_new <- lf_result$q 
+    # ハミルトニアン(移動後)
+    hamiltonian_new <- Hamiltonian(p = p_new, q = q_new, E = E) 
+    
+    # 移動前後のハミルトニアンを比較
+    if (runif(1) < exp(hamiltonian - hamiltonian_new)) {
+      q[i, ] <- q_new
+      count <- count + 1
+    } else {
+      q[i, ] <- q[i-1, ] 
+    }
+  } 
+  result <- list(q = q, p = p, accept = count/N)
+  return(result)
+}
+```
+
+元となるデータを生成する。
+
+```{r}
+# データ mu = 99.21619, sigma2 = 25.22075
+set.seed(1234)
+n <- 100
+x <- rnorm(n, mean = 100, sd = sqrt(25))
+summary(x)
+```
+
+生成したデータと似たような平均と分散を推定できていることがわかる。
+
+```{r}
+#ハミルトニアンモンテカルロ法
+fit <- hmc(N = 10000, init = c(110,49), E = lognorm, D = Dlognorm)
+data <- data.frame('mu' = fit$q[ ,1], 'sigma2' = fit$q[ ,2])
+summary(data)
+```
+
+最後に同時分布と周辺分布を可視化しておく。
+
+```{r}
+library(ggplot2)
+library(patchwork)
+xy <- ggplot(data, aes(mu, sigma2)) + geom_point(alpha = 1/8)
+x  <- ggplot(data, aes(mu)) + geom_histogram(bins = 50)
+y  <- ggplot(data, aes(sigma2)) + geom_histogram(bins = 50) + coord_flip()
+# (x | plot_spacer()) / (xy | y)
+
+theme_marginal_x <- theme(axis.title.x = element_blank(), 
+                          axis.text.x = element_blank(),
+                          axis.ticks.x = element_blank())
+theme_marginal_y <- theme(axis.title.y = element_blank(), 
+                          axis.text.y = element_blank(), 
+                          axis.ticks.y = element_blank())
+
+wrap_plots(
+  x + coord_cartesian(xlim = c(96, 102)) + theme_marginal_x, 
+  plot_spacer(),
+  xy + coord_cartesian(xlim = c(96, 102), ylim = c(15, 40)), 
+  y + coord_flip(xlim = c(15, 40)) + theme_marginal_y,
+  nrow = 2,
+  widths = c(1, 0.5),
+  heights = c(0.5, 1)
+)
+```

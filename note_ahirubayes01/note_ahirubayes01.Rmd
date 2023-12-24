@@ -46,7 +46,7 @@ UPDATE: `r Sys.time()`
 コードが出てくるのは第4章からではあるが、第2章の予測分布で気になる部分があったのでメモを追加しておく。予測分布は下記の通り、確率モデルと事後分布を積分することで計算される。
 
 <div class="tbox">
-<th3>予測分布</th3>
+<th3>事後予測分布</th3>
 <div class="inner">
 $$
 \begin{eqnarray}
@@ -270,7 +270,7 @@ rnorm(5, c(1,10,100,1000,10000), 1)
 hist(d_mcmc$y50, breaks = 50, main = 'Posterior Predicted Distribution of Income at Age 50')
 ```
 
-実際はStan側からデータを受け取って予測区間となるMCMCサンプルを計算するではなく、Stan側で計算させることができる。先程説明した、計算したいパラメタとStanのモデル式が対応しているとはこのことである。
+実際はStan側からデータを受け取って予測区間となるMCMCサンプルを計算するではなく、Stan側で計算させることができる。先程説明した、計算したいパラメタとStanのモデル式が対応しているとはこのことである。事後予測分布については、ノート末尾でも補足する。
 
 まずはStanコードを作成する。別ファイルに記載しているコードを下記に転記している。
 
@@ -332,7 +332,7 @@ fit <- sampling(object = model4412, data = data, seed = 1234)
 
 サンプリング結果を確認すると、`parameters`ブロック、`transformed parameters`ブロック、`generated quantities`ブロックで指定されたパラメタの事後分布が得られている。
 
-```{r}
+```{r, class.output="scroll-1000"}
 print(fit, probs = c(0.025, 0.5, 0.975))
 ```
 
@@ -373,8 +373,86 @@ ggplot() +
   labs(y = 'Y', title = 'Prediction intervals')
 ```
 
+## 事前予測分布と事後予測分布
+
+事前予測分布(PRIOR predictive distribution)と事後予測分布(POSTERIOR predictive distribution)への理解を深める。事後予測分布は下記の通り定義される。
+
+
+<div class="tbox">
+<th3>事後予測分布</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+p_{pred}(y|Y) = \int p(y|\theta) p(\theta|Y) d\theta \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+事後予測分布は以下のようにサンプリングできる。
+
+- 1. 事後分布$p(\theta|Y)$からサンプルを抽出する
+- 2. $p(y|\theta)$を使ってサンプルを生成する
+
+
+```{r}
+n_samples <- 10000
+
+# binom
+n <- 10
+x <- 6
+
+# beta
+a <- 2
+b <- 2
+
+# Draw sample from the posterior
+posterior <- rbeta(n = n_samples, shape1 = x + a, shape2 = n - x + b)
+
+# Generate data based on the prior samples
+posterior_predictive <- rbinom(n_samples, size = n, prob = posterior)
+
+ggplot(data.frame(posterior_predictive), aes(x = posterior_predictive)) +
+  geom_histogram(binwidth = 1) + 
+  scale_x_continuous(breaks = c(0:n)) + 
+  labs(x = 'y', title = 'Posterior predictive distribution') +
+  theme_bw()
+```
+
+事前予測分布はデータの周辺分布(marginal distribution of data)とも呼ばれ、下記の通り定義される。
+
+<div class="tbox">
+<th3>事前予測分布</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+p(y) = \int p(\theta)p(y | \theta) d\theta
+\end{eqnarray}
+$$
+</div>
+</div>
+
+$p(y)$は、事前分布$p(\theta)$からサンプルを抽出し、このサンプルを用いて$p(y|\theta)$を生成することでシュミレートできる。
+
+```{r}
+a <- 2
+b <- 2
+
+# Draw from the prior
+prior_samples <- rbeta(n = n_samples, shape1 = a, shape2 = b)
+
+# Generate data based on the prior samples
+y <- rbinom(n_samples, size = 100, prob = prior_samples)
+
+ggplot() +
+  geom_histogram(data = data.frame(y), 
+                 aes(x = y), 
+                 binwidth = 1)
+```
+
 ## 参考文献および参考資料
 
 - [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
 - [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
 - [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)
+- [Working with samples](https://carpentries-incubator.github.io/statistical-probabilistic-programming-r/instructor/sampling.html)

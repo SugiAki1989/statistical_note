@@ -1,0 +1,467 @@
+---
+title: "StanとRでベイズ統計モデリング07"
+pagetitle: "StanとRでベイズ統計モデリング07"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+今回は第8章「階層モデル」のチャプターを写経していく。
+
+## 8.1 階層モデルの導入
+
+この章で使用するデータの説明しておく。大手企業４社$KID$の年齢$X-23$、年収$Y$が記録されている40人のデータを使用する。$X$から23が引かれているのは解釈がしやすくするため。
+
+```{r}
+options(max.print = 999999)
+library(dplyr)
+library(ggplot2)
+library(rstan)
+
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap08/input/data-salary-2.txt')
+d
+```
+
+ここでも分析の問題は、年功序列で賃金は上昇する傾向にあるが、会社によって「新卒時点の基本年収」や「年齢の伴う昇給額は異なる」と考えられるため、その会社によるグループ差を検討したい。
+
+## 8.1.2 グループ差を考えない場合
+
+グループ差を考えない場合は、これまで通り通常の回帰分析を行えばよく、下記のモデルを元にパラメタを推定する。
+
+<div class="tbox">
+<th3>モデル8-1</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &=& y_{base}[n] + \epsilon[n] \\
+y_{base} &=& a + bX[n] \\
+\epsilon[n] &\sim& Normal(0, \sigma_{Y})
+\end{eqnarray}
+$$
+</div>
+</div>
+
+4社にわたる40人で共通の直線式があり、そこに他人ごとに独立にノイズが加わって$Y$が生成される、と仮定している。モデル式は下記の通りにも書ける。
+
+$$
+\begin{eqnarray}
+Y[n] &\sim& Normal(a + bX[n], \sigma_{Y})
+\end{eqnarray}
+$$
+ただ、このデータを可視化してみるとわかるが、実態として、会社ごとに「新卒時点の基本年収」や「年齢の伴う昇給額は異なる」可能性が高く、このモデルはデータをあまり上手くは説明できていない。
+
+```{r}
+d$KID <- as.factor(d$KID)
+res_lm <- lm(Y ~ X, data = d)
+coef <- coef(res_lm)
+ggplot(d, aes(X, Y, shape = KID)) +
+  theme_bw(base_size = 15) +
+  geom_abline(intercept = coef[1], slope = coef[2], linewidth = 2, alpha = 0.3) +
+  facet_wrap(~ KID) +
+  geom_line(stat = 'smooth', method = 'lm', se = FALSE, color = 'black', linetype = '31') +
+  geom_point(size = 3) +
+  scale_shape_manual(values = c(16, 2, 4, 9)) +
+  labs(x = 'X', y = 'Y')
+```
+
+## 8.2.2 グループごとに切片と傾きを持つ場合
+
+会社ごとに「新卒時点の基本年収」や「年齢の伴う昇給額は異なる」可能性が高いのでモデルを改良する。つまり、会社ごとに$a,b$を推定すればよさそうに思える。会社の数を$K(1\sim4)$とすると、$a[1],a[2],a[3],a[4],b[1],b[2],b[3],b[4]$を推定する。
+
+モデルは下記の通り。このモデルでは、ノイズの大きさはすべて共通で、$KID=1$のデータで$a[1],b[1]$を推定し、$KID=2$のデータで$a[2],b[2]$を推定することを繰り返す。
+
+<div class="tbox">
+<th3>モデル8-2</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &\sim& Normal(a[KID[n]] + b[KID[n]]X[n], \sigma_{Y})
+\end{eqnarray}
+$$
+</div>
+</div>
+
+データを準備しておく。これ以降$KID$などグループを表現する変数の動かし方が重要なので、そのあたりを注意しておくと個人的にはモデルを理解しやすくなると思われる。
+
+```{r}
+N <- nrow(d)
+K <- 4
+data <- list(N = N, K = K, X = d$X, Y = d$Y, KID = as.numeric(d$KID))
+data
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model82 <- stan_model('note_ahirubayes07-82.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model82, data = data, seed = 1989)
+```
+
+推定結果を見ると、$a[1],a[2],a[3],a[4],b[1],b[2],b[3],b[4]$が推定されていることがわかる。ただ、$b[4]=-1.2$と推定されているが、年齢が上がると年収が下がることになるため、本来はありえない。このように推定されてしまうのは、データのサンプルサイズが小さいため。$KID=4$はサンプルサイズが3しか無いため、データに対して素直に推定すると、このような推定をしてしまう。これでは分析したい目的とは異なるので、さらにモデルを改良する必要がある。また、会社ごとの推定値は得られたものの、$a,b$に関する仮定がないので、会社による差はまだわからないままであり、このデータに含まれていない会社の切片と傾きについては答えることができない。
+
+```{r}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+次に進む前にモデルの挙動を確認しておく。下記のStanモデルの通り、$KID=1$のデータで$a[1],b[1]$を推定し、$KID=2$のデータで$a[2],b[2]$を推定することを繰り返したわけではあるが、Stanではどのようにデータをやり取りしているのか。
+
+```
+model {
+  for (n in 1:N)
+    Y[n] ~ normal(a[KID[n]] + b[KID[n]]*X[n], s_Y);
+}
+```
+
+`a[KID[n]]`の部分を使って理解を深めておく。ここではあまり図解する必要はないかもしれないが、階層モデルを複雑にしていくと、個人的には直感的によく分からなくなるので、図解しておく。
+
+```
+    X   Y KID
+1   7 457   1 | a[KID[n]]: KID[ 1] -> 1 -> a[1]
+2  10 482   1 | a[KID[n]]: KID[ 2] -> 1 -> a[1]
+[snip]
+15 21 517   1 | a[KID[n]]: KID[15] -> 1 -> a[1]
+16 12 553   2 | a[KID[n]]: KID[16] -> 2 -> a[2]
+[snip]
+27  2 376   2 | a[KID[n]]: KID[27] -> 2 -> a[2]
+28 15 522   3 | a[KID[n]]: KID[28] -> 3 -> a[3]
+[snip]
+37 25 592   3 | a[KID[n]]: KID[37] -> 3 -> a[3]
+38 28 722   4 | a[KID[n]]: KID[38] -> 4 -> a[4]
+39 24 726   4 | a[KID[n]]: KID[39] -> 4 -> a[4]
+40 22 728   4 | a[KID[n]]: KID[40] -> 4 -> a[4]
+```
+
+## 8.1.4 階層モデル
+
+ここからはグループ差に仮定を入れた階層モデルを考える。メカニズムとしては、$a[1],a[2],a[3],a[4]$を「すべての会社で共通の全体平均」と「会社差を表す項」に分解する。会社差には平均0標準偏差$\sigma_{a}$の正規分布から生成されると考える。$b[1],b[2],b[3],b[4]$も同様で、年齢に伴う昇給額は「すべての会社で共通の全体平均」と「会社差を表す項」に分解する。
+
+このような制約を入れることで、新卒時点の年収の会社さのばらつきは$\sigma_{a}$ぐらいと解釈できるようになる。$\sigma_{a}$には無情報事前分布を仮定する。このように階層的に事前分布が設定されているため階層モデルと呼ばれる。
+
+<div class="tbox">
+<th3>モデル8-3</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &\sim& Normal(a[KID[n]] + b[KID[n]]X[n], \sigma_{Y}) \\
+a[k] &=& a_{全体平均} + a_{会社差}[k] \\
+a_{会社差}[k] &\sim& Normal(0, \sigma_{a}) \\
+b[k] &=& b_{全体平均} + b_{会社差}[k] \\
+b_{会社差}[k] &\sim& Normal(0, \sigma_{b}) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+このモデルでは、データから下記のパラメタを推定する。また、$a_{全体平均},b_{全体平均},\sigma_{a},\sigma_{b},\sigma_{Y}$の事前分布に正規分布を仮定する。
+
+- $\sigma_{Y}$
+- $a_{全体平均}$
+- $a_{会社差}[1],a_{会社差}[2],a_{会社差}[3],a_{会社差}[4]$
+- $\sigma_{a}$
+- $b_{全体平均}$
+- $b_{会社差}[1],b_{会社差}[2],b_{会社差}[3],b_{会社差}[4]$
+- $\sigma_{b}$
+
+書籍にもあるとおり、シュミレーションデータを作ることで、データ生成過程への理解を深める。
+
+```{r}
+set.seed(1)
+N <- 40
+K <- 4
+N_k <- c(15, 12, 10, 3)
+a0 <- 350　
+b0 <- 12
+s_a <- 60
+s_b <- 4
+s_Y <- 25
+X <- sample(x = 0:35, size = N, replace = TRUE)
+KID <- rep(1:4, times = N_k)
+a <- a0 + rnorm(K, mean = 0, sd = s_a)
+b <- b0 + rnorm(K, mean = 0, sd = s_b)
+d <- data.frame(X = X, KID = KID, a = a[KID], b = b[KID])
+d <- transform(d, Y_sim = rnorm(N, mean = a + b*X, sd = s_Y))
+# 各会社の最初と最後のレコードだけ表示している。
+d[c(1, 15, 16, 27, 28, 37, 38, 40), ]
+```
+
+この部分でデータを生成する際のパラメタを設定している。レコード数は$N=40$、会社の数$K=4$やばらつき$N_{k}=(15, 12, 10, 3)$、全体平均$a_{0}=350, b_{0}=12$、標準偏差$\sigma_{a}=60, \sigma_{b}=4,\sigma_{Y}=25$である。
+
+```
+set.seed(123)
+N <- 40
+K <- 4
+N_k <- c(15, 12, 10, 3)
+a0 <- 350　
+b0 <- 12
+s_a <- 60
+s_b <- 4
+s_Y <- 25
+X <- sample(x = 0:35, size = N, replace = TRUE)
+KID <- rep(1:4, times = N_k)
+```
+
+そして、$a,b$ともに、例えば$a_{1}$であれば、全体平均$a_{0} + a[1], \ a[1] \sim Normal(0, \sigma_{a})$の関係から生成される。
+
+```
+a <- a0 + rnorm(K, mean = 0, sd = s_a)
+a
+[1] 342.2354 403.2042 340.9162 369.7875
+
+b <- b0 + rnorm(K, mean = 0, sd = s_b)
+b
+[1] -0.9092913  8.9128329 13.1461943  7.1179521
+```
+
+最終的に、線形モデルの各パラメタとして利用され、ノイズ$\sigma_{Y}$が加わって年収$Y$が生成される。
+
+```
+Y_sim = rnorm(N, mean = a + b*X, sd = s_Y)
+```
+
+```{r}
+d$KID <- as.factor(d$KID)
+ggplot(d, aes(X, Y_sim, shape = KID)) +
+  theme_bw(base_size = 15) +
+  facet_wrap(~KID) +
+  geom_line(stat = 'smooth', method = 'lm', se = FALSE, linewidth = 1, color = 'black', linetype = '31') +
+  geom_point(size = 3) +
+  scale_shape_manual(values = c(16, 2, 4, 9)) +
+  labs(x = 'X', y = 'Y')
+```
+
+データは先程と同じものを利用する。
+
+```{r}
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap08/input/data-salary-2.txt')
+N <- nrow(d)
+K <- 4
+data <- list(N = N, K = K, X = d$X, Y = d$Y, KID = as.numeric(d$KID))
+data
+```
+
+階層モデルのStanファイルはこちら。
+
+```
+data {
+  int N;
+  int K;
+  real X[N];
+  real Y[N];
+  int<lower=1, upper=K> KID[N];
+}
+
+parameters {
+  real a0;
+  real b0;
+  real ak[K];
+  real bk[K];
+  real<lower=0> s_a;
+  real<lower=0> s_b;
+  real<lower=0> s_Y;
+}
+
+transformed parameters {
+  real a[K];
+  real b[K];
+  for (k in 1:K) {
+    a[k] = a0 + ak[k];
+    b[k] = b0 + bk[k];
+  }
+}
+
+model {
+  s_a ~ normal(0, 1e5);
+  s_b ~ normal(0, 1e5);
+  s_Y ~ normal(0, 1e5);
+  
+  for (k in 1:K) {
+    ak[k] ~ normal(0, s_a);
+    bk[k] ~ normal(0, s_b);
+  }
+
+  for (n in 1:N)
+    Y[n] ~ normal(a[KID[n]] + b[KID[n]]*X[n], s_Y);
+}
+
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model83 <- stan_model('note_ahirubayes07-83.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model83, data = data, seed = 1989)
+```
+
+推定結果を見ると、「新卒給与」の会社差のばらつき$\sigma_{a}$はおよそ169万円、「年齢昇給額」の会社差のばらつき$\sigma_{b}$はおよそ17万円、ノイズの大きさは$\sigma_{Y}$はおよそ28万円とわかる。
+
+- $a_{全体平均}$: 383.4[148.7~655.5]
+- $b_{全体平均}$: 14.3 [-8.9~45.5]
+- $\sigma_{a}$: 169.0[11.8~728.8]
+- $\sigma_{b}$: 17.3[3.2~101.0]
+- $\sigma_{Y}$: 28.4[22.2~36.7]
+
+
+```{r}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+1つ前のモデルでは、`b[4] = -1.2`と推定されていたが、階層モデルでは`b[4] = 9.5`となっている。これは、$b[1],b[2],b[3],b[4]$の年齢に伴う昇給額は「すべての会社で共通の全体平均$b_{0}$」と「会社差を表す項$b_{k}$」に分解され、会社差$b_{k}$には平均0標準偏差$\sigma_{b}$の正規分布から生成されると考える、という仮定を置いている効果がここに出ている。
+
+この階層モデルでもモデルの挙動を確認しておく。
+
+`a[KID[n]]`の部分を使って理解を深めておく。この部分で`normal(0, s_a)`に従う`ak[1]-ak[4]`が生成される。
+
+```
+for (k in 1:K) {
+  ak[k] ~ normal(0, s_a);
+  bk[k] ~ normal(0, s_b);
+}
+
+// image 
+ak[1] → AK1
+ak[2] → AK2
+ak[3] → AK3
+ak[4] → AK4
+```
+
+そして、この部分でさきほどの`ak[1]-ak[4]`が利用され、全体平均`a0`が加えられることで、`a[1]-a[4]`が生成される。
+
+```
+for (k in 1:K) {
+    a[k] = a0 + ak[k];
+    b[k] = b0 + bk[k];
+  }
+
+// image 
+a0 + AK1 -> a[1] -> A1 
+a0 + AK2 -> a[2] -> A2
+a0 + AK3 -> a[3] -> A3
+a0 + AK4 -> a[4] -> A4
+```
+
+生成された`a[1]-a[4]`(同様に`b[1]-b[4]`)を利用して、正規分布の部分に情報が渡され$Y$が生成される。
+
+```
+for (n in 1:N){
+  Y[n] ~ normal(a[KID[n]] + b[KID[n]]*X[n], s_Y);
+}
+
+// aのイメージ、bは省略
+
+    X   Y KID
+1   7 457   1 | a[KID[n]]: KID[ 1] -> 1 -> a[1] -> A1 | Normal(A1 + B1*X[ 1], s_Y)
+2  10 482   1 | a[KID[n]]: KID[ 2] -> 1 -> a[1] -> A1 | Normal(A1 + B1*X[ 2], s_Y)
+[snip]
+15 21 517   1 | a[KID[n]]: KID[15] -> 1 -> a[1] -> A1 | Normal(A1 + B1*X[15], s_Y)
+16 12 553   2 | a[KID[n]]: KID[16] -> 2 -> a[2] -> A2 | Normal(A2 + B2*X[16], s_Y)
+[snip]
+27  2 376   2 | a[KID[n]]: KID[27] -> 2 -> a[2] -> A2 | Normal(A2 + B2*X[27], s_Y)
+28 15 522   3 | a[KID[n]]: KID[28] -> 3 -> a[3] -> A3 | Normal(A3 + B3*X[28], s_Y)
+[snip]
+37 25 592   3 | a[KID[n]]: KID[37] -> 3 -> a[3] -> A3 | Normal(A3 + B3*X[37], s_Y)
+38 28 722   4 | a[KID[n]]: KID[38] -> 4 -> a[4] -> A4 | Normal(A4 + B4*X[38], s_Y)
+39 24 726   4 | a[KID[n]]: KID[39] -> 4 -> a[4] -> A4 | Normal(A4 + B4*X[39], s_Y)
+40 22 728   4 | a[KID[n]]: KID[40] -> 4 -> a[4] -> A4 | Normal(A4 + B4*X[40], s_Y)
+```
+
+## 8.1.6 階層モデルの等価な表現
+
+モデル8-4はモデル8-3と等価である。すべての会社の平均が$a_{全体平均}$で、各社の$a[k]$が加わって生成されるという形から、平均$a_{全体平均}$で、標準偏差$\sigma_{a}$の正規分布から生成される形となっている。
+
+<div class="tbox">
+<th3>モデル8-4</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &\sim& Normal(a[KID[n]] + b[KID[n]]X[n], \sigma_{Y}) \\
+a[k] &\sim& Normal(a_{全体平均}, \sigma_{a}) \\
+b[k] &\sim& Normal(b_{全体平均}, \sigma_{b}) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+Stanのモデルは下記の通り。
+
+```
+data {
+  int N;
+  int K;
+  real X[N];
+  real Y[N];
+  int<lower=1, upper=K> KID[N];
+}
+
+parameters {
+  real a0;
+  real b0;
+  real a[K];
+  real b[K];
+  real<lower=0> s_a;
+  real<lower=0> s_b;
+  real<lower=0> s_Y;
+}
+
+model {
+  s_a ~ normal(0, 1e5);
+  s_b ~ normal(0, 1e5);
+  s_Y ~ normal(0, 1e5);
+  
+  for (k in 1:K) {
+    a[k] ~ normal(a0, s_a);
+    b[k] ~ normal(b0, s_b);
+  }
+
+  for (n in 1:N)
+    Y[n] ~ normal(a[KID[n]] + b[KID[n]]*X[n], s_Y);
+}
+```
+
+## 参考文献および参考資料
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+- [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)

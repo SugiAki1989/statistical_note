@@ -24,10 +24,10 @@
 
 ## ベイズ統計学
 
-- [アヒル本01](https://sugiaki1989.github.io/statistical_note/note_ahirubayes01/note_ahirubayes01.html)
-- [アヒル本02](https://sugiaki1989.github.io/statistical_note/note_ahirubayes02/note_ahirubayes02.html)
-- [アヒル本03](https://sugiaki1989.github.io/statistical_note/note_ahirubayes03/note_ahirubayes03.html)
-- [アヒル本04](https://sugiaki1989.github.io/statistical_note/note_ahirubayes04/note_ahirubayes04.html)
+- [アヒル本01-Chapter04-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes01/note_ahirubayes01.html)
+- [アヒル本02-Chapter05pre-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes02/note_ahirubayes02.html)
+- [アヒル本03-Chapter05post-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes03/note_ahirubayes03.html)
+- [アヒル本04-Chapter07-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes04/note_ahirubayes04.html)
 - [アヒル本05](https://sugiaki1989.github.io/statistical_note/note_ahirubayes05/note_ahirubayes05.html)
 - [アヒル本06](https://sugiaki1989.github.io/statistical_note/note_ahirubayes06/note_ahirubayes06.html)
 - [アヒル本07](https://sugiaki1989.github.io/statistical_note/note_ahirubayes07/note_ahirubayes07.html)
