@@ -43,6 +43,7 @@ UPDATE: `r Sys.time()`
 
 ## 8.3 非線形モデルの階層モデル
 
+7.3節のモデルを16人に拡張して階層モデルを適用する。
 
 ```{r}
 options(max.print = 999999)
@@ -64,40 +65,41 @@ head(d, 10)
 
 ## 8.3.1 解析の目的とデータの分布の確認
 
+各個人において、頭打ちになる$Y$の値と、頭打ちになるまでの時間を知りたい。また個人差のばらつきも分析したいとする。各個人のデータを可視化すると、頭打ちになるものの、個人ごとに上限が異なることがわかる。
 
 ```{r}
-dd <- d %>% 
-  tidyr::pivot_longer(cols=-PersonID, values_to='Y') %>% 
-  mutate(Time=readr::parse_number(name)) %>% 
-  select(-name)
-
-ggplot(data=dd, aes(x=Time, y=Y)) +
-  theme_bw(base_size=18) +
+d %>% 
+  tidyr::pivot_longer(cols = -PersonID, values_to = 'Y') %>% 
+  mutate(Time = readr::parse_number(name)) %>% 
+  select(-name) %>% 
+  ggplot(data = ., aes(x = Time, y = Y)) +
+  theme_bw(base_size = 15) +
   facet_wrap(~PersonID) +
-  geom_line(linewidth=1) +
-  geom_point(size=3) +
-  labs(x='Time (hour)', y='Y') +
-  scale_x_continuous(breaks=c(0,6,12,24), limit=c(0,24)) +
-  scale_y_continuous(breaks=seq(0,40,10), limit=c(-3,37))
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  labs(x = 'Time (hour)', y = 'Y') +
+  scale_x_continuous(breaks = c(0,6,12,24), limit = c(0,24)) +
+  scale_y_continuous(breaks = seq(0,40,10), limit = c(-3,37))
 ```
 
-
+最終時点ごとの$Y$の値も個人によって異なる。
 
 ```{r}
 d_last <- d[ncol(d)]
 
 bw <- 3.0
-ggplot(data=d_last, aes(x=Time24)) +
-  theme_bw(base_size=18) +
-  geom_histogram(binwidth=bw, color='black', fill='white') +
-  geom_density(aes(y=after_stat(count)*bw), alpha=0.2, color='black', fill='gray20') +
-  geom_rug(sides='b') +
-  labs(x='Time24', y='count') +
+ggplot(data = d_last, aes(x = Time24)) +
+  theme_bw(base_size = 15) +
+  geom_histogram(binwidth = bw, color = 'black', fill = 'white') +
+  geom_density(aes(y = after_stat(count)*bw), alpha = 0.2, color = 'black', fill = 'gray20') +
+  geom_rug(sides = 'b') +
+  labs(x = 'Time24', y = 'count') +
   xlim(range(density(d_last$Time24)$x))
 ```
 
 ## 8.3.2 メカニズムの想像
 
+ここでは`a[n],b[n]`が特定の分布に従うと仮定して、階層モデルを適用する。`a[n],b[n]`は正の値をとることを考慮し、対数をとった`log(a)[n],log(b)[n]`が正規分布に従うと仮定する。考えるだけで、`log`はとってないので注意。
 
 
 ## 8.3.3 モデル式の記述
@@ -147,6 +149,8 @@ transformed parameters {
   real a[N];
   real b[N];
   for (n in 1:N) {
+  // expは、logはとってないが想定する値がマイナスにならないようにする.
+  // `a[n],b[n]`は正の値をとることを考慮
     a[n] = exp(log_a[n]);
     b[n] = exp(log_b[n]);
   }
@@ -154,8 +158,9 @@ transformed parameters {
 
 model {
   for (n in 1:N) {
+    // logはとってない、対数をとったものが正規分布に従うと考える
     log_a[n] ~ normal(a0, s_a);
-    log_b[n] ~ normal(b0, s_b);
+    log_b[n] ~ normal(b0, s_b); 
   }
   for (n in 1:N)
     for (t in 1:T)
@@ -183,11 +188,13 @@ model87 <- stan_model('note_ahirubayes09-87.stan')
 fit <- sampling(object = model87, data = data, seed = 1989)
 ```
 
+パラメタの推定結果はこちら。$\sigma_{Y}$以外は対数スケールとなっている。少し混乱するが、`a[1],b[1]`は通常スケールで`exp`で変換する前の`a0,b0`が対数スケールということ(対数変換したものが正規分布に従うと考えている)。
 
 ```{r, class.output="scroll-1000"}
 print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
 ```
 
+MCMCで得られたデータを利用して予測分布を可視化する。
 
 ```{r}
 ms <- rstan::extract(fit)
@@ -197,197 +204,113 @@ for (n in 1:nrow(d)) {
   d_est <- rbind(d_est, data.frame(PersonID = n, Time = Time_new, t(qua), check.names = FALSE))
 }
 
-d <- d %>% 
+d2 <- d %>% 
   tidyr::pivot_longer(cols = -PersonID, values_to = 'Y') %>% 
   mutate(Time = readr::parse_number(name)) %>% 
   select(-name)
 
 ggplot(data = d_est, aes(x = Time, y = `50%`)) +
-  theme_bw(base_size = 18) +
+  theme_bw(base_size = 15) +
   facet_wrap(~PersonID) +
   geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), fill = 'black', alpha = 1/5) +
   geom_line(linewidth = 0.5) +
-  geom_point(data = d, aes(x = Time, y = Y), size = 3) +
+  geom_point(data = d2, aes(x = Time, y = Y), size = 3) +
   labs(x = 'Time (hour)', y = 'Y') +
   scale_x_continuous(breaks = Time, limit = c(0,24)) +
   scale_y_continuous(breaks = seq(0,40,10), limit = c(-3,37))
 ```
 
 
-```{r}
+## ガンマ分布を利用したモデル
 
-```
+書籍と同じようなモデルとして、ガンマ分布を利用する方法もある。ガンマ分布は正の値しかとらないので、今回のケースでは都合よい。Stanで使用する際はパラメタを$\alpha = \frac{\mu^2}{\sigma},\beta=\frac{\mu}{\sigma}$と指定するので注意。
 
+- [Stanでガンマ回帰（動かす編）](https://messefor.hatenablog.com/entry/2020/09/05/232031)
+- [16.6 Gamma Distribution](https://mc-stan.org/docs/2_21/functions-reference/gamma-distribution.html)
 
+$\alpha,\beta$と$\mu,\sigma$の関係は下記の通り。
 
-```{r}
+[Gamma](/Users/aki/Documents/statistical_note/note_ahirubayes09/gamma.png)
 
-```
-
-## 8.4 ロジスティック回帰の階層モデル
-
-
-```{r}
-d1 <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap08/input/data-attendance-4-1.txt')
-d2 <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap08/input/data-attendance-4-2.txt')
-N <- 50
-C <- 10
-I <- nrow(d2)
-conv <- c(0, 0.2, 1)
-names(conv) <- c('A', 'B', 'C')
-data <- list(N = N, C = C, I = I, A = d1$A, Score = d1$Score/200,
-             PID = d2$PersonID, CID = d2$CourseID, W = conv[d2$Weather], Y = d2$Y)
-```
-
-## 8.4.2 メカニズムの想像
-
-
-
-## 8.4.3 モデル式の記述
-
-ここで想定しているモデルは下記の通り。
-
-<div class="tbox">
-<th3>モデル8-8</th3>
-<div class="inner">
-$$
-\begin{eqnarray}
-x[i] &=& b_{1} + x_{学生}[PersonID[i]] + x_{科目}[CourseID[i]] + x_{授業}[i] \\
-q[i] &=& inv\_logit(x[i]) \\
-Y[i] &\sim& Bernoulli(q[i]) \\
-x_{学生}[n] &=& b_{2}A[n] + b_{3}Score[n] + b_{学生差}[n] \\
-b_{学生差}[n] &\sim& Normal(0, \sigma_{P}) \\
-x_{科目}[c] &=& b_{科目差}[c] \\
-b_{科目差}[c] &\sim& Normal(0, \sigma_{C}) \\
-x_{授業}[i] &=& b_{4}Weather[i] \\
-\end{eqnarray}
-$$
-</div>
-</div>
-
-## 8.4.4 Stanで実装
-
-Stanファイルは下記の通り。
+ガンマ分布を使った場合のStanのモデルは下記のように表現できる。
 
 ```
 data {
   int N;
-  int C;
-  int I;
-  int<lower=0, upper=1> A[N];
-  real<lower=0, upper=1> Score[N];
-  int<lower=1, upper=N> PID[I];
-  int<lower=1, upper=C> CID[I];
-  real<lower=0, upper=1> W[I];
-  int<lower=0, upper=1> Y[I];
+  int T;
+  real Time[T];
+  real Y[N,T];
+  int T_new;
+  real Time_new[T_new];
 }
 
 parameters {
-  real b[4];
-  real b_P[N];
-  real b_C[C];
-  real<lower=0> s_P;
-  real<lower=0> s_C;
-}
-
-transformed parameters {
-  real x_P[N];
-  real x_C[C];
-  real x_J[I];
-  real x[I];
-  real q[I];
-  for (n in 1:N)
-    x_P[n] = b[2]*A[n] + b[3]*Score[n] + b_P[n];
-  for (c in 1:C)
-    x_C[c] = b_C[c];
-  for (i in 1:I) {
-    x_J[i] = b[4]*W[i];
-    x[i] = b[1] + x_P[PID[i]] + x_C[CID[i]] + x_J[i];
-    q[i] = inv_logit(x[i]);
-  }
+  real mu_a;
+  real mu_b;
+  real<lower=0> a[N];
+  real<lower=0> b[N];
+  real<lower=0> s_a;
+  real<lower=0> s_b;
+  real<lower=0> s_Y;
 }
 
 model {
+  for (n in 1:N) {
+    a[n] ~ gamma(mu_a^2/s_a, mu_a/s_a);
+    b[n] ~ gamma(mu_b^2/s_b, mu_b/s_b);
+  }
   for (n in 1:N)
-    b_P[n] ~ normal(0, s_P);
-  for (c in 1:C)
-    b_C[c] ~ normal(0, s_C);
-  for (i in 1:I)
-    Y[i] ~ bernoulli(q[i]);
+    for (t in 1:T)
+      Y[n,t] ~ normal(a[n]*(1 - exp(-b[n]*Time[t])), s_Y);
 }
+
+generated quantities {
+  real y_new[N,T_new];
+  for (n in 1:N)
+    for (t in 1:T_new)
+      y_new[n,t] = normal_rng(a[n]*(1 - exp(-b[n]*Time_new[t])), s_Y);
+}
+
 ```
 
 ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
 
 ```{r, eval=TRUE, echo=TRUE, results='hide'}
-model88 <- stan_model('note_ahirubayes09-88.stan')
+model87_ <- stan_model('note_ahirubayes09-87_.stan')
 ```
 
 `sampling()`関数でサンプリングする。
 
 ```{r, eval=TRUE, echo=TRUE, results='hide'}
-fit <- sampling(object = model88, data = data, seed = 1989)
+fit_ <- sampling(object = model87_, data = data, seed = 1989)
 ```
 
+パラメタの推定結果はこちら。$\sigma_{Y}$以外は対数スケールとなっている。少し混乱するが、`a[1],b[1]`は通常スケールで`exp`で変換する前の`a0,b0`が対数スケールということ(対数変換したものが正規分布に従うと考えている)。
 
 ```{r, class.output="scroll-1000"}
-# fit <- stan(file = 'model/model8-8.stan', data = data,
-#             pars = c('b', 'b_P', 'b_C', 's_P', 's_C', 'q'), seed = 1234)
-print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1,
-      pars = c('b', 'b_P', 'b_C', 's_P', 's_C', 'q'))
+print(fit_, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
 ```
 
+MCMCで得られたデータを利用して予測分布を可視化する。
 
 ```{r}
-ms <- rstan::extract(fit)
-N_mcmc <- length(ms$lp__)
+ms <- rstan::extract(fit_)
+d_est <- data.frame()
+for (n in 1:nrow(d)) {
+  qua <- apply(ms$y_new[,n,], 2, quantile, prob = c(0.025, 0.5, 0.975))
+  d_est <- rbind(d_est, data.frame(PersonID = n, Time = Time_new, t(qua), check.names = FALSE))
+}
 
-param_names <- c('mcmc', paste0('b', 1:4), 's_P', 's_C')
-d_mcmc <- data.frame(1:N_mcmc, ms$b, ms$s_P, ms$s_C)
-colnames(d_mcmc) <- param_names
-
-qua <- apply(d_mcmc[,-1], 2, quantile, probs = c(0.025, 0.25, 0.5, 0.75, 0.975))
-d_est <- data.frame(X = param_names[-1], t(qua), check.names = FALSE)
-
-d_long <- d_mcmc %>% 
-  tidyr::pivot_longer(cols = -mcmc, names_to = 'X') %>%
-  mutate(X  =  factor(X, levels = rev(param_names[-1])))
-
-ggplot() +
-  theme_bw(base_size = 18) +
-  coord_flip() +
-  geom_violin(data = d_long, aes(x = X, y = value), fill = 'white', color = 'grey80', linewidth = 2, alpha = 0.3, scale = 'width') +
-  geom_pointrange(data = d_est, aes(x = X, y = `50%`, ymin = `2.5%`, ymax = `97.5%`), size = 1) +
-  labs(x = 'parameter', y = 'value') +
-  scale_y_continuous(breaks = seq(from = -2, to = 6, by = 2))
+ggplot(data = d_est, aes(x = Time, y = `50%`)) +
+  theme_bw(base_size = 15) +
+  facet_wrap(~PersonID) +
+  geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), fill = 'black', alpha = 1/5) +
+  geom_line(linewidth = 0.5) +
+  geom_point(data = d2, aes(x = Time, y = Y), size = 3) +
+  labs(x = 'Time (hour)', y = 'Y') +
+  scale_x_continuous(breaks = Time, limit = c(0,24)) +
+  scale_y_continuous(breaks = seq(0,40,10), limit = c(-3,37))
 ```
-
-
-```{r}
-d_mcmc <- data.frame(1:N_mcmc, ms$b_C)
-colnames(d_mcmc) <- c('mcmc', paste0('b_C', 1:10))
-d_mode <- apply(ms$b_C, 2, function(x) {
-  dens <- density(x)
-  mode_i <- which.max(dens$y)
-  mode_x <- dens$x[mode_i]
-  mode_y <- dens$y[mode_i]
-  c(mode_x, mode_y)
-}) %>% 
-  t() %>% 
-  data.frame() %>% 
-  magrittr::set_colnames(c('X', 'Y'))
-
-d_long <- d_mcmc %>% tidyr::pivot_longer(cols = -mcmc, names_to = 'X')
-
-ggplot() +
-  theme_bw(base_size = 18) +
-  geom_density(data = d_long, aes(x = value, group = X), fill = 'black', color = 'black', alpha = 0.15) +
-  geom_segment(data = d_mode, aes(x = X, xend = X, y = Y, yend = 0), color = 'black', linetype = 'dashed', alpha = 0.6) +
-  geom_rug(data = d_mode, aes(x = X), sides = 'b') +
-  labs(x = 'value', y = 'density') +
-  scale_x_continuous(breaks = seq(from = -4, to = 4, by = 2))
-```
-
 
 
 ## 参考文献および参考資料

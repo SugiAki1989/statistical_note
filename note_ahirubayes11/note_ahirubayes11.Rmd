@@ -1,0 +1,482 @@
+---
+title: "StanとRでベイズ統計モデリング11"
+pagetitle: "StanとRでベイズ統計モデリング11"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+今回は第9章「一歩進んだ文法」のチャプターを写経していく。
+
+## 9.3.1 多変量正規分布
+
+32人分の50m走と走り幅跳びの距離が記録されているデータを利用する。50m走と走り幅跳びの距離は相関することが想定でき、データを生成している確率分布は多変量正規分布が妥当だと考えられる。Stanでは、多変量正規分布を利用する際は、ベクトルを上手く利用する必要がある。
+
+```{r}
+library(dplyr)
+library(rstan)
+library(ggplot2)
+
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap09/input/data-mvn.txt')
+ggplot(data = d, aes(x = Y1, y = Y2)) +
+  theme_bw(base_size = 18) +
+  geom_point(shape = 1, size = 3)
+```
+
+多変量正規分布を仮定したモデル式は下記の通り。これまでの表記と異なる部分は、$Y$がベクトル化されている点であり、Stanファイルで指定する時も`vector[K] Y[N]`と指定する。他にも、多変量正規分布ではパラメタもベクトルや行列であるため、Stanファイルもそれにあわせる必要がある。
+
+<div class="tbox">
+<th3>モデル9-2</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+\overrightarrow{Y[n]} &\sim& MultiNormal(\overrightarrow{\mu}, \Sigma)\\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+先程の点を注意して、データを渡す必要がある。
+
+```{r}
+data <- list(N = nrow(d), D = 2, Y = d)
+data
+```
+
+
+Stanのファイルは下記の通り。`vector[D] Y[N]`は、$Y$は33個(=`N`)の「長さ2(=`K`)のベクトル」という意味である。`cov_matrix[D] cov`は、共分散行列を扱える特殊な型で、`D×D`サイズの行列が作られる。
+
+```
+data {
+  int N;
+  int D;
+  vector[D] Y[N];
+}
+
+parameters {
+  vector[D] mu;
+  cov_matrix[D] cov;
+}
+
+model {
+  for (n in 1:N){
+    Y[n] ~ multi_normal(mu, cov);
+  }
+}
+```
+
+$Y$は33個の長さ2のベクトルとは、下記のようなイメージである。下記はStanのサンプリング中に`print()`関数でプリントデバッグした結果である。
+
+```
+[9.2,2.56]
+[9.8,1.99]
+[9.4,2.4]
+[9.2,2.27]
+[8.1,3.68]
+[9.2,2.81]
+[9.2,2.5]
+[8.5,2.65]
+[8.7,3.36]
+[9.3,2.56]
+[9.2,2.54]
+[9.2,2.72]
+[8.3,3.46]
+[9.8,2.5]
+[8,3.33]
+[9.3,2.3]
+[10.3,1.76]
+[8.6,3.26]
+[9.6,2.48]
+[8.2,3.14]
+[9.6,1.76]
+[9.6,2.17]
+[9.9,2.2]
+[8.9,2.9]
+[9.3,2.49]
+[8.7,2.42]
+[10.2,1.92]
+[9.6,2.07]
+[9.7,2.53]
+[9.6,2.32]
+[9.2,2.22]
+[8.8,2.71]
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model92 <- stan_model('note_ahirubayes11-92.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model92, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+## 9.4.2 simplex型
+
+simplex型はvector型の特別な場合の型で、要素が0-1の範囲で合計が1という条件を満たすことができる型。確率として解釈できるので、カテゴリカル分布や多項分布を利用する際に、あわせて利用されることが多い。
+
+<div class="tbox">
+<th3>モデル9-4</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &\sim& Categorical(\overrightarrow{\theta}) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+サイコロを200回振ったデータを利用する。このサイコロの各目の確率を推定したい。
+
+```{r}
+K <- 6
+d <- read.csv(file = 'https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap09/input/data-dice.txt')
+d_count <- table(factor(d$Face, levels = 1:K))
+data <- list(N = nrow(d), K = K, Y = d$Face)
+data
+```
+
+`simplex[K] theta`と指定している部分に注意。このように指定することで、要素が0-1の範囲で合計が1という条件を満たす。
+
+```
+data {
+  int N;
+  int K;
+  int<lower=1, upper=K> Y[N];
+}
+
+parameters {
+  simplex[K] theta;
+}
+
+model {
+  for (n in 1:N)
+    Y[n] ~ categorical(theta);
+}
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model94 <- stan_model('note_ahirubayes11-94.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model94, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+
+似たようなケースとして、サイコロの目が出た数を集計したデータがあったとする。このデータは多項分布から生成されたと想定することができるので、下記のモデルを利用できる。ここで$N$は試行回数で、$\overrightarrow{Y}$は長さ$K$のベクトルで、各要素は$N$回中に何回の目が出たのかを記録している。
+
+
+<div class="tbox">
+<th3>モデル9-5</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+\overrightarrow{Y} &\sim& Multinomial(N, \overrightarrow{\theta}) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+```
+# K <- 6
+# d <- read.csv(file = 'https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap09/input/data-dice.txt')
+# Y <- table(factor(d$Face, levels = 1:K))
+# data <- list(K = K, Y = Y)
+# model95 <- stan_model('note_ahirubayes11-95.stan')
+# fit <- sampling(object = model95, data = data, seed = 1989)
+# print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+
+data {
+  int K;
+  int<lower=0> Y[K];
+}
+
+parameters {
+  simplex[K] theta;
+}
+
+model {
+  Y ~ multinomial(theta);
+}
+```
+
+## 9.5.2 欠損値
+
+8.3で扱った分析データに欠損値が含まれる場合の対応を考える。欠損値はデータ分析にはよくあることで、何かしらの方法で処理する必要がある。このデータでは、`PersonID=1,2,3,16`の患者で欠損値が発生している。
+
+```{r}
+d_wide <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap09/input/data-conc-2-NA-wide.txt')
+apply(d_wide, 1, function(x) {sum(is.na(x))})
+```
+
+欠損値が含まれたままの状態で、8.3で使用したN行T列の2次元配列を渡すと`NA`のインデックスのところでエラーになってしまう。そのため、wide型からlong型にテーブルを変形して、データを渡すのがよい。つまり、long型に変換した際に、欠損値のレコードを削除する。
+
+<div class="tbox">
+<th3>モデル8-7</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n,t] &\sim& Normal(a[n]\{1 -\exp(-b[n] Time[t]) \}, \sigma_{Y}) \\
+log(a[n]) &\sim& Normal(a_{全体平均}, \sigma_{a}) \\
+log(b[n]) &\sim& Normal(b_{全体平均}, \sigma_{b})
+\end{eqnarray}
+$$
+</div>
+</div>
+
+long型に変更したことで、モデル式自体も変更する必要があるので注意。わかりにくいが、$\mu[PersonID[i],TimeID[i]]$となっており、`PersonID,TimeID`のインデックスにあたる数値が正規分布の平均パラメタとして渡される。
+
+<div class="tbox">
+<th3>モデル9-6</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[i] &\sim& Normal(\mu[PersonID[i], TimeID[i]], \sigma_{Y}) \\
+\mu[n,t] &=& a[n]\{1 -\exp(-b[n] Time[t]) \}\\
+log(a[n]) &\sim& Normal(a_{全体平均}, \sigma_{a}) \\
+log(b[n]) &\sim& Normal(b_{全体平均}, \sigma_{b})
+\end{eqnarray}
+$$
+</div>
+</div>
+
+モデル式はこちら。
+
+```
+data {
+  int I;
+  int N;
+  int T;
+  real Time[T];
+  int<lower=1, upper=N> PersonID[I];
+  int<lower=1, upper=T> TimeID[I];
+  vector[I] Y;
+}
+
+parameters {
+  real a0;
+  real b0;
+  vector[N] log_a;
+  vector[N] log_b;
+  real<lower=0> s_a;
+  real<lower=0> s_b;
+  real<lower=0> s_Y;
+}
+
+transformed parameters {
+  vector[N] a;
+  vector[N] b;
+  row_vector[T] mu[N];
+  
+  a = exp(log_a);
+  b = exp(log_b);
+  
+  for (n in 1:N){
+    for (t in 1:T){
+      mu[n,t] = a[n]*(1 - exp(-b[n]*Time[t]));
+    }
+  }
+}
+
+model {
+  log_a ~ normal(a0, s_a);
+  log_b ~ normal(b0, s_b);
+  
+  for (i in 1:I){
+    Y[i] ~ normal(mu[PersonID[i], TimeID[i]], s_Y);
+  }
+}
+```
+
+モデルの挙動を確認しておく。`mu`は観測ノイズを加える前の値であり、測定値が欠損かどうかに関わらず、すべての患者のすべての時点で存在すると考えられるため、欠損値の部分を推定されている。
+
+```
+// N=16 
+// T=6
+transformed parameters {
+  for (n in 1:N){
+    for (t in 1:T){
+      mu[n,t] = a[n]*(1 - exp(-b[n]*Time[t]));
+    }
+  }
+}
+
+// row_vector[T] mu[N]の中身
+            | [
+PersonID= 1 | [2.86439,5.12237,8.30545,11.5126,12.751,13.4852],
+PersonID= 2 | [1.77624,3.24415,5.45976,8.00636,9.19418,10.1272],
+PersonID= 3 | [6.6993,11.692,18.1857,23.7954,25.5258,26.275],
+PersonID= 4 | [7.72858,13.2546,20.031,25.2666,26.635,27.1106],
+PersonID= 5 | [2.7115,4.82007,7.73486,10.5634,11.5977,12.1649],
+PersonID= 6 | [4.69957,7.88456,11.506,13.9333,14.4454,14.581],
+PersonID= 7 | [2.20191,4.10481,7.17052,11.1702,13.4012,15.7269],
+PersonID= 8 | [3.84458,6.54562,9.77645,12.1583,12.7385,12.9228],
+PersonID= 9 | [11.5332,18.9006,26.6133,31.0449,31.7828,31.9296],
+PersonID=10 | [6.22664,10.3172,14.7697,17.5206,18.0329,18.1495],
+PersonID=11 | [6.65016,10.9271,15.447,18.0898,18.542,18.6348],
+PersonID=12 | [5.93907,9.92335,14.3894,17.3039,17.8943,18.043],
+PersonID=13 | [2.61715,4.46431,6.68817,8.34781,8.75965,8.89349],
+PersonID=14 | [6.34325,10.9556,16.7481,21.4301,22.7389,23.2356],
+PersonID=15 | [4.69129,8.15539,12.6021,16.3488,17.4626,17.9215],
+PersonID=16 | [14.4284,22.0674,28.2533,30.4734,30.6478,30.6627]
+            | ]
+
+// I=88
+model {
+  for (i in 1:I){
+    Y[i] ~ normal(mu[PersonID[i], TimeID[i]], s_Y);
+  }
+
+// Y[1] ~ normal(mu[PersonID[1], TimeID[1]], s_Y);
+// Y[1] ~ normal(mu[1,1], s_Y);
+
+// PersonIDが2のTime1はNAなので飛んで
+// Y[2] ~ normal(mu[PersonID[2], TimeID[2]], s_Y);
+// Y[2] ~ normal(mu[3,1], s_Y);
+
+// Y[15] ~ normal(mu[PersonID[15], TimeID[15]], s_Y);
+// Y[15] ~ normal(mu[16,1], s_Y);
+
+// PersonIDが1のTime2はNAなので飛んで
+// Y[16] ~ normal(mu[PersonID[16], TimeID[16]], s_Y);
+// Y[16] ~ normal(mu[2,2], s_Y);
+```
+
+Stanに渡すデータはこのようになる。
+
+```{r}
+N <- nrow(d_wide)
+Time <- c(1, 2, 4, 8, 12, 24)
+colnames(d_wide) <- c('PersonID', 1:length(Time))
+
+d <- d_wide %>% 
+  tidyr::pivot_longer(cols = -PersonID, values_to = 'Y') %>% 
+  mutate(TimeID = readr::parse_number(name)) %>% 
+  select(-name) %>% 
+  na.omit() %>% 
+  arrange(TimeID)
+
+data <- list(
+  I = nrow(d), N = N, T = length(Time), Time = Time,
+  PersonID = d$PersonID, TimeID = d$TimeID, Y = d$Y
+)
+data
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model96 <- stan_model('note_ahirubayes11-96.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model96, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+可視化用のデータを作成する。
+
+```{r}
+ms <- rstan::extract(fit)
+
+d$Time <- Time[d$TimeID]
+d_est <- data.frame()
+for (n in 1:N) {
+  qua <- apply(ms$mu[,n,], 2, quantile, prob = c(0.025, 0.5, 0.975))
+  d_est <- rbind(d_est, data.frame(PersonID = n, Time = Time, t(qua), check.names = FALSE))
+}
+```
+
+
+このデータを列方向にパーセンタイルを計算する。
+
+```{r}
+# personID=1の4000行6列(=Time)
+dim(ms$mu[,1,])
+```
+
+結果として、時点(`TimeID`)ごとのパーセンタイルが計算されているので、これを`rbind()`関数で縦に積み重ねる。
+
+```{r}
+t(apply(ms$mu[,1,], 2, quantile, prob = c(0.025, 0.5, 0.975)))
+```
+
+可視化した結果を見ると、欠損値が発生している患者では信用区間が広くなっているが、エラーなく推定できている。
+
+```{r}
+ggplot(data = d_est, aes(x = Time, y = `50%`)) +
+  theme_bw(base_size = 18) +
+  facet_wrap(~PersonID) +
+  geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), fill = 'black', alpha = 1/5) +
+  geom_line(linewidth = 0.5) +
+  geom_point(data = d, aes(x = Time, y = Y), size = 3) +
+  labs(x = 'Time (hour)', y = 'Y') +
+  scale_x_continuous(breaks = Time, limit = c(0,24))
+
+```
+
+## 参考文献および参考資料
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+- [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)

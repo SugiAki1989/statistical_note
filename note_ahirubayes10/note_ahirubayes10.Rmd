@@ -1,0 +1,406 @@
+---
+title: "StanとRでベイズ統計モデリング10"
+pagetitle: "StanとRでベイズ統計モデリング10"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+今回は第8章「階層モデル」のチャプターを写経していく。非線形モデルの続きから。
+
+## 8.4 ロジスティック回帰の階層モデル
+
+ここで想定しているモデルは、学生の出欠データに対する下記のモデルを階層化させたモデル。
+
+<div class="tbox">
+<th3>モデル5-5</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+q[i] &=& inv\_logit(b_{1} + b_{2}A[i] + b_{3}Score[i] + b_{4}Weather[i] ) \\
+Y[i] &\sim& Bernoulli(q[i]) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+このモデルの反省点は、同一学生の複数の出欠記録をそのまま扱ったこと、学生の出欠行動の学生差を考慮してないこと、科目などの人気度合いも考慮されていないなどがあった。そこで今回扱うモデルでは、学生差、科目差を考慮した階層モデルに取り組む。
+
+データは2つ利用する。50行の学生マスタと出欠履歴データである。
+
+- `A`: 学生がアルバイトが好きかどうかを表す変数(0,1)
+- `Score`: 学生の学問への興味度合い(0-200)
+- `Weather`: 授業日の天気(A:晴、B:曇、C:雨)
+- `Y`: 授業に出席したかどうかを表す変数(0,1)
+
+```{r}
+options(max.print = 999999)
+library(dplyr)
+library(ggplot2)
+library(rstan)
+d1 <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap08/input/data-attendance-4-1.txt')
+d2 <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap08/input/data-attendance-4-2.txt')
+head(d1)
+head(d2)
+```
+
+## 8.4.2 メカニズムの想像
+
+解析の目的は下記の通りである。
+
+- 説明変数から応答変数がどれだけ予測できるか
+- 説明変数の出欠確率への影響度合い
+- 学生差のばらつき
+- 科目差のばらつき
+
+このモデルでは、出席確率を決める要素として、学生依存(`A,Score`、学生差)、科目依存(科目差)、1回ごとの授業依存(`Weather`)の3つにわけてモデルを検討する。最終的に、出席確率は各要素の和をロジスティック関数で0から1に変換して算出される。
+
+## 8.4.3 モデル式の記述
+
+ここで想定しているモデルは下記の通り。$N$は学生人数で50人、$n$は学生のインデックス、$I$は出欠データ数で2396個、$i$は学生のインデックス、$C$は科目数で10科目、$c$は科目のインデックス。
+
+8.16式が学生に依存する要素で
+
+<div class="tbox">
+<th3>モデル8-8</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+x[i] &=& b_{1} + x_{学生}[PersonID[i]] + x_{科目}[CourseID[i]] + x_{授業}[i] \\
+q[i] &=& inv\_logit(x[i]) \\
+Y[i] &\sim& Bernoulli(q[i]) \\
+x_{学生}[n] &=& b_{2}A[n] + b_{3}Score[n] + b_{学生差}[n] \tag{8.16}\\
+b_{学生差}[n] &\sim& Normal(0, \sigma_{P}) \\
+x_{科目}[c] &=& b_{科目差}[c]  \tag{8.17}\\
+b_{科目差}[c] &\sim& Normal(0, \sigma_{C}) \\
+x_{授業}[i] &=& b_{4}Weather[i]  \tag{8.18}\\
+\end{eqnarray}
+$$
+</div>
+</div>
+  
+## 8.4.4 Stanで実装
+  
+Stanファイルは下記の通り。
+
+```
+data {
+  int N;
+  int C;
+  int I;
+  int<lower=0, upper=1> A[N];
+  real<lower=0, upper=1> Score[N];
+  int<lower=1, upper=N> PID[I];
+  int<lower=1, upper=C> CID[I];
+  real<lower=0, upper=1> W[I];
+  int<lower=0, upper=1> Y[I];
+}
+
+parameters {
+  real b[4];
+  real b_P[N];
+  real b_C[C];
+  real<lower=0> s_P;
+  real<lower=0> s_C;
+}
+
+transformed parameters {
+  real x_P[N];
+  real x_C[C];
+  real x_J[I];
+  real x[I];
+  real q[I];
+
+  // N=50
+  // b_P[n] ~ normal(0, s_P);
+  // x_P[1],x_P[2],...,x_P[50]
+  for (n in 1:N){
+    x_P[n] = b[2]*A[n] + b[3]*Score[n] + b_P[n]; 
+  }
+
+  // C=10
+  // b_C[c] ~ normal(0, s_C);
+  // x_C[1],x_C[2],...,x_C[10]
+  for (c in 1:C){
+    x_C[c] = b_C[c];
+  }
+
+  // I=2396
+  // x_J[1],x_J[2],...,x_J[2396]
+  for (i in 1:I) {
+    x_J[i] = b[4]*W[i];
+  }
+
+  // I=2396
+  // x[1],x[2],...,x[2396]
+  // q[1],q[2],...,q[2396]
+  for (i in 1:I) {
+    x[i] = b[1] + x_P[PID[i]] + x_C[CID[i]] + x_J[i];
+    q[i] = inv_logit(x[i]);
+  }
+}
+
+model {
+  // N=50
+  for (n in 1:N){
+    b_P[n] ~ normal(0, s_P);
+  }
+
+  // C=10
+  for (c in 1:C){
+    b_C[c] ~ normal(0, s_C);
+  }
+
+  // I=2396  
+  for (i in 1:I){
+    Y[i] ~ bernoulli(q[i]);
+  }
+}
+```
+
+最終的に要素の和を取る部分の挙動を確認しておく。
+
+```
+transformed parameters {
+  real x_P[N];
+  real x_C[C];
+  real x_J[I];
+  real x[I];
+  real q[I];
+
+  // N=50
+  // b_P[n] ~ normal(0, s_P);
+  // x_P[1],x_P[2],...,x_P[50]
+  for (n in 1:N){
+    x_P[n] = b[2]*A[n] + b[3]*Score[n] + b_P[n]; 
+  }
+
+  // C=10
+  // b_C[c] ~ normal(0, s_C);
+  // x_C[1],x_C[2],...,x_C[10]
+  for (c in 1:C){
+    x_C[c] = b_C[c];
+  }
+
+  // I=2396
+  // x_J[1],x_J[2],...,x_J[2396]
+  for (i in 1:I) {
+    x_J[i] = b[4]*W[i];
+  }
+
+  // I=2396
+  // x[1],x[2],...,x[2396]
+  // q[1],q[2],...,q[2396]
+  // PID
+  //   [. 1]  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1
+  //   [ 44]  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2
+  //   [ 87]  2  2  2  2  2  2  2  2  2  2  2  2  2  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3
+  //   [130]  3  3  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4
+  // CID
+  //  [ 1]  3  9  1  9  7  9  3  1  9  7  7  7  3  7  1  3  3  3  3  9  1  3  9  7  1  3  9  9  9  7  1  3  7  3  7  9  9  7  7  1  9  7  1
+  //  [44]  8  9 10  1  9 10  7  9  1 10  9  7  7 10  7  8 10 10  7  8  1  8  9  1  8  8  9  7  1  9  9  9  8  8  7  8  1  7  7  8 10  9  9
+  //  [87]  7  7  8  1 10  9 10  7 10  1 10  8 10  8 10  1 10  1 10 10  8 10 10  8  1  8  1  8  8  1  8  8  8  1  8 10  8  1 10 10 10  1 10
+
+  for (i in 1:I) {
+    x[i] = b[1] + x_P[PID[i]] + x_C[CID[i]] + x_J[i];
+    q[i] = inv_logit(x[i]);
+  }
+  // i=1
+  // x[1] = b[1] + x_P[PID[1]] + x_C[CID[1]] + x_J[1];
+  // x[1] = b[1] + x_P[1] + x_C[3] + x_J[1];
+  //
+  // i=531
+  // x[531] = b[531] + x_P[PID[531]] + x_C[CID[531]] + x_J[531];
+  // x[531] = b[531] + x_P[10] + x_C[5] + x_J[531];
+  //
+  // i=2331
+  // x[2331] = b[2331] + x_P[PID[2331]] + x_C[CID[2331]] + x_J[2331];
+  // x[2331] = b[2331] + x_P[50] + x_C[5] + x_J[2331];
+}
+
+```
+
+データはこちら。
+
+```{r}
+N <- 50
+C <- 10
+I <- nrow(d2)
+conv <- c(0, 0.2, 1)
+names(conv) <- c('A', 'B', 'C')
+data <- list(
+  N = N, 
+  C = C,
+  I = I,
+  A = d1$A,
+  Score = d1$Score/200,
+  PID = d2$PersonID,
+  CID = d2$CourseID,
+  W = conv[d2$Weather],
+  Y = d2$Y
+  )
+
+```
+
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model88 <- stan_model('note_ahirubayes10-88.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model88, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+      #,pars = c('b', 'b_P', 'b_C', 's_P', 's_C', 'q'))
+```
+
+推定結果を可視化したものはこちら。`b2(A),b4(Weather)`はマイナスの範囲で収まっているのため、「アルバイトが好き」「授業の日が雨」だと出席にマイナスの影響を与える。`b3(Score)`はおおよその範囲がプラスの範囲に収まっているので、「学業への興味度合いが高い」と出席しやすくなる。学生差を表す`s_P`は0に近いため、学生差の影響はあまりない。一方で科目差を表す`s_C`は0から離れており、科目さの影響は大きいと言える。
+
+```{r}
+ms <- rstan::extract(fit)
+N_mcmc <- length(ms$lp__)
+
+param_names <- c('mcmc', paste0('b', 1:4), 's_P', 's_C')
+d_mcmc <- data.frame(1:N_mcmc, ms$b, ms$s_P, ms$s_C)
+colnames(d_mcmc) <- param_names
+
+qua <- apply(d_mcmc[,-1], 2, quantile, probs = c(0.025, 0.25, 0.5, 0.75, 0.975))
+d_est <- data.frame(X = param_names[-1], t(qua), check.names = FALSE)
+
+d_long <- d_mcmc %>% 
+  tidyr::pivot_longer(cols = -mcmc, names_to = 'X') %>%
+  mutate(X  =  factor(X, levels = rev(param_names[-1])))
+
+ggplot() +
+  theme_bw(base_size = 18) +
+  coord_flip() +
+  geom_violin(data = d_long, aes(x = X, y = value), fill = 'white', color = 'grey80', linewidth = 2, alpha = 0.3, scale = 'width') +
+  geom_pointrange(data = d_est, aes(x = X, y = `50%`, ymin = `2.5%`, ymax = `97.5%`), size = 1) +
+  labs(x = 'parameter', y = 'value') +
+  scale_y_continuous(breaks = seq(from = -2, to = 6, by = 2))
+```
+
+最も出席率の高い科目のMAP推定値と最も低い科目では、MAP推定値が3以上離れている。
+
+```{r}
+d_mcmc <- data.frame(1:N_mcmc, ms$b_C)
+colnames(d_mcmc) <- c('mcmc', paste0('b_C', 1:10))
+d_mode <- apply(ms$b_C, 2, function(x) {
+  dens <- density(x)
+  mode_i <- which.max(dens$y)
+  mode_x <- dens$x[mode_i]
+  mode_y <- dens$y[mode_i]
+  c(mode_x, mode_y)
+}) %>% 
+  t() %>% 
+  data.frame() %>% 
+  magrittr::set_colnames(c('X', 'Y'))
+
+d_long <- d_mcmc %>% tidyr::pivot_longer(cols = -mcmc, names_to = 'X')
+
+ggplot() +
+  theme_bw(base_size = 18) +
+  geom_density(data = d_long, aes(x = value, group = X), fill = 'black', color = 'black', alpha = 0.15) +
+  geom_segment(data = d_mode, aes(x = X, xend = X, y = Y, yend = 0), color = 'black', linetype = 'dashed', alpha = 0.6) +
+  geom_rug(data = d_mode, aes(x = X), sides = 'b') +
+  labs(x = 'value', y = 'density') +
+  scale_x_continuous(breaks = seq(from = -4, to = 4, by = 2))
+```
+
+出席率の学生差の分布。
+
+```{r}
+d_mcmc <- data.frame(1:N_mcmc, ms$b_P)
+colnames(d_mcmc) <- c('mcmc', paste0('b_P', 1:50))
+d_mode <- apply(ms$b_P, 2, function(x) {
+  dens <- density(x)
+  mode_i <- which.max(dens$y)
+  mode_x <- dens$x[mode_i]
+  mode_y <- dens$y[mode_i]
+  c(mode_x, mode_y)
+}) %>% 
+  t() %>% 
+  data.frame() %>% 
+  magrittr::set_colnames(c('X', 'Y'))
+
+d_long <- d_mcmc %>% tidyr::pivot_longer(cols = -mcmc, names_to = 'X')
+
+ggplot() +
+  theme_bw(base_size = 18) +
+  geom_density(data = d_long, aes(x = value, group = X), fill = 'black', color = 'black', alpha = 0.05) +
+  geom_segment(data = d_mode, aes(x = X, xend = X, y = Y, yend = 0), color = 'black', linetype = 'dashed') +
+  geom_rug(data = d_mode, aes(x = X), sides = 'b') +
+  labs(x = 'value', y = 'density') +
+  scale_x_continuous(breaks = seq(from = -4, to = 4, by = 1))
+```
+
+## 練習問題8.4
+
+データから計算できる学生ごとの出席率の分布は下記の通り。この分布をみることで、学生差を確認できる。
+
+```{r}
+d_person <- tapply(d2$Y, d2$PersonID, mean)
+bw <- (max(d_person)-min(d_person))/30
+ggplot(data = data.frame(X = d_person), aes(X)) +
+  geom_histogram(color = 'grey20', binwidth = bw) +
+  geom_line(aes(y = after_stat(count)*bw), stat = 'density') +
+  labs(x = 'ratio', y = 'count')
+```
+
+データから計算できる科目ごとの出席率の分布は下記の通り。この分布をみることで、科目差を確認できる。
+
+```{r}
+d_course <- tapply(d2$Y, d2$CourseID, mean)
+bw <- (max(d_course)-min(d_course))/30
+ggplot(data = data.frame(X = d_course), aes(X)) +
+  geom_histogram(color = 'grey20', binwidth = bw) +
+  geom_line(aes(y = after_stat(count)*bw), stat = 'density') +
+  labs(x = 'ratio', y = 'count')
+```
+
+## 参考文献および参考資料
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+- [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)
