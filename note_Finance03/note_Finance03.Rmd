@@ -69,6 +69,7 @@ $$
 ```{r}
 library(tidyverse)
 library(survival)
+library(rstan)
 
 # status: 1=censored, 2=dead
 # sex: 1=male, 2=female
@@ -163,6 +164,277 @@ plot(time, y_female, type = 'l', col = 'tomato')
 
 ワイブル分布の期待値の95％信頼区間を計算する方法は分からないが(ブートストラップ法で計算できなくはなさそう)、計算できれば幅をもってLTVを推定できそう。知らんけど。
 
+## おまけ
+
+おまけとしてStanで生存分析とCox回帰を行う例を載せておく。下記を参考にさせていただいた。
+
+- [Stanで生存時間解析(Weibull 回帰)](https://ajhjhaf.hatenablog.com/entry/2017/08/05/194939)
+
+サンプルデータは、432人の男性囚人の再犯に関する実験データ。刑務所から釈放されてから1年間(52週)追跡された。逮捕された人が事件を起こし、再逮捕されるまでの期間(単位：週)をCox回帰分析を使って、各変数の影響を調べることを目的にしたデータセット。
+
+`week`が再逮捕されるまでの期間(単位：週)で、52週を超えると打ち切り。`arrest`は再逮捕されたか否か、`fin`は財政的な援助を受けているかどうか。比例ハザードモデルでは、財政的な援助が再逮捕の発生を下げるかどうかを検討する。
+
+```{r}
+url <- "http://socserv.mcmaster.ca/jfox/Books/Companion/data/Rossi.txt"
+df <- read.table(url, header = TRUE)
+df <- df %>% select(week, arrest, fin) %>% 
+  mutate(fin = if_else(fin == "no", 0 , 1))
+  
+head(df)
+```
+
+
+打ち切りの扱いに関しては、[アヒル本の第7章の7.8 打ち切り](https://www.kyoritsu-pub.co.jp/book/b10003786.html)が詳しい。ここでは、打ち切りとなる52週の尤度を下記のように累積分布関数を利用して尤度に加える。
+
+$$
+\begin{align}
+Prob[52 \lt y]   &= \int_{52}^{\infty}weibull(52|m, \eta) \\\
+    &= 1 - \int_0^{52} weibull(52|m, \eta) \\\
+    &= 1 - weibull\_cdf(52|m, \eta) \\\
+    &= weibull\_ccdf(52|m, \eta)\end{align}
+$$
+
+`model`ブロックでは、打ち切り(`=0`)かどうかを判定して、密度関数、分布関数から尤度を計算している。
+
+```
+data {
+  int N;
+  int week[N];
+  int arrest[N];
+}
+
+parameters {
+  real shape;
+  real scale;
+}
+
+model {
+  for(n in 1:N){
+    if(arrest[n] == 0){
+    // The log of the Weibull complementary cumulative distribution function
+      target += weibull_lccdf(week[n]| shape, scale);
+    }else{
+    // The log of the Weibull density
+      target += weibull_lpdf(week[n]| shape, scale);
+    }
+  }
+}
+
+generated quantities {
+  real pred_Y[N];
+
+  for(n in 1:N){
+    pred_Y[n] = (1 - weibull_cdf(week[n], shape, scale));
+  }
+}
+```
+
+Stanに渡すデータを用意する。
+
+```{r}
+standata <- list(N = nrow(df), 
+                 week = df$week,
+                 arrest = df$arrest)
+
+fit <- stan(file = 'weibull.stan', data = standata, iter = 2000, chains = 4)
+```
+
+推定結果は下記の通り。
+
+```{r}
+print(fit, pars = c("scale", "shape"))
+```
+
+信用区間つきの生存関数を描く。
+
+```{r}
+rstan::extract(fit)$pred_Y %>% 
+  data.frame() %>% 
+  apply(., 2, quantile, prob = c(0.025, 0.10, 0.5, 0.90, 0.975)) %>% 
+  t() %>% 
+  `colnames<-`(c("cred2.5", "cred10", "cred50", "cred90", "cred97.5")) %>% 
+  cbind(df) %>% 
+  ggplot() + 
+  geom_line(aes(week, y = cred50), colour = "#4169e1") +
+  geom_ribbon(aes(week, ymin = cred2.5, ymax = cred97.5), alpha = 0.1, fill = "#4169e1") +
+  geom_ribbon(aes(week, ymin = cred10, ymax = cred90), alpha = 0.3, fill = "#4169e1") +
+  theme_classic() +
+  theme(axis.text  = element_text(size = 15),
+        axis.title = element_text(size = 15))
+```
+
+次は比例ハザードモデル。ワイブル分布では、現象の傾向を示す形状(`shape`)パラメタ$m$と、現象の時間スケールを示す尺度(`scale`)パラメタ$\eta$で表現される。[ハザード関数](https://en.wikipedia.org/wiki/Weibull_distribution#:~:text=The%20failure%20rate%20h%20(or%20hazard%20function)%20is%20given%20by)は下記のように表現される。
+
+$$
+\begin{align}
+    h(t|m, \eta) &= \frac{m}{\eta}\left(\frac{t}{\eta}\right)^{m-1} \\
+    &= \frac{m}{\eta}t^{m-1}\left( \frac{1}{\eta} \right)^{m} \left( \frac{1}{\eta} \right)^{-1} \\\
+    &= \frac{m}{\eta}t^{m-1}\left( \frac{1}{\eta} \right)^{m} \eta \\\
+    &= \frac{m}{\eta^m}t^{m-1} \\\
+    &= m \frac{1}{\eta^m}t^{m-1} \\\
+    &= m \lambda t^{m-1} \\\
+\end{align}
+$$
+
+参考にしたブログに記載されている通り、ここでも下記の資料に従い、
+
+- [COMPARISON BETWEEN WEIBULL AND COX PROPORTIONAL HAZARDS MODELS](http://www.seas.columbia.edu/wrc/flood/weibulltrendsglm.pdf)
+- [Estimating trends in data from the Weibull and a generalized extreme value distribution](https://krex.k-state.edu/bitstream/handle/2097/8787/AngelaCrumer2011.pdf)
+
+尺度(`scale`)パラメタ$\eta$に共変量の効果を加える。そして、尺度パラメータ$\eta$へダイレクトに加えるのではなく$\lambda$を経由させる。基底状態に対するパラメタを切片、共変量、ダミー変数$\beta_{0}, \beta, F$とする。
+
+$$
+\lambda = exp(\beta_0 + \beta^TF ) 
+$$
+
+これを$\eta$について変形する。これをStanで実装する。
+
+$$
+\eta = exp \left(-\frac{\beta_0 + \beta^TF}{m} \right)
+$$
+
+`fin`は財政的な援助を受けているかどうかなので、財政的な援助が再逮捕の発生を下げるかどうかを検討する。
+
+
+```{r}
+standata <- list(N = nrow(df), 
+                 week = df$week,
+                 arrest = df$arrest,
+                 fin = df$fin)
+fit <- stan(file = 'coxreg.stan', data = standata, iter = 2000, chains = 4)
+```
+
+推定結果はこの通りです。`beta[2]`が財政的な援助`fin`で、`-0.37[-0.75, -0.01]`となり、95%の確率で再逮捕の可能性は低下させる模様。
+
+```{r}
+print(fit, pars = c("beta"))
+```
+
+可視化しておく。経済的支援を受けた場合は、再犯率が低くなっている。
+
+```{r}
+df_Y1 <- rstan::extract(fit)$pred_Y1%>% 
+  data.frame() %>% 
+  apply(., 2, quantile, prob = c(0.025, 0.10, 0.5, 0.90, 0.975)) %>% 
+  t() %>% 
+  `colnames<-`(c("cred2.5", "cred10", "cred50", "cred90", "cred97.5")) %>% 
+  cbind(df)
+
+df_Y2 <- rstan::extract(fit)$pred_Y2%>% 
+  data.frame() %>% 
+  apply(., 2, quantile, prob = c(0.025, 0.10, 0.5, 0.90, 0.975)) %>% 
+  t() %>% 
+  `colnames<-`(c("cred2.5", "cred10", "cred50", "cred90", "cred97.5")) %>% 
+  cbind(df)
+
+ggplot() + 
+  geom_line(data = df_Y1, aes(week, y = cred50), colour = "#4169e1") +
+  geom_ribbon(data = df_Y1, aes(week, ymin = cred2.5, ymax = cred97.5), alpha = 0.3, fill = "#4169e1") +
+  geom_line(data = df_Y2, aes(week, y = cred50), colour = "#AF4F5C") +
+  geom_ribbon(data = df_Y2, aes(week, ymin = cred2.5, ymax = cred97.5), alpha = 0.3, fill = "#AF4F5C") +
+  theme_classic() +
+  theme(axis.text  = element_text(size = 15),
+        axis.title = element_text(size = 15))
+```
+
+
+```{r}
+# url <- "http://socserv.mcmaster.ca/jfox/Books/Companion/data/Rossi.txt"
+# Rossi <- read.table(url, header=TRUE)
+mod.allison <- coxph(Surv(week, arrest) ~ fin, data=df)
+
+plot(survfit(mod.allison, newdata = data.frame(fin = c(0, 1))),
+     conf.int = TRUE, ylim = c(0.6, 1), col = c(2, 4),
+     xlab = "Weeks", ylab = "Proportion Not Rearrested")
+legend("bottomleft", legend=c("fin = no", "fin = yes"), lty = c(1 ,1), col = c(2, 4), inset = 0.02)
+```
+
+対数尤度を計算する場合は下記のコードを使う。
+
+```
+stancode <- "
+data {
+  int N ;
+  int week[N] ;
+  int arrest[N] ;
+}
+
+parameters {
+  real shape ;
+  real scale ;
+}
+
+model {
+  for(n in 1:N){
+    if(arrest[n] == 0){
+      target += weibull_lccdf(week[n]| shape, scale) ;
+    }else{
+      target += weibull_lpdf(week[n]| shape, scale) ;
+    }
+  }
+}
+
+generated quantities {
+  real log_lik[N] ;
+  real pred_Y[N];
+
+  for(n in 1:N){
+    if(arrest[n] == 0){
+      log_lik[n] = weibull_lccdf(week[n]| shape, scale) ;
+    }else{
+      log_lik[n] = weibull_lpdf(week[n]| shape, scale) ;
+    }
+  }
+
+  for(n in 1:N){
+    pred_Y[n] = (1 - weibull_cdf(week[n], shape, scale));
+  }
+}
+"
+
+stancode <- "
+data {
+  int N ;
+  int week[N] ;
+  int arrest[N] ;
+  int fin[N] ;
+}
+
+parameters {
+  real shape ;
+  real beta[2] ;
+}
+
+model {
+  for(n in 1:N){
+    if(arrest[n] == 0){
+      target += weibull_lccdf(week[n]| shape, exp(- (beta[1] + fin[n] * beta[2]) / shape)) ;
+    }else{
+      target += weibull_lpdf(week[n]| shape, exp(- (beta[1] + fin[n] * beta[2]) / shape)) ;
+    }
+  }
+}
+
+generated quantities {
+  real log_lik[N] ;
+  real pred_Y1[N];
+  real pred_Y2[N];
+
+  for(n in 1:N){
+    if(arrest[n] == 0){
+      log_lik[n] = weibull_lccdf(week[n]| shape, exp(- (beta[1] + fin[n] * beta[2]) / shape)) ;
+    }else{
+      log_lik[n] = weibull_lpdf(week[n]| shape, exp(- (beta[1] + fin[n] * beta[2]) / shape)) ;
+    }
+  }
+
+  for(n in 1:N){
+    pred_Y1[n] = (1 - weibull_cdf(week[n], shape, exp(- (beta[1] + beta[2]) / shape)));
+    pred_Y2[n] = (1 - weibull_cdf(week[n], shape, exp(- (beta[1]) / shape)));
+  }
+}
+"
+```
 ## 参考文献
 
 - [Rによる生存時間解析](http://stat.inf.uec.ac.jp/doku.php?id=r:survival)

@@ -1,0 +1,280 @@
+---
+title: "StanとRでベイズ統計モデリング15"
+pagetitle: "StanとRでベイズ統計モデリング15"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+今回は第11章「離散値をとるパラメータを使う」の後半から写経していく。
+
+## 11.3 ゼロ過剰ポアソン分布
+
+ある飲食店への来店回数を取得したデータをもとに来店回数が多い人の特徴を調べたい。来店回数はポアソン分布を仮定できそうではあるが、0が多いことから、ゼロ過剰ポアソン分布を利用するほうが望ましい。
+
+- `Sex`: 0が男性、1が女性
+- `Sake`: 0が飲まない、1が飲む
+
+```{r}
+library(dplyr)
+library(rstan)
+library(ggplot2)
+library(GGally)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap11/input/data-ZIP.txt')
+head(d)
+```
+
+
+## 11.3.1 解析目的とデータの分布の確認
+
+解析の目的は「リピーターになりそうな人を知りたい」とする。また「説明変数でリピーターになるかをどれほど予測できるかを知りたい、影響度合いも知りたい」とする。
+
+- 1行1列目のグラフから、女性が少なそう
+- 2行2列目のグラフから、お酒を飲む人が少なそう
+- 3行3列目のグラフから、年齢に特徴はなさそう
+- 4行4列目のグラフから、来店回数が0が突出して多く、0を除くと正規分布のような形状
+- 4行1列目のグラフから、女性だと来店回数が少なそう
+- 4行3列目のグラフから、年齢が高いと来店回数が多くなりそう
+- 2行4列目のグラフから、お酒を飲むかつ来店回数が0の人が少ないため順位相関係数が少し高い
+
+```{r}
+d$Sex <- as.factor(d$Sex)
+d$Sake <- as.factor(d$Sake)
+
+N_col <- ncol(d)
+ggp <- ggpairs(d, upper = 'blank', diag = 'blank', lower = 'blank')
+
+# 対角成分のヒストグラムを作成
+for (i in 1:N_col) {
+  x <- d[,i]
+  p <- ggplot(data.frame(x), aes(x = x)) +
+    theme_bw(base_size = 14) +
+    theme(axis.text.x = element_text(angle = 40, vjust = 1, hjust = 1))
+  if (class(x) == 'factor') {
+    p <- p + geom_bar(color = 'grey5', fill = 'grey80')
+  } else {
+    bw <- ifelse(colnames(d)[i] == 'Y', 1, (max(x)-min(x))/10)
+    p <- p + geom_histogram(binwidth = bw, color = 'grey5', fill = 'grey80') +
+      geom_line(aes(y = after_stat(count)*bw), stat = 'density')
+  }
+  p <- p + geom_label(data = data.frame(x = -Inf, y = Inf, label = colnames(d)[i]), aes(x = x, y = y, label = label), hjust = 0, vjust = 1)
+  ggp <- putPlot(ggp, p, i, i)
+}
+
+# 上三角成分の相関係数を作成
+zcolat <- seq(-1, 1, length = 81)
+zcolre <- c(zcolat[1:40]+1, rev(zcolat[41:81]))
+
+for (i in 1:(N_col-1)) {
+  for (j in (i+1):N_col) {
+    x <- as.numeric(d[,i])
+    y <- as.numeric(d[,j])
+    r <- cor(x, y, method = 'spearman', use = 'pairwise.complete.obs')
+    zcol <- lattice::level.colors(r, at = zcolat, col.regions = grey(zcolre))
+    textcol <- ifelse(abs(r) < 0.4, 'grey20', 'white')
+    ell <- ellipse::ellipse(r, level = 0.95, type = 'l', npoints = 50, scale = c(.2, .2), centre = c(.5, .5))
+    p <- ggplot(data.frame(ell), aes(x = x, y = y)) + theme_bw() + theme(
+      plot.background = element_blank(),
+      panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+      panel.border = element_blank(), axis.ticks = element_blank()) +
+      geom_polygon(fill = zcol, color = zcol) +
+      geom_text(data = NULL, x = .5, y = .5, label = 100*round(r, 2), size = 6, col = textcol)
+    ggp <- putPlot(ggp, p, i, j)
+  }
+}
+
+# 下三角成分の箱ヒゲ図を作成
+for (j in 1:(N_col-1)) {
+  for (i in (j+1):N_col) {
+    x <- d[,j]
+    y <- d[,i]
+    if (class(x) == 'factor' && class(y) == 'factor') {
+      p <- ggplot(reshape2::melt(table(x,y)), aes(x = x, y = y)) +
+        theme_bw(base_size = 14) +
+        geom_point(aes(size = value), color = 'grey80') +
+        geom_text(aes(label = value)) +
+        scale_size_area(max_size = 8) +
+        scale_x_continuous(breaks = 0:1, limits = c(-0.5,1.5)) + scale_y_continuous(breaks = 0:1, limits = c(-0.5,1.5))
+    } else {
+      p <- ggplot(data.frame(x, y, Y = as.numeric(d$Y)), aes(x = x, y = y, color = Y)) +
+        theme_bw(base_size = 14) +
+        theme(axis.text.x = element_text(angle = 40, vjust = 1, hjust = 1))
+      if (class(x) == 'factor') {
+        p <- p + geom_boxplot(alpha = 3/6, outlier.size = 0, fill = 'white') +
+          geom_point(position = position_jitter(w = 0.4, h = 0), size = 1)
+      } else {
+        p <- p + geom_point(size = 1)
+      }
+      p <- p + scale_color_gradient(low = 'grey65', high = 'grey5')
+    }
+    ggp <- putPlot(ggp, p, i, j)
+  }
+}
+print(ggp, left = 0.3, bottom = 0.3)
+```
+
+## 11.3.2 メカニズムの想像
+
+来店回数$Y$の0が突出している点が特徴的なので、このメカニズムを考える。1人が来店するメカニズムとして、「とにかく1回来店する」場合と「気に入って複数回来店する」場合のパターンがある。そして、とにかく1回来店するのは確率$q$のベルヌイ分布に従うと考え、リピーターの来店回数は平均$\lambda$のポアソン分布に従うと考える。
+
+つまり、確率$q$のコインを投げて、裏が出れば来店回数は0、表が出れば平均$\lambda$のポアソン分布に従って生成される。そして、$q$はロジスティック回帰、$\lambda$はポアソン回帰でパラメタの推定を分ける。コイン投げは離散パラメタとなるので、周辺化消去が必要になる。
+
+$y=0$のときは「ベルヌイ分布で0が出る確率」と「ベルヌイ分布で1が出る確率」と「ポアソン分布で0が出る確率」の和となる。$y=0$のときはベルヌイ分布の可能性が高いが、$y=1$のときはどちらの分布か判断し難くく、$y\ge2$のときはポアソン分布に従うと考える。そのため、$Bernoulli(0|q) + Bernoulli(1|q) × Poisson(y=0|\lambda)$とする。
+
+$$
+\begin{eqnarray}
+ZIP(y|q,\lambda)
+=
+  \begin{cases}
+    Bernoulli(0|q) + Bernoulli(1|q) × Poisson(y=0|\lambda) \ if \ y = 0 \\
+    Bernoulli(1|q) × Poisson(y|\lambda) \ if \ y \ge 1 \\
+  \end{cases}
+\end{eqnarray}
+$$
+
+
+## 11.3.3 モデル式の記述
+
+$\boldsymbol{ X }$はN×4の行列で、$\overrightarrow{ b}$は長さ4のベクトル。
+
+<div class="tbox">
+<th3>モデル11-7/th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+q[n] &=& inv\_logit((\boldsymbol{ X } \overrightarrow{ b_{1}})[n]) \\
+\lambda[n] &=& (\boldsymbol{ X } \overrightarrow{ b_{2}})[n] \\
+Y[n] &\sim& ZIP(q[n], \lambda[n])
+\end{eqnarray}
+$$
+</div>
+</div>
+
+## 11.3.4 Stanで実装
+
+Stanのモデルは下記の通り。
+
+```
+functions {
+  real ZIP_lpmf(int Y, real q, real lambda) {
+    if (Y == 0) {
+      return log_sum_exp(
+        bernoulli_lpmf(0 | q),
+        bernoulli_lpmf(1 | q) + poisson_log_lpmf(0 | lambda)
+      );
+    } else {
+      return bernoulli_lpmf(1 | q) + poisson_log_lpmf(Y | lambda);
+    }
+  }
+}
+
+data {
+  int N;
+  int D;
+  int<lower=0> Y[N];
+  matrix[N,D] X;
+}
+
+parameters {
+  vector[D] b[2];
+}
+
+transformed parameters {
+  vector[N] q_x;
+  vector[N] q;
+  vector[N] lambda;
+
+  q_x = X*b[1];
+  lambda = X*b[2];
+  for (n in 1:N)
+    q[n] = inv_logit(q_x[n]);
+}
+
+model {
+  for (n in 1:N)
+    Y[n] ~ ZIP(q[n], lambda[n]);
+}
+```
+
+## 11.3.5 推定結果の解釈
+
+データを用意する。
+
+```{r, class.output="scroll-1000"}
+d$Age <- d$Age/10
+X <- cbind(1, d[,-ncol(d)])
+data <- list(N = nrow(d), D = ncol(X), Y = d$Y, X = X)
+data
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model117 <- stan_model('note_ahirubayes15-117.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model117, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。`b[1,]`は来店確率に関わる回帰係数で、`b[2,]`はリピーターが何回来店するかに関わる回帰係数。`b[,1−4]`は切片、`Sex`、`Sake`、`Age`に対応する。`Age`は10で割っているので、10倍する必要がある。1回来る来店確率が高いのは、「女性(`b[1,2]=1.6`)でお酒を飲んでいる人(`b[1,3]=3.4`)」である。リピーターになる確率が高いのは、「男性(`b[2,2]=-0.7`)でお酒を飲んでいない人(`b[2,3]=-0.2`)で、年齢が高い人(`b[2,4]=0.2`)」である。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), pars = c('b', 'q', 'lambda'), digits_summary = 1)
+```
+
+$q, \lambda$の順位相関係数の中央値は負であるため、来店確率が高いことと、リピーターで多数来店することは、負の関係がある。
+
+```{r}
+ms <- rstan::extract(fit)
+N_mcmc <- length(ms$lp__)
+r <- sapply(1:N_mcmc,
+            function(i) cor(ms$lambda[i,], ms$q[i,], method = 'spearman'))
+quantile(r, prob = c(0.025, 0.25, 0.5, 0.75, 0.975))
+```
+
+## 参考文献および参考資料
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+- [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)

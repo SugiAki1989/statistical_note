@@ -19,8 +19,11 @@ model {
 		Y[i] ~ binomial(8, q[i]); // binom
   }
   
+  for (n in 1:N){
+    r[n] ~ normal(0, sigma);
+  }
+  
   beta ~ normal(0, 100);      // non-informative prior
-  r ~ normal(0, sigma);       // hierarchical prior 
   sigma ~ uniform(0, 10000);  // non-informative prior
 }
 

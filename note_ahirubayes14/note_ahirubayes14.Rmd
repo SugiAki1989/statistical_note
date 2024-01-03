@@ -1,0 +1,505 @@
+---
+title: "StanとRでベイズ統計モデリング14"
+pagetitle: "StanとRでベイズ統計モデリング14"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+今回は第10章「離散値をとるパラメータを使う」のチャプターから写経していく。
+
+## 11.1 離散パラメタを扱うテクニック
+
+stanでは離散値を取るパラメタを扱うことはできない。そのため、場合の数を足し上げて、離散バラメタを消去した形で対数尤度を表現することで対処する。
+
+## 11.1.1 log_sum_exp関数
+
+離散バラメタを消去した形で対数尤度を表現するためには`target`記法と和の対数を計算する`log_sum_exp`関数が必要になる。`log_sum_exp`関数は複数の実数値を引数に取る。
+
+$$
+log\_sum\_exp(x, y) = log(exp(x) + exp(y))
+$$
+
+ベクトルも渡すことができ、右辺が`log_sum_exp`という形になっている。
+
+$$
+log\_sum\_exp\left(
+\left(
+  \begin{array}{c}
+    x_1 \\
+    \vdots \\
+    x_n
+  \end{array}
+\right)
+\right) = 
+log\left( \sum_{k=1}^{K} exp(x_{k}) \right)
+$$
+
+また、$exp(x_{k}) = u_{k} \iff x_k = log \ u_k$とおくと、下記の通り表現ができる。
+
+$$
+log\_sum\_exp\left(
+\left(
+  \begin{array}{c}
+    log \ u_1 \\
+    \vdots \\
+    log \ u_n
+  \end{array}
+\right)
+\right) = 
+log\left( \sum_{k=1}^{K} u_{k} \right)
+$$
+
+これは右辺から左辺への変形とみると、logの引数である$\Sigma$をベクトルに変換している。そのベクトルの各要素は、$\Sigma$の各項目のlogを取ったものである。
+
+## 11.1.2 周辺化消去
+
+stanでは離散値を取るパラメタを扱うことはできない。そのため、モデル式を変形し、離散パラメタを消去する必要がある。その方法の1つに「場合の数をすべて数え上げて各々の場合の確率を算出して和を取ることで、離散パラメタを消去する」という方法がある。これを周辺化消去という。周辺化消去は「同時に起こることは掛け算、排他的に起こることは足し算」という確率の基本ルールを利用する。下記の例を通りsて理解を深める。
+
+```{r}
+m <- matrix(
+  c(3/10, 1/10,
+    1/10, 5/10),
+  2, 2, byrow = TRUE
+)
+colnames(m) <- c('y_Red', 'y_White')
+rownames(m) <- c('x_BoxA', 'x_BoxB')
+m
+```
+
+例えば、同時確率$p(x_{BoxA},y_{Red})$は$0.3$であり、周辺確率$p(x_{BoxA}),p(x_{BoxB})$は
+
+```{r}
+apply(m, 2, sum)
+```
+
+である。周辺確率は「求めたい変数以外の変数の全ての取り得る確率の足し合わせ」を行った。つまり、各箱において$p(x_{BoxA}),p(x_{BoxB})$を消去したことになる。例えば、赤玉の個数は「箱A、箱B」の赤玉を足せば良く、箱が$N$個あっても同じように足し合わせればよい。
+
+
+ベルヌイ分布に従う離散パラメタを扱う例で理解を深める。高校の生徒を対象に喫煙経験を回答するアンケートを行う。ただ、喫煙経験は素直に回答できないので、コインを振って表であれば素直に回答し、裏であれば常にYesと回答する。Yesの場合は$Y=1$と回答する。このアンケートから喫煙経験$q$を推定したい。
+
+<div class="tbox">
+<th3>モデル11-1</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+coin[n] &\sim& Bernoulli(0.5) \\
+\theta[1] &=& q \\
+\theta[2] &=& 1.0 \\
+Y[n] &\sim& Bernoulli(\theta[coin[n] + 1]) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+このモデルでは$coin[n]$は表なら0、裏なら1をとる確率変数であり、分析者は知ることができない離散パラメタとなる。つまり、$coin[n]$は離散パラメタであり、int型のパラメタとして宣言できない。そこでコイントスを場合の数を数え上げて和を取ることで、int型のパラメタを消去する。1人の具体的な例を通して考える。
+
+![coin](/Users/aki/Documents/statistical_note/note_ahirubayes14/coin.png)
+
+回答データ(Y=1 or Y=0)を生成するには、図中の上側のルートと下側のルートの2通りの場合があることを表している。この2つは同時に起こらず排他的なので、回答データを生成する確率分布はこれらの和である。
+
+$$
+\begin{eqnarray}
+p(y|q) &=& 0.5 * Bernoulli(y|q) + 0.5 * Bernoulli(y|1.0) \\
+\end{eqnarray}
+$$
+
+途中のコイントスを結果を知らなくても回答がYes、Noになる確率を求めることができる。結果として、1人がアンケートで回答した場合の尤度は下記のとおりである。
+
+$$
+\begin{eqnarray}
+p(Y|q) &=& 0.5 * Bernoulli(Y|q) + 0.5 * Bernoulli(Y|1.0) \\
+\end{eqnarray}
+$$
+
+Stanで実装するには、この尤度の対数をとって対数尤度をを求めて、`target`を使った記法で足し込む。
+
+$$
+\begin{eqnarray}
+log \ p(Y|q) &=& \log\_sum\_exp(log \ 0.5 * log \ Bernoulli(Y|q) ,\  log \ 0.5 * log \ Bernoulli(Y|1.0)) \\
+\end{eqnarray}
+$$
+
+Stanのモデルは下記の通り。
+
+```
+data {
+  int N;
+  int<lower=0, upper=1> Y[N];
+}
+
+parameters {
+  real<lower=0, upper=1> q;
+}
+
+model {
+  for (n in 1:N)
+    target += log_sum_exp(
+      log(0.5) + bernoulli_lpmf(Y[n] | q),
+      log(0.5) + bernoulli_lpmf(Y[n] | 1)
+    );
+}
+```
+
+```{r}
+library(dplyr)
+library(rstan)
+library(ggplot2)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap11/input/data-coin.txt')
+data <- list(N = nrow(d), Y = d$Y)
+data
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model111 <- stan_model('note_ahirubayes14-111.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model111, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+似たような例として、ポアソン分布を使った例を考える。パラメタ$\lambda$のポアソン分布から乱数を発生させ、出力させた値$m$の枚数のコインを一度に投げ、そのうち表は出た枚数を$Y$とする。ここでの$m[n]$は離散パラメタである。
+
+<div class="tbox">
+<th3>モデル11-2</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+m[n] &\sim& Poisson(\lambda) \\
+Y[n] &\sim& Binomial(m[n], 0.5) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+このケースでは、$m$の場合の数を数え上げて和をとって消去する。1つ分の尤度は下記の通り。
+
+$$
+\begin{eqnarray}
+p(Y|\lambda) &=& Poisson(0|\lambda)×binomial(Y|0,0.5) \\
+&+& Poisson(1|\lambda)×binomial(Y|1,0.5) \\
+&+& Poisson(2|\lambda)×binomial(Y|2,0.5) \\
+&+& ... 
+\end{eqnarray}
+$$
+
+$Y$の最大値は9なので、$m$について高々40までを考慮すればよい。なぜなら、$Binomial(9|40,0.5)$の確率は$Binomial(9|m,0.5)$と比べて非常に小さいため、40以上は無視できる。
+
+$$
+\begin{eqnarray}
+p(Y|\lambda) &=& \sum_{m=Y}^{40} \left[ Poisson(m|\lambda)×Binomial(Y|m,0.5)\right]
+\end{eqnarray}
+$$
+
+これに対数をとって対数尤度を計算する。
+
+$$
+\begin{eqnarray}
+\log \ p(Y|\lambda) &=& \log \left(\sum_{m=Y}^{40} \left[ Poisson(m|\lambda)×Binomial(Y|m,0.5)\right]\right) \\
+&=& log\_sum\_exp
+\left(
+  \begin{array}{c}
+    log \ Poisson(Y|\lambda)×log \ Binomial(Y|Y,0.5) \\
+    log \ Poisson(Y+1|\lambda)×log \ Binomial(Y+1|Y,0.5) \\
+    \vdots \\
+    log \ Poisson(40|\lambda)×log \ Binomial(40|Y,0.5) \\
+  \end{array}
+\right)
+\end{eqnarray}
+$$
+
+Stanのモデルは下記の通り。
+
+```
+  int N;
+  int M_max;
+  int<lower=0> Y[N];
+}
+
+parameters {
+  real<lower=0> lambda;
+}
+
+model {
+  for (n in 1:N) {
+    vector[M_max-Y[n]+1] lp;
+    for (m in Y[n]:M_max)
+      lp[m-Y[n]+1] = poisson_lpmf(m | lambda) + binomial_lpmf(Y[n] | m, 0.5);
+    target += log_sum_exp(lp);
+  }
+}
+```
+
+```{r}
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap11/input/data-poisson-binomial.txt')
+data <- list(N = nrow(d), M_max = 40, Y = d$Y)
+data
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model112 <- stan_model('note_ahirubayes14-112.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model112, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+## 11.1.3 公式の活用
+
+ポアソン分布と二項分布は、すでに知られる公式によって合成が可能であり、
+
+<div class="tbox">
+<th3>モデル11-3</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+m &\sim& Poisson(\lambda) \\
+Y &\sim& Binomial(m, p) \\
+Y &\sim& Poisson(\lambda p) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+合成した結果、下記の通り表現できる。
+
+<div class="tbox">
+<th3>モデル11-4</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y &\sim& Poisson(\lambda p) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+Stanのモデルは下記の通りシンプルに表現できる。$p=0.5$とした場合である。
+
+```
+data {
+  int N;
+  int<lower=0> Y[N];
+}
+
+parameters {
+  real<lower=0> lambda;
+}
+
+model {
+  for (n in 1:N)
+    Y[n] ~ poisson(lambda*0.5);
+}
+```
+
+## 11.2 混合正規分布
+
+100人分の社員の能力測定値のスコアを使って混合正規分布と離散パラメタへの理解を深める。混合正規分布は確率$a$で1つ目の正規分布から生成され、確率$1-a$で2つ目の正規分布から生成される。
+
+$$
+Normal\_Mixture(a, \mu_{1}, \mu_{2}, \sigma_{1}, \sigma_{2}) = a × N(y|\mu_{1},\sigma_{1}) + (1-a) × N(y|\mu_{2},\sigma_{2})
+$$
+
+混合正規分布を使ってモデル式を表現すると、下記のようになる。
+
+<div class="tbox">
+<th3>モデル11-5</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] \sim Normal\_Mixture(a, \mu_{1}, \mu_{2}, \sigma_{1}, \sigma_{2})
+\end{eqnarray}
+$$
+</div>
+</div>
+
+Stanのモデル式は下記の通り。`log1m(a)`関数は、`log(1-a)`をより安定して計算するための便利関数。
+
+```
+data {
+  int N;
+  vector[N] Y;
+}
+
+parameters {
+  real<lower=0, upper=1> a;
+  ordered[2] mu;
+  vector<lower=0>[2] sigma;
+}
+
+model {
+  for (n in 1:N)
+    target += log_sum_exp(
+      log(a)   + normal_lpdf(Y[n] | mu[1], sigma[1]),
+      log1m(a) + normal_lpdf(Y[n] | mu[2], sigma[2])
+    );
+}
+```
+
+ここでは混合正規分布の混合数を$K$個に拡張した例をメモしておく。
+
+```{r}
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap11/input/data-mix2.txt')
+K <- 5
+data <- list(N = nrow(d), K = K, Y = d$Y)
+init <- list(a = rep(1,K)/K, mu = seq(10,40,len = K), s_mu = 20, sigma = rep(1,K))
+data
+```
+
+可視化するとこのような分布である。
+
+```{r}
+dens <- density(d$Y)
+
+ggplot(data = d, aes(x = Y)) +
+  theme_bw(base_size = 18) +
+  geom_histogram(color = 'black', fill = 'white') +
+  geom_density(aes(y = after_stat(count)), alpha = 0.35, colour = 'black', fill = 'gray20') +
+  geom_rug(sides = 'b') +
+  labs(x = 'Y') + xlim(range(dens$x)) 
+```
+
+$$
+Normal\_Mixture(y|\overrightarrow{ a }, \overrightarrow{ \mu }, \overrightarrow{ \sigma }) = \sum_{k=1}^{K} a_{k} Normal(y|\mu_{k}, \sigma_{k})
+$$
+
+モデル式は下記の通り。
+
+<div class="tbox">
+<th3>モデル11-6</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+\log Normal\_Mixture(y|\overrightarrow{ a }, \overrightarrow{ \mu }, \overrightarrow{ \sigma }) &=& \log \left[ \sum_{k=1}^{K} a_{k} Normal(y|\mu_{k}, \sigma_{k})\right] \\
+&=& log\_sum\_exp
+\left(
+  \begin{array}{c}
+  \log{a_{1} Normal(y|\mu_{1},\sigma_{1})} \\
+    \vdots \\
+  \log{a_{k} Normal(y|\mu_{k},\sigma_{k})} \\
+  \end{array}
+\right) \\
+&=& log\_sum\_exp
+\left(
+  \begin{array}{c}
+  \log{a_{1} + Normal\_lpdf(y|\mu_{1},\sigma_{1})} \\
+    \vdots \\
+  \log{a_{k} + Normal\_lpdf(y|\mu_{k},\sigma_{k})} \\
+  \end{array}
+\right)
+\end{eqnarray}
+$$
+</div>
+</div>
+
+Stanのモデルは下記の通り。$\overrightarrow{ a }$は合計すると1になるためsimplex型で定義できる。また、位置パラメタ$\mu$は混合正規分布の場合、順序関係を持たせることが可能なので`order`型で定義できる。
+
+```
+data {
+  int N;
+  int K;
+  vector[N] Y;
+}
+
+parameters {
+  simplex[K] a;
+  ordered[K] mu;
+  vector<lower=0>[K] sigma;
+  real<lower=0> s_mu;
+}
+
+model {
+  mu ~ normal(mean(Y), s_mu);
+  sigma ~ gamma(1.5, 1.0);
+  for (n in 1:N) {
+    vector[K] lp;
+    for (k in 1:K)
+      lp[k] = log(a[k]) + normal_lpdf(Y[n] | mu[k], sigma[k]);
+    target += log_sum_exp(lp);
+  }
+}
+
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model114 <- stan_model('note_ahirubayes14-114.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model114, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+
+## 参考文献および参考資料
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+- [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)

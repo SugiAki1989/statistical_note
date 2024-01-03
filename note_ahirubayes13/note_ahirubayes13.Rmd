@@ -1,0 +1,481 @@
+---
+title: "StanとRでベイズ統計モデリング13"
+pagetitle: "StanとRでベイズ統計モデリング13"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+今回は第10章「収束しない場合の対処法」の後半、10.2.4の分散共分散行列のチャプターから写経していく。
+
+## 10.2.4 分散共分散行列
+
+チャプター8の階層モデルを多変量正規分布、共分散行列を使って拡張する。このモデルのメカニズムとしては、$a[1],a[2],a[3],a[4]$を「すべての会社で共通の全体平均」と「会社差を表す項」に分解する。会社差は平均0標準偏差$\sigma_{a}$の正規分布から生成されると考える。$b[1],b[2],b[3],b[4]$も同様で、年齢に伴う昇給額は「すべての会社で共通の全体平均」と「会社差を表す項」に分解する。
+
+このような制約を入れることで、新卒時点の年収の会社差のばらつきは$\sigma_{a}$ぐらいと解釈できるようになる。$\sigma_{a}$には無情報事前分布を仮定する。このように階層的に事前分布が設定されているため階層モデルと呼ばれる。
+
+<div class="tbox">
+<th3>モデル8-4</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &\sim& Normal(a[KID[n]] + b[KID[n]]X[n], \sigma_{Y}) \\
+a[k] &\sim& Normal(a_{全体平均}, \sigma_{a}) \\
+b[k] &\sim& Normal(b_{全体平均}, \sigma_{b}) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+上記モデルでは、$a[k],b[k]$は独立した正規分布に従うと仮定されている。ただ、モデルのメカニズムとして、新卒年収が高いと年齢による昇給額も高くなる高くなりやすい場合もある。$a[k]$が高いと$b[k]$も高い、$a[k]$が高いと$b[k]$が低い、となるようような相関関係をモデル化したい。このようなケースで多変量正規分布が役立つ。
+
+<div class="tbox">
+<th3>モデル10-5</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &\sim& Normal(a[KID[n]] + b[KID[n]]X[n], \sigma_{Y}) \\
+\begin{pmatrix}
+a[k] \\
+b[k] \\
+\end{pmatrix}
+&\sim&
+MultiNormal
+\left(
+  \begin{array}{c}
+    \left(
+  \begin{array}{c}
+    a_{全体平均} \\
+    b_{全体平均} \\
+  \end{array}
+\right)
+  \end{array},\Sigma
+\right)
+\end{eqnarray}
+$$
+</div>
+</div>
+  
+一般に、多変量正規分布は下記の通り表現される。この分布は$\overrightarrow{y}$の各要素$y_{1},...,y_{n}$が従う同時分布になっている。$\Sigma$は共分散行列で、$|\Sigma|$は行列式である。共分散行列には無情報事前分布を利用する。
+
+$$
+MultiNormal(\overrightarrow{y}|\overrightarrow{\mu},\Sigma) = \frac{1}{(2\pi)^{\frac{K}{2}}}\frac{1}{\sqrt{|\Sigma|}} 
+\exp 
+\left( 
+-\frac{1}{2} (\overrightarrow{y}-\overrightarrow{\mu})\Sigma^{-1}(\overrightarrow{y}-\overrightarrow{\mu}) 
+\right)
+$$
+
+$\Sigma$の対角成分以外が0である場合、互いに独立な$K$個の正規分布から生成されたのと同じである。2つの要素しかない場合、$\overrightarrow{y}=(a,b)^{T}$を考えるとわかり良い。$\mu_{a},\sigma_{a}$を$a$の平均、標準偏差、$\mu_{b},\sigma_{b}$を$b$の平均、標準偏差とする。$a,b$の相関を$\rho$とする。
+
+$$
+\overrightarrow{\mu} = 
+\left(
+  \begin{array}{c}
+    \mu_{a} \\
+    \mu_{b} \\
+  \end{array}
+\right)
+,
+\Sigma = 
+\begin{pmatrix}
+\sigma_{a}^{2} & \sigma_{a}\sigma_{b}\rho \\
+\sigma_{a}\sigma_{b}\rho & \sigma_{b}^{2}
+\end{pmatrix}
+$$
+
+Stanのモデル式は下記の通り。
+
+```
+data {
+  int N;
+  int K;
+  vector[N] X;
+  vector[N] Y;
+  int<lower=1, upper=K> KID[N];
+}
+
+parameters {
+  vector[2] ab[K];
+  vector[2] ab0;
+  cov_matrix[2] cov;
+  real<lower=0> s_Y;
+}
+
+transformed parameters {
+  vector[K] a;
+  vector[K] b;
+  for (k in 1:K) {
+    a[k] = ab[k,1];
+    b[k] = ab[k,2];
+  }
+}
+
+model {
+  ab ~ multi_normal(ab0, cov);
+  Y ~ normal(a[KID] + b[KID] .* X, s_Y);
+}
+// forloop版
+// model {
+//   for (k in 1:K) {
+//     ab[k] ~ multi_normal(ab0, cov);
+//   }
+//   for (n in 1:N) {
+//     Y[n] ~ normal(a[KID[n]] + b[KID[n]] * X[n], s_Y);
+//   }
+// }
+```
+
+ただ、このモデルは収束しない。モデルが複雑でパラメタの制限が少ないのに対し、データが十分ではないことが原因。このような場合、分散共分散行列に弱情報事前分布を設定する。このようなケースでは逆ウィシャート分布が使われることが多い模様。逆ウィシャート分布は逆ガンマ分布の多変量版で、共分散行列の共役事前分布でもある。
+逆Wishart分布は、Wishart分布に従う行列の逆行列が従う分布です。行列のサイズを$K$としたとき、対称正定値行列$\Sigma$の逆ウィシャート分布は、自由度パラメタ$\nu \in (K-1, \infty)$と対称正定値行列のパラメタ$S \in \mathbb{ R }^{K×K}$を使って下記のように表現される。
+
+$$
+p(\mathbf {\Sigma} | \nu, S) = \frac{1}{2^\frac{\nu K}{2}} \
+\frac{1}{\Gamma_K \! \left( \frac{\nu}{2} \right)} 
+\ \left| S \right|^\frac{\nu}{2} 
+\ \left| \mathbf {\Sigma} \right|^{-\frac{\nu + K + 1}{2}} \ \exp \! \left(
+- \frac{1}{2} \ \text{tr} (S \mathbf {\Sigma}^{-1}) \right)
+$$
+
+ただ、逆ウィシャート分布はパラメタの設定が難しく、解決策として、標準偏差と相関から分散共分散行列を構成する方法がある。こうすることで、$\sigma_{a},\sigma_{b}$に事前分布を設定しやすく、$\sigma_{a},\sigma_{b},\rho$から分散共分散行列$\Sigma$を構成する。
+
+<div class="tbox">
+<th3>モデル10-6</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &\sim& Normal(a[KID[n]] + b[KID[n]]X[n], \sigma_{Y}) \\
+\begin{pmatrix}
+a[k] \\
+b[k] \\
+\end{pmatrix}
+&\sim&
+MultiNormal
+\left(
+  \begin{array}{c}
+    \left(
+  \begin{array}{c}
+    a_{全体平均} \\
+    b_{全体平均} \\
+  \end{array}
+\right)
+  \end{array},
+  \begin{pmatrix}
+\sigma_{a}^{2} & \sigma_{a}\sigma_{b}\rho \\
+\sigma_{a}\sigma_{b}\rho & \sigma_{b}^{2}
+\end{pmatrix}
+\right) \\
+a_{全体平均} &\sim& Normal(400,200) \\
+b_{全体平均} &\sim& Normal(15,15) \\
+\sigma_{a} &\sim& Student\_t^{+}(4,0,200) \\
+\sigma_{b} &\sim& Student\_t^{+}(4,0,20) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+事前分布を利用するにあたり、下記の通り仮定を置いている。
+
+- 新卒の基本年収の全体平均$a_{全体平均}$: 200-600万円の範囲だろう
+- 年齢に伴う昇給額の全体平均$b_{全体平均}$: 0-30万円の範囲だろう
+- 新卒の基本年収の会社差のばらつき$\sigma_{a}$: 高々200万円くらいだろう
+- 年齢に伴う昇給額の会社差のばらつき$\sigma_{b}$: 高々20万円くらいだろう
+- $\sigma_{a},\sigma_{b}$の関係を表す$\rho$には無情報事前分布を利用
+
+```
+data {
+  int N;
+  int K;
+  vector[N] X;
+  vector[N] Y;
+  int<lower=1, upper=K> KID[N];
+}
+
+parameters {
+  vector[2] ab[K];
+  vector[2] ab0;
+  real<lower=0> s_a;
+  real<lower=0> s_b;
+  real<lower=-1, upper=1> rho;
+  real<lower=0> s_Y;
+}
+
+transformed parameters {
+  vector[K] a;
+  vector[K] b;
+  matrix[2,2] cov;
+  for (k in 1:K) {
+    a[k] = ab[k,1];
+    b[k] = ab[k,2];
+  }
+  // 共分散分散行列
+  cov[1,1] = square(s_a); cov[1,2] = s_a*s_b*rho;
+  cov[2,1] = s_a*s_b*rho; cov[2,2] = square(s_b);
+}
+
+model {
+  ab0[1] ~ normal(400, 200);
+  ab0[2] ~ normal(15, 15);
+  s_a ~ student_t(4, 0, 200);
+  s_b ~ student_t(4, 0, 20);
+  ab ~ multi_normal(ab0, cov);
+  Y ~ normal(a[KID] + b[KID] .* X, s_Y);
+}
+```
+
+```{r}
+library(dplyr)
+library(rstan)
+library(ggplot2)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+library(rstan)
+
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap08/input/data-salary-2.txt')
+N <- nrow(d)
+K <- 4
+data <- list(N=N, K=K, X=d$X, Y=d$Y, KID=d$KID)
+```
+
+
+モデルは下記の通りである。
+
+```
+data {
+  int N;
+  int K;
+  vector[N] X;
+  vector[N] Y;
+  int<lower=1, upper=K> KID[N];
+}
+
+parameters {
+  vector[2] ab[K];
+  vector[2] ab0;
+  real<lower=0> s_a;
+  real<lower=0> s_b;
+  real<lower=-1, upper=1> rho;
+  real<lower=0> s_Y;
+}
+
+transformed parameters {
+  vector[K] a;
+  vector[K] b;
+  matrix[2,2] cov;
+  for (k in 1:K) {
+    a[k] = ab[k,1];
+    b[k] = ab[k,2];
+  }
+  // Σを構成
+  cov[1,1] = square(s_a); cov[1,2] = s_a*s_b*rho;
+  cov[2,1] = s_a*s_b*rho; cov[2,2] = square(s_b);
+}
+
+model {
+  // 事前分布
+  ab0[1] ~ normal(400, 200);
+  ab0[2] ~ normal(15, 15);
+  s_a ~ student_t(4, 0, 200);
+  s_b ~ student_t(4, 0, 20);
+  ab ~ multi_normal(ab0, cov);
+
+  // `.*`は要素ごとの積
+  Y ~ normal(a[KID] + b[KID] .* X, s_Y);
+}
+// forloop版
+// model {
+//   s_a ~ student_t(4, 0, 200);
+//   s_b ~ student_t(4, 0, 20);
+//   ab0[1] ~ normal(400, 200);
+//   ab0[2] ~ normal(15, 15);
+// 
+//   for (k in 1:K) {
+//     ab[k] ~ multi_normal(ab0, cov);
+//   }
+// 
+//   for (n in 1:N) {
+//     Y[n] ~ normal(a[KID[n]] + b[KID[n]] * X[n], s_Y);
+//   }
+// }
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model106 <- stan_model('note_ahirubayes13-106.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model106, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+
+この方法では、分散共分散行列のサイズが大きくなると、事前分布の設定が煩雑になる。その解決策として、LKJ相関分布を利用する方法がある。詳しくは[Stanマニュアル](https://stan-ja.github.io/gh-pages-html/#:~:text=LKJ%E7%9B%B8%E9%96%A2-,%E5%88%86%E5%B8%83,-%E3%81%AF60.1%E7%AF%80)を参照。相関行列に対してLKJ相関分布で事前分布を設定し、行列演算から分散共分散行列を作る。
+
+<div class="tbox">
+<th3>モデル10-7</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y[n] &\sim& Normal(a[KID[n]] + b[KID[n]]X[n], \sigma_{Y}) \\
+\begin{pmatrix}
+a[k] \\
+b[k] \\
+\end{pmatrix}
+&\sim&
+MultiNormal\_Cholesky
+\left(
+  \begin{array}{c}
+    \left(
+  \begin{array}{c}
+    a_{全体平均} \\
+    b_{全体平均} \\
+  \end{array}
+\right)
+  \end{array},
+  \Sigma_{chol}
+\right) \\
+
+\Sigma_{chol} &\sim& 
+\begin{pmatrix}
+\sigma_{a} & 0 \\
+0 & \sigma_{b}
+\end{pmatrix} \Omega_{chol} \\
+a_{全体平均} &\sim& Normal(400,200) \\
+b_{全体平均} &\sim& Normal(15,15) \\
+\sigma_{a} &\sim& Student\_t^{+}(4,0,200) \\
+\sigma_{b} &\sim& Student\_t^{+}(4,0,20) \\
+\Omega_{chol} &\sim& LKJcorr\_Cholesky(\nu) 
+\end{eqnarray}
+$$
+</div>
+</div>
+
+$\Sigma_{chol}$は分散共分散行列もコレスキー因子を表し、$\Omega_{chol}$は相関行列のコレスキー因子を表す。MultiNormal_Cholesky分布は、コレスキー因子を引数にとる多変量正規分布。LKJcorr_Cholesky分布は相関行列のコレスキー因子を生成する分布で、$\Omega_{chol}$の事前分布である。$\nu$はLKJcorr_Cholesky分布のshapeパラメタで1以上の値をとる。1だと一様分布に相当する無情報事前分布となり。2や4などであれば制約の強い相関行列が生成される。
+
+
+モデルは下記の通りである。
+
+```
+data {
+  int N;
+  int K;
+  vector[N] X;
+  vector[N] Y;
+  int<lower=1, upper=K> KID[N];
+  real Nu;
+}
+
+parameters {
+  vector[2] ab[K];
+  vector[2] ab0;
+  cholesky_factor_corr[2] corr_chol;
+  vector<lower=0>[2] sigma_vec;
+  real<lower=0> s_Y;
+}
+
+transformed parameters {
+  vector[K] a;
+  vector[K] b;
+  cholesky_factor_cov[2] cov_chol;
+  for (k in 1:K) {
+    a[k] = ab[k,1];
+    b[k] = ab[k,2];
+  }
+  // 分散共分散行列を構成
+  cov_chol = diag_pre_multiply(sigma_vec, corr_chol);
+}
+
+model {
+  ab0[1] ~ normal(400, 200);
+  ab0[2] ~ normal(15, 15);
+  sigma_vec[1] ~ student_t(4, 0, 200);
+  sigma_vec[2] ~ student_t(4, 0, 20);
+  corr_chol ~ lkj_corr_cholesky(Nu);
+  ab ~ multi_normal_cholesky(ab0, cov_chol);
+  Y ~ normal(a[KID] + b[KID] .* X, s_Y);
+}
+
+generated quantities {
+  matrix[2,2] corr;
+  matrix[2,2] cov;
+  // 相関行列のコレスキー因子corr_cholから相関行列corrを算出
+  corr = multiply_lower_tri_self_transpose(corr_chol);
+  // 分散共分散行列のコレスキー因子cov_cholから分散共分散行列covを算出
+  cov = multiply_lower_tri_self_transpose(cov_chol);
+}
+```
+
+- `diag_pre_multiply(vector v, matrix m)`: `diag_matrix(v) * m`を計算し、`matrix`型を返す
+- `diag_matrix(vector v)`: `v`の各要素を対角線上に並べた対角行列を`matrix`型で返す
+- `multiply_lower_tri_self_transpose(matrix m)`: `m`の対角成分と下三角成分だけを抜き出した行列`L`とすると、`LL^t`を計算して`matrix`型で返す
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model107 <- stan_model('note_ahirubayes13-107.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+data <- list(N = N, K = K, X = d$X, Y = d$Y, KID = d$KID, Nu = 2)
+fit <- sampling(object = model107, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+
+## 参考文献および参考資料
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+- [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)
