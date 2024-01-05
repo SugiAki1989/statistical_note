@@ -1,19 +1,19 @@
 ---
-title: '事後分布の評価方法および解釈方法について'
-pagetitle: '事後分布の評価方法および解釈方法について'
+title: "ベイズ統計01"
+pagetitle: "ベイズ統計01"
 output:
   html_document:
-    toc: TRUE
-    toc_depth: 5
-    toc_float: FALSE
-    # number_sections: TRUE
-    code_folding: 'show'
-    highlight: 'kate'
-    # theme: 'flatly'
-    css: ../style.css
-    md_extensions: -ascii_identifiers
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
 ---
-
+  
 ```{r SETUP, include = FALSE}
 knitr::opts_chunk$set(
   echo = TRUE,
@@ -21,45 +21,222 @@ knitr::opts_chunk$set(
   warning = FALSE,
   # out.width = 800,
   # out.height = 600,
-  fig.align = 'center',
-  dev = 'ragg_png'
+  fig.align = "center",
+  dev = "ragg_png"
 )
 ```
 
-<div class='update-right'>
-UPDATE: `r Sys.time()`
+<div class="update-right">
+  UPDATE: `r Sys.time()`
 </div>
-
+  
 # はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。
 
-このノートではベイズ統計学の事後分布の評価方法および解釈方法についてまとめている。下記の第2章を参考にしている。
+今回はStanのチュートリアルにもある「Eight Schools」の問題を例に階層ベイスモデルへの理解を深める。[Bayesian Data Analysis](http://www.stat.columbia.edu/~gelman/book/)のチャプター5「Hierarchical models」と、非常にわかりやすい解説がされているこちらの記事を、参考にさせていただいた。
 
-- [はじめての統計データ分析](https://www.asakura.co.jp/detail.php?book_code=12214)
+- [Bayesian Data Analysis](http://www.stat.columbia.edu/~gelman/book/BDA3.pdf)
+- [8行のデータで理解する階層ベイズ](https://qiita.com/aoki-h/items/b8281823146b0e6c3ac2)
 
-## ライブラリや関数の設定
+## Eight Schoolsの問題と分析目的
+
+[TensorFlowのチュートリアル](https://www.tensorflow.org/probability/examples/Eight_Schools?hl=ja)に、ここで扱うEight Schoolsの問題が説明されていたので、内容をお借りする。
+
+> 『Bayesian Data Analysis』第 5.5 項（Gelman et al. 2013）の抄訳:
+8つの高校で実施された SAT-V（Scholastic Aptitude Test-Verbal）特別指導プログラムの効果を分析するために、Educational Testing Service の調査が実施されました。各調査の結果変数は、SAT-V の特別実施のスコアでした。これは、Educational Testing Service が運営し、大学が入学決定を下す際に使用する標準化された多肢選択式テストです。スコアは 200 点から 800 点の間で変動し、平均は約 500 点、標準偏差は約 100 点です。SA​​T 試験は、特に試験の成績を上げるための短期的な取り組みを評価するものではなく、長期にわたる学習で得た知識と能力の開発を反映するように設計されています。それにもかかわらず、この調査の対象となった 8 つの高校では、その短期指導プログラムが SAT のスコアの引き上げに非常に役立つと考えました。また、8 つのプログラムのいずれも、他のプログラムよりも効果的であったり、いくつかのプログラムの効果の類似性が他のプログラムのものよりも高かったりすることを予め信じる理由はありませんでした。
+
+要するに、8つの高校で、特別指導プログラムを実施。特別指導プログラムの前後でテストを受け、「どのくらい」テストの点数が上がったのか(下がったのか)が記録されている。特別指導プログラムは何点くらいの引き上げ効果があるのかを知りたい。
 
 ```{r}
+library(dplyr)
+library(rstan)
 library(ggplot2)
-library(scales)
-library(rstan) 
 
-rstan_options(auto_write = TRUE)
-options(mc.cores = parallel::detectCores())
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
 
-# 事後分布の要約統計量を計算する関数
-generated_quantities_summary <- function(
-    x, digits = 3, probs = c(0.025, 0.05, 0.5, 0.95, 0.975)
-    ){
-   y <- c(
-     round(mean(x), digits), 
-     round(sd(x), digits),
-     round(quantile(x, probs), digits)
-     )
-   
-   names(y) <- c('EAP', 'post.sd', probs)
-   return(y)
+d <- data.frame(
+  school = c('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'),
+  y = c(28, 8, -3, 7, -1, 1, 18, 12),
+  s = c(15, 10, 16, 11, 9, 11, 10, 18)
+  )
+j <- nrow(d)
+d
+```
+
+高校Aでは前後で28点の点数(標準誤差は15)の上昇が見られ、特別指導プログラムは有効に見える一方で、高校Cでは点数が-3(標準誤差は16)の下降が見られ、特別指導プログラムの効果はないようにも見える。さて、このような状況下で、どのようにすれば特別指導プログラムの効果を妥当な形で推定することができるだろうか。これがEight Schools問題。
+
+```{r}
+ggplot(data = d) +
+  theme_bw(base_size = 15) +
+  geom_point(aes(school, y)) + 
+  geom_errorbar(aes(school, y, ymax = y + s, ymin = y - s), width = 0.2) + 
+  geom_hline(aes(yintercept = mean(d$y)), col = 'tomato', linetype = 'dashed') +
+  labs(x = 'school', y = 'y', title = '8 School Problem')
+```
+
+## メカニズムの想像
+
+参考にしている記事にもある通り、3つのメカニズムを想定できる。ここでも同じように3つのモデルを想定する。
+
+![Models](/Users/aki/Documents/statistical_note/note_bayes01/models.png)
+
+### モデル1
+
+各高校$i=A,B,...,H$ごとの点数を$Y_{i}$、標準誤差を$S_{i}$、指導効果を$\theta_{i}$とすると、$Y_{i}$は平均$\theta_{i}$、標準偏差$S_{i}$の正規分布から生成されると考える。8つの高校は互いに無関係。各高校の効果はその高校のデータのみで推定する。
+
+<div class="tbox">
+<th3>モデル1</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y_{i} \sim Normal(\theta_{i}, S_{i})
+\end{eqnarray}
+$$
+</div>
+</div>
+
+無情報事前分布を使い、8つ高校を個別に推定すると、各校の事後分布の95%信用区間は下記の通り。
+
+```{r}
+# 各列ごとに各パラメタから乱数が生成され1000×8列
+# matrix(rnorm(30, mean = c(10,100,1000), sd = c(1,5,10)), nrow = 10, byrow = TRUE)
+m <- matrix(rnorm(1000 * j, mean = d$y, sd = d$s), nrow = 1000, byrow = TRUE)
+tibble(
+  median = apply(m, 2, median),
+  lower  = apply(m, 2, function(x) quantile(x, .025)),
+  upper  = apply(m, 2, function(x) quantile(x, .975))
+) %>% 
+  bind_cols(d) %>% 
+  ggplot() +
+  theme_bw(base_size = 15) +
+  geom_point(aes(x = school, y = median), col = 'tomato', size = 3) +
+  geom_errorbar(aes(school, median, ymax = upper, ymin = lower), width = 0.2, col = 'tomato') +
+  geom_point(aes(x = school, y = y), alpha = 1/2) +
+  labs(x = 'school', y = 'y', title = '8 School Problem')
+```
+
+推定を別々に行っており、事後分布の中央値の点推定値は、$θ_{i}=y_{i}$の近くに分布している。推定のばらつきを見ると、すべての高校の分布が重なっているので、各高校が別々の$θ_{i}$を持っているという前提はあまり妥当ではない。
+ 
+### モデル2
+
+全高校共通で効果$\theta$が1つあると仮定する。そして、この$\theta$の正規分布から8つ高校のデータが生成されたと考える。モデル1とは異なり、全ての高校が$\theta$を通して関係を持っている。
+
+<div class="tbox">
+<th3>モデル2</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y_{i} \sim Normal(\theta, S)
+\end{eqnarray}
+$$
+</div>
+</div>
+
+Bayesian Data Analysis](http://www.stat.columbia.edu/~gelman/book/)のp114,p120あたり、今回のようなデータ生成過程に対する事後分布の平均と標準偏差に関する計算方法が記載されている。
+
+```{r}
+# Bayesian Data Analysis: http://www.stat.columbia.edu/~gelman/book/
+# p114, p120に計算式の理由は記載されている
+# 標準誤差が大きい=特別指導プログラムの生徒が少ない=Yが大きくばらつく。
+# 標準誤差の逆数で、標準誤差が大きいものの影響は小さくするというようなニュアンス
+pool_s2 <- sum(1/(d$s)^2)
+pool_y <- sum(1/d$s^2 * d$y)/pool_s2
+set.seed(1989)
+pool_post <- rnorm(10000, mean = pool_y, sd = sqrt(pool_s2^(-1)))
+quantile(pool_post, c(.025, .5, .975))
+```
+
+1つの$\theta$によって生成されると仮定した場合、高校Aで観察された効果$\theta_{H}=28$が、このような仮定のもとでの分布から出てくる可能性は低いため、このモデルではデータのばらつきをうまく説明できない。
+
+```{r}
+sum(pool_post > 28)
+```
+
+### モデル3
+
+どの高校でも共通効果$\mu$を考える。そして、各高校ごとの効果である$\theta_{i}$は、共通効果$\mu$と標準偏差$\sigma$をもつ正規分布から生成されたと考える。同じ特別指導プログラムを実施しているので、同じような共通効果$\mu$が存在しており、違いは各高校ごとの生徒、指導者、何らかの高校に由来する差によるものと考える。
+
+このモデルでは各高校の$\theta_{i}$が1つ1つの高校差を表しているのと同時に、各$\theta_{i}$が同じ正規分布から生成されたと考えることで、高校同士が互いに関係を持つことになる。パラメタの関係性が階層構造になっているので、階層ベイスモデルと呼ばれる。
+
+高校に由来する差の大きさは$\sigma$によってコントロールされる。この$\sigma$が仮に$\infty$だとどうなるかというと、高校差が無限に大きくなる。つまり、各高校の$\theta_{i}$はどんな値でも取れる自由な状態となり、モデル1と同じになる。一方で、この$\sigma$が仮に0だとどうなるかというと、$\theta_{i}$はどの高校でも同じになるため、高校差はなくなり、モデル2と同じになる。
+
+<div class="tbox">
+<th3>モデル3</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y_{i} &\sim& Normal(\theta_{i}, S_{i}) \\
+\theta_{i} &\sim& Normal(\mu, \sigma) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+## モデル3を実装する
+
+モデル3のモデル構造をStanのモデルで書き直す。reparameterizationしたバージョンのモデル式ではなく、素直にモデル化している。
+
+```
+data {
+  int<lower=1> J;
+  real Y[J];
+  real<lower=0> S[J];
 }
+parameters {
+  real theta[J];
+  real mu;
+  real<lower=0> sigma;
+}
+model {
+  for (j in 1:J) {
+    theta[j] ~ normal(mu, sigma);
+  }
 
+  for (j in 1:J) {
+    Y[j] ~ normal(theta[j], S[j]);
+  }
+}
+```
+
+データを用意して、
+
+```{r}
+data <- list(Y = d$y, S = d$s, J = j)
+data
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model <- stan_model('note_bayes01−001.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model, data = data, seed = 1989)
+```
+
+推定結果を確認する。
+
+- 特別指導プログラムの効果$\mu$は7.64程度の点数の上昇を期待できる
+- ただ、95%信用区間が[-1.73, 17.71]なので、点数が下がる可能性もある
+- 高校差を表す$\sigma$は6.89程度のばらつきがある
+
+```{r, class.output="scroll-1000"}
+print(fit)
+```
+
+事後分布を可視化しておく。
+
+```{r}
+plot(fit)
+```
+
+```{r}
 # 事後分布を可視化する関数
 plot_posterior <- function(posterior_samples, 
                            title = 'Posterior Distribution',
@@ -84,297 +261,24 @@ plot_posterior <- function(posterior_samples,
     labs(title = title,  
          x = x_title,
          y = "Density") + 
-    scale_x_continuous(breaks = pretty_breaks(n = 10)) + 
+    scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + 
     xlim(xlim[[1]], xlim[[2]]) + 
     theme_minimal() +
     theme(plot.title = element_text(size = 14, face = "bold"),
           axis.title = element_text(size = 12))
 }
-```
 
-## データ
-
-```{r}
-x <- c(76.5, 83.9, 87.9, 70.8, 84.6, 85.1, 79.6, 79.8, 79.7, 78.0)
-summary(x)
-```
-
-## Stanコード
-
-```{r}
-model_code <- '
-data {
-  int<lower=0> n;     //データ数
-  real<lower=0> x[n]; //データ
-}
-parameters {
-  real mu;             //平均
-  real<lower=0> sigma; //標準偏差
-}
-  transformed parameters {
-}
-model {
-  x ~ normal(mu, sigma);  //正規分布
-}
-generated quantities{
-  real posterior_sample;
-  real log_lik;
-  posterior_sample = normal_rng(mu, sigma); //予測分布
-  log_lik = normal_lpdf(x|mu, sigma);       //対数確率
-}
-'
-```
-
-## サンプリング
-
-```{r}
-dat <- list(n = length(x), x = x)
-par <- c('mu', 'sigma', 'posterior_sample', 'log_lik')
-fit <- stan(
-    model_code = model_code,
-    data = dat,
-    pars = par,
-    seed = 1234,
-    chains = 4,
-    warmup = 1000,
-    iter = 21000
-  )
-ext <- extract(fit, pars = par)
-out <-
-  list(
-    fit = fit,
-    par = par,
-    prob = c(0.025, 0.05, 0.5, 0.95, 0.975),
-    mu = ext$mu,
-    sigma = ext$sigma,
-    posterior_sample = ext$posterior_sample,
-    log_lik = ext$log_lik
-  )
-# traceplot(fit)
-```
-
-
-## サンプリング結果
-
-```{r}
-# 正規分布に関する推測
-fit
-```
-
-## 事後分布の評価指標
-
-事後期待値(Expected a posteriori, EAP)は下記の通り定義される。事後分布の平均。サンプリング初期のバーンイン期間は使用しない。
-
-$$
-\hat{\theta}_{eap}=\frac{\sum_{t}^{T} \theta^{(t)}}{T}
-$$
-
-事後分散(Posterior standard deviation)は下記の通り定義される。post.sdとも呼ばれる。$\sqrt(\hat{\sigma}^{2}_{\theta}) = \hat{\sigma}_{\theta}$は事後標準偏差と呼ばれる。
-
-$$
-\hat{\sigma}^{2}_{\theta}=\frac{\sum_{t}^{T} (\theta^{(t)} - \hat{\theta}_{eap})^{2}}{T}
-$$
-
-事後期待値の標準誤差$\sigma_{\hat{\theta}_{eap}}$(standard error)は下記の関係にある。
-
-$$
-\hat{\theta}_{eap} \sim N(\theta_{eap}, \sigma_{\theta}/\sqrt{n_{eff}})
-$$
-
-予測分布には2種類ある点が注意。1つ目の定義は、$t$ごとにサンプリングされたパラメタを使用して「事後予測分布」を生成する方法。
-
-$$
-x^{*} \sim f(\theta^{(t)})
-$$
-
-正規分布モデルであれば下記の通り。$t$ごとにサンプリングされたパラメタが使用されている。
-
-$$
-x^{t} \sim N(\mu^{(t)}, \sigma^{(t)})
-$$
-
-2つ目の定義は、$t$ごとにサンプリングされたパラメタを使用せず、$\hat{\Theta}$には点推定値を利用する「条件付き予測分布」から生成する方法。
-
-$$
-f(x^{*}| \hat{\Theta})
-$$
-
-生成量(Generated quantities)は標本$\Theta^{(t)}$の関数$g(\Theta^{(t)})$として定義される。$\Theta^{(t)}$を利用して作成したものは生成量として呼ばれる。
-
-## 事後平均に関する推測
-
-平均値の点推定、区間推定は$\hat{\mu}_{eap} =$ `r generated_quantities_summary(out$mu)[[1]]`[`r generated_quantities_summary(out$mu)[[3]]` - `r generated_quantities_summary(out$mu)[[7]]`]
-
-```{r}
-# 事後平均の推定結果
-generated_quantities_summary(out$mu)
-
-# 事後平均の事後分布
+out <- rstan::extract(fit)
 plot_posterior(
-  out$mu, 
-  title = 'Posterior Probability Distribution of mu', 
-  x_title = 'mu',
-  xlim = c(70, 90)
-  )
+    out$mu, 
+    title = 'Posterior Probability Distribution of mu', 
+    x_title = 'mu',
+    xlim = c(-10, 30)
+)
+
 ```
 
+## 参考文献および参考資料
 
-## 事後標準偏差に関する推測
-
-標準偏差の点推定、区間推定は$\hat{\sigma}_{eap} =$ `r generated_quantities_summary(out$sigma)[[1]]`[`r generated_quantities_summary(out$sigma)[[3]]` - `r generated_quantities_summary(out$sigma)[[7]]`]
-
-```{r}
-# 事後標準偏差の推定結果
-generated_quantities_summary(out$sigma)
-
-# 事後標準偏差の事後分布
-plot_posterior(
-  out$sigma, 
-  title = 'Posterior Probability Distribution of sigma', 
-  x_title = 'sigma',
-  xlim = c(0, 15)
-  )
-```
-
-## 予測分布$x^{*}$に関する推測
-
-予測分布$x^{*}$の点推定、区間推定は$x^{*} =$ `r generated_quantities_summary(out$posterior_sample)[[1]]`[`r generated_quantities_summary(out$posterior_sample)[[3]]` - `r generated_quantities_summary(out$posterior_sample)[[7]]`]。平均の点推定、区間推定は$\hat{\mu}_{eap} =$ `r generated_quantities_summary(out$mu)[[1]]`[`r generated_quantities_summary(out$mu)[[3]]` - `r generated_quantities_summary(out$mu)[[7]]`]なので、予測分布なので、
-予測の不確実性が高いため、区間が広くなっている。
-
-```{r}
-# 事後予測分布の推定結果
-generated_quantities_summary(out$posterior_sample)
-
-# 事後予測分布
-plot_posterior(
-  out$posterior_sample, 
-  title = 'Posterior Predictive Distribution', 
-  x_title = 'posterior_sample',
-  xlim = c(50, 110)
-  )
-```
-
-## 分散の生成量に関する推測
-
-分散の事後分布は、生成量として下記の通り定義できる。
-
-$$
-g(\sigma^{(t)}) = \sigma^{(t)2}
-$$
-
-```{r}
-# 分散の生成量の推定結果
-sigma2 <- out$sigma^2
-generated_quantities_summary(sigma2) 
-
-# 分散の生成量の事後分布
-plot_posterior(
-  sigma2, 
-  title = 'Posterior Probability Distribution of sigma2', 
-  x_title = 'sigma2',
-  xlim = c(0, 150)
-  )
-```
-
-
-分散$\hat{\sigma}^{2}_{eap}$の点推定、区間推定は$x^{*} =$ `r generated_quantities_summary(sigma2)[[1]]`[`r generated_quantities_summary(sigma2)[[3]]` - `r generated_quantities_summary(sigma2)[[7]]`]
-
-
-## 変動係数の生成量に関する推測
-
-変動係数の事後分布は、生成量として下記の通り定義できる。
-
-$$
-cv^{(t)} = g(\mu^{(t)}, \sigma^{(t)})= \frac{\sigma^{(t)}}{\mu^{(t)}}
-$$
-
-
-```{r}
-# 変動係数の生成量の推定結果
-cv <- out$sigma / out$mu
-generated_quantities_summary(cv) 
-
-# 変動係数の生成量の事後分布
-plot_posterior(
-  cv, 
-  title = 'Posterior Probability Distribution of cv', 
-  x_title = 'cv',
-  xlim = c(0, 0.15)
-  )
-```
-
-変動係数$cv$の点推定、区間推定は$x^{*} =$ `r generated_quantities_summary(cv)[[1]]`[`r generated_quantities_summary(cv)[[3]]` - `r generated_quantities_summary(cv)[[7]]`]
-
-## 効果量の生成量に関する推測
-
-効果量の事後分布は、生成量として下記の通り定義できる。
-
-$$
-\delta_{c}^{(t)} = g(\mu^{(t)}, \sigma^{(t)})= \frac{\mu^{(t)} - c}{\sigma^{(t)}}
-$$
-
-```{r}
-# デルタ85の生成量の推定結果
-delta85 <- (out$mu - 85) / out$sigma
-generated_quantities_summary(delta85) 
-
-# 効果量の生成量の事後分布
-plot_posterior(
-  delta85, 
-  title = 'Posterior Probability Distribution of delta85', 
-  x_title = 'delta85',
-  xlim = c(-3, 2)
-  )
-```
-
-効果量$\delta_{85}$の点推定、区間推定は$x^{*} =$ `r generated_quantities_summary(delta85)[[1]]`[`r generated_quantities_summary(delta85)[[3]]` - `r generated_quantities_summary(delta85)[[7]]`]
-
-## 第1四分位の生成量に関する推測
-
-第1四分位%点の事後分布は、生成量として下記の通り定義できる。
-
-$$
-g(\mu^{(t)}, \sigma^{(t)})= \mu^{(t)} + z_{\alpha} \sigma^{(t)}
-$$
-
-下記は25%点の場合のサンプル。
-
-```{r}
-# 第1四分位の生成量の推定結果
-# qnorm(p = 0.25, 0, 1) = - 0.675
-quarter <- out$mu - 0.675 * out$sigma
-generated_quantities_summary(quarter) 
-
-# 第1四分位の生成量の事後分布
-plot_posterior(
-  quarter, 
-  title = 'Posterior Probability Distribution of quarter', 
-  x_title = 'quarter',
-  xlim = c(65, 85)
-  )
-```
-
-## 予測分布の特定区間の生成量に関する推測
-
-基準点未満の測定値が観測される確率は下記のように定義できる。サンプリングされたパラメタを使用して、累積分布関数から確率を得る。
-
-$$
-g(\mu^{(t)}, \sigma^{(t)}) = F(b|\mu^{(t)}, \sigma^{(t)}) - F(a|\mu^{(t)}, \sigma^{(t)})
-$$
-```{r}
-# 85g以下の確率の生成量の推定結果
-pred85 <- pnorm(85, out$mu, out$sigma)
-generated_quantities_summary(pred85) 
-
-# 85g以下の確率の生成量の事後分布
-plot_posterior(
-  pred85, 
-  title = 'Posterior Probability Distribution of pred85', 
-  x_title = 'pred85',
-  xlim = c(0.3, 1.2)
-  )
-```
-
-## 参考文献
-
-- [はじめての 統計データ分析](https://www.asakura.co.jp/detail.php?book_code=12214)
+- [Bayesian Data Analysis](http://www.stat.columbia.edu/~gelman/book/BDA3.pdf)
+- [8行のデータで理解する階層ベイズ](https://qiita.com/aoki-h/items/b8281823146b0e6c3ac2)

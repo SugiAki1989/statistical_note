@@ -1,0 +1,380 @@
+---
+title: '事後分布の評価方法および解釈方法について'
+pagetitle: '事後分布の評価方法および解釈方法について'
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: 'show'
+    highlight: 'kate'
+    # theme: 'flatly'
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = 'center',
+  dev = 'ragg_png'
+)
+```
+
+<div class='update-right'>
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではベイズ統計学の事後分布の評価方法および解釈方法についてまとめている。下記の第2章を参考にしている。
+
+- [はじめての統計データ分析](https://www.asakura.co.jp/detail.php?book_code=12214)
+
+## ライブラリや関数の設定
+
+```{r}
+library(ggplot2)
+library(scales)
+library(rstan) 
+
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+# 事後分布の要約統計量を計算する関数
+generated_quantities_summary <- function(
+    x, digits = 3, probs = c(0.025, 0.05, 0.5, 0.95, 0.975)
+    ){
+   y <- c(
+     round(mean(x), digits), 
+     round(sd(x), digits),
+     round(quantile(x, probs), digits)
+     )
+   
+   names(y) <- c('EAP', 'post.sd', probs)
+   return(y)
+}
+
+# 事後分布を可視化する関数
+plot_posterior <- function(posterior_samples, 
+                           title = 'Posterior Distribution',
+                           x_title = 'Parameter',
+                           xlim = NULL) {
+  
+  if (is.null(xlim)) {
+    range <- range(posterior_samples) 
+    xlim <- c(range[1] - abs(diff(range)) * 0.05, 
+              range[2] + abs(diff(range)) * 0.05)
+  }
+  
+  q <- quantile(posterior_samples, probs = c(0.025, 0.975))
+  m <- mean(posterior_samples)
+  
+  ggplot(data.frame(x = posterior_samples), aes(x = x)) +
+    geom_histogram(aes(y = ..density..), color = 'black', bins = 50, alpha = 0.2) +
+    geom_density(fill = "steelblue", alpha = 0.5) + 
+    geom_vline(xintercept = q[[1]], linetype = 3) + 
+    geom_vline(xintercept = q[[2]], linetype = 3) + 
+    geom_vline(xintercept = m, linetype = 3) + 
+    labs(title = title,  
+         x = x_title,
+         y = "Density") + 
+    scale_x_continuous(breaks = pretty_breaks(n = 10)) + 
+    xlim(xlim[[1]], xlim[[2]]) + 
+    theme_minimal() +
+    theme(plot.title = element_text(size = 14, face = "bold"),
+          axis.title = element_text(size = 12))
+}
+```
+
+## データ
+
+```{r}
+x <- c(76.5, 83.9, 87.9, 70.8, 84.6, 85.1, 79.6, 79.8, 79.7, 78.0)
+summary(x)
+```
+
+## Stanコード
+
+```{r}
+model_code <- '
+data {
+  int<lower=0> n;     //データ数
+  real<lower=0> x[n]; //データ
+}
+parameters {
+  real mu;             //平均
+  real<lower=0> sigma; //標準偏差
+}
+  transformed parameters {
+}
+model {
+  x ~ normal(mu, sigma);  //正規分布
+}
+generated quantities{
+  real posterior_sample;
+  real log_lik;
+  posterior_sample = normal_rng(mu, sigma); //予測分布
+  log_lik = normal_lpdf(x|mu, sigma);       //対数確率
+}
+'
+```
+
+## サンプリング
+
+```{r}
+dat <- list(n = length(x), x = x)
+par <- c('mu', 'sigma', 'posterior_sample', 'log_lik')
+fit <- stan(
+    model_code = model_code,
+    data = dat,
+    pars = par,
+    seed = 1234,
+    chains = 4,
+    warmup = 1000,
+    iter = 21000
+  )
+ext <- extract(fit, pars = par)
+out <-
+  list(
+    fit = fit,
+    par = par,
+    prob = c(0.025, 0.05, 0.5, 0.95, 0.975),
+    mu = ext$mu,
+    sigma = ext$sigma,
+    posterior_sample = ext$posterior_sample,
+    log_lik = ext$log_lik
+  )
+# traceplot(fit)
+```
+
+
+## サンプリング結果
+
+```{r}
+# 正規分布に関する推測
+fit
+```
+
+## 事後分布の評価指標
+
+事後期待値(Expected a posteriori, EAP)は下記の通り定義される。事後分布の平均。サンプリング初期のバーンイン期間は使用しない。
+
+$$
+\hat{\theta}_{eap}=\frac{\sum_{t}^{T} \theta^{(t)}}{T}
+$$
+
+事後分散(Posterior standard deviation)は下記の通り定義される。post.sdとも呼ばれる。$\sqrt(\hat{\sigma}^{2}_{\theta}) = \hat{\sigma}_{\theta}$は事後標準偏差と呼ばれる。
+
+$$
+\hat{\sigma}^{2}_{\theta}=\frac{\sum_{t}^{T} (\theta^{(t)} - \hat{\theta}_{eap})^{2}}{T}
+$$
+
+事後期待値の標準誤差$\sigma_{\hat{\theta}_{eap}}$(standard error)は下記の関係にある。
+
+$$
+\hat{\theta}_{eap} \sim N(\theta_{eap}, \sigma_{\theta}/\sqrt{n_{eff}})
+$$
+
+予測分布には2種類ある点が注意。1つ目の定義は、$t$ごとにサンプリングされたパラメタを使用して「事後予測分布」を生成する方法。
+
+$$
+x^{*} \sim f(\theta^{(t)})
+$$
+
+正規分布モデルであれば下記の通り。$t$ごとにサンプリングされたパラメタが使用されている。
+
+$$
+x^{t} \sim N(\mu^{(t)}, \sigma^{(t)})
+$$
+
+2つ目の定義は、$t$ごとにサンプリングされたパラメタを使用せず、$\hat{\Theta}$には点推定値を利用する「条件付き予測分布」から生成する方法。
+
+$$
+f(x^{*}| \hat{\Theta})
+$$
+
+生成量(Generated quantities)は標本$\Theta^{(t)}$の関数$g(\Theta^{(t)})$として定義される。$\Theta^{(t)}$を利用して作成したものは生成量として呼ばれる。
+
+## 事後平均に関する推測
+
+平均値の点推定、区間推定は$\hat{\mu}_{eap} =$ `r generated_quantities_summary(out$mu)[[1]]`[`r generated_quantities_summary(out$mu)[[3]]` - `r generated_quantities_summary(out$mu)[[7]]`]
+
+```{r}
+# 事後平均の推定結果
+generated_quantities_summary(out$mu)
+
+# 事後平均の事後分布
+plot_posterior(
+  out$mu, 
+  title = 'Posterior Probability Distribution of mu', 
+  x_title = 'mu',
+  xlim = c(70, 90)
+  )
+```
+
+
+## 事後標準偏差に関する推測
+
+標準偏差の点推定、区間推定は$\hat{\sigma}_{eap} =$ `r generated_quantities_summary(out$sigma)[[1]]`[`r generated_quantities_summary(out$sigma)[[3]]` - `r generated_quantities_summary(out$sigma)[[7]]`]
+
+```{r}
+# 事後標準偏差の推定結果
+generated_quantities_summary(out$sigma)
+
+# 事後標準偏差の事後分布
+plot_posterior(
+  out$sigma, 
+  title = 'Posterior Probability Distribution of sigma', 
+  x_title = 'sigma',
+  xlim = c(0, 15)
+  )
+```
+
+## 予測分布$x^{*}$に関する推測
+
+予測分布$x^{*}$の点推定、区間推定は$x^{*} =$ `r generated_quantities_summary(out$posterior_sample)[[1]]`[`r generated_quantities_summary(out$posterior_sample)[[3]]` - `r generated_quantities_summary(out$posterior_sample)[[7]]`]。平均の点推定、区間推定は$\hat{\mu}_{eap} =$ `r generated_quantities_summary(out$mu)[[1]]`[`r generated_quantities_summary(out$mu)[[3]]` - `r generated_quantities_summary(out$mu)[[7]]`]なので、予測分布なので、
+予測の不確実性が高いため、区間が広くなっている。
+
+```{r}
+# 事後予測分布の推定結果
+generated_quantities_summary(out$posterior_sample)
+
+# 事後予測分布
+plot_posterior(
+  out$posterior_sample, 
+  title = 'Posterior Predictive Distribution', 
+  x_title = 'posterior_sample',
+  xlim = c(50, 110)
+  )
+```
+
+## 分散の生成量に関する推測
+
+分散の事後分布は、生成量として下記の通り定義できる。
+
+$$
+g(\sigma^{(t)}) = \sigma^{(t)2}
+$$
+
+```{r}
+# 分散の生成量の推定結果
+sigma2 <- out$sigma^2
+generated_quantities_summary(sigma2) 
+
+# 分散の生成量の事後分布
+plot_posterior(
+  sigma2, 
+  title = 'Posterior Probability Distribution of sigma2', 
+  x_title = 'sigma2',
+  xlim = c(0, 150)
+  )
+```
+
+
+分散$\hat{\sigma}^{2}_{eap}$の点推定、区間推定は$x^{*} =$ `r generated_quantities_summary(sigma2)[[1]]`[`r generated_quantities_summary(sigma2)[[3]]` - `r generated_quantities_summary(sigma2)[[7]]`]
+
+
+## 変動係数の生成量に関する推測
+
+変動係数の事後分布は、生成量として下記の通り定義できる。
+
+$$
+cv^{(t)} = g(\mu^{(t)}, \sigma^{(t)})= \frac{\sigma^{(t)}}{\mu^{(t)}}
+$$
+
+
+```{r}
+# 変動係数の生成量の推定結果
+cv <- out$sigma / out$mu
+generated_quantities_summary(cv) 
+
+# 変動係数の生成量の事後分布
+plot_posterior(
+  cv, 
+  title = 'Posterior Probability Distribution of cv', 
+  x_title = 'cv',
+  xlim = c(0, 0.15)
+  )
+```
+
+変動係数$cv$の点推定、区間推定は$x^{*} =$ `r generated_quantities_summary(cv)[[1]]`[`r generated_quantities_summary(cv)[[3]]` - `r generated_quantities_summary(cv)[[7]]`]
+
+## 効果量の生成量に関する推測
+
+効果量の事後分布は、生成量として下記の通り定義できる。
+
+$$
+\delta_{c}^{(t)} = g(\mu^{(t)}, \sigma^{(t)})= \frac{\mu^{(t)} - c}{\sigma^{(t)}}
+$$
+
+```{r}
+# デルタ85の生成量の推定結果
+delta85 <- (out$mu - 85) / out$sigma
+generated_quantities_summary(delta85) 
+
+# 効果量の生成量の事後分布
+plot_posterior(
+  delta85, 
+  title = 'Posterior Probability Distribution of delta85', 
+  x_title = 'delta85',
+  xlim = c(-3, 2)
+  )
+```
+
+効果量$\delta_{85}$の点推定、区間推定は$x^{*} =$ `r generated_quantities_summary(delta85)[[1]]`[`r generated_quantities_summary(delta85)[[3]]` - `r generated_quantities_summary(delta85)[[7]]`]
+
+## 第1四分位の生成量に関する推測
+
+第1四分位%点の事後分布は、生成量として下記の通り定義できる。
+
+$$
+g(\mu^{(t)}, \sigma^{(t)})= \mu^{(t)} + z_{\alpha} \sigma^{(t)}
+$$
+
+下記は25%点の場合のサンプル。
+
+```{r}
+# 第1四分位の生成量の推定結果
+# qnorm(p = 0.25, 0, 1) = - 0.675
+quarter <- out$mu - 0.675 * out$sigma
+generated_quantities_summary(quarter) 
+
+# 第1四分位の生成量の事後分布
+plot_posterior(
+  quarter, 
+  title = 'Posterior Probability Distribution of quarter', 
+  x_title = 'quarter',
+  xlim = c(65, 85)
+  )
+```
+
+## 予測分布の特定区間の生成量に関する推測
+
+基準点未満の測定値が観測される確率は下記のように定義できる。サンプリングされたパラメタを使用して、累積分布関数から確率を得る。
+
+$$
+g(\mu^{(t)}, \sigma^{(t)}) = F(b|\mu^{(t)}, \sigma^{(t)}) - F(a|\mu^{(t)}, \sigma^{(t)})
+$$
+```{r}
+# 85g以下の確率の生成量の推定結果
+pred85 <- pnorm(85, out$mu, out$sigma)
+generated_quantities_summary(pred85) 
+
+# 85g以下の確率の生成量の事後分布
+plot_posterior(
+  pred85, 
+  title = 'Posterior Probability Distribution of pred85', 
+  x_title = 'pred85',
+  xlim = c(0.3, 1.2)
+  )
+```
+
+## 参考文献
+
+- [はじめての 統計データ分析](https://www.asakura.co.jp/detail.php?book_code=12214)

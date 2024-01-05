@@ -176,7 +176,7 @@ $$
 $\boldsymbol{ X }$はN×4の行列で、$\overrightarrow{ b}$は長さ4のベクトル。
 
 <div class="tbox">
-<th3>モデル11-7/th3>
+<th3>モデル11-7</th3>
 <div class="inner">
 $$
 \begin{eqnarray}

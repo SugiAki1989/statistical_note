@@ -25,15 +25,21 @@
 ## ベイズ統計学
 
 - [アヒル本01-Chapter04-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes01/note_ahirubayes01.html)
-- [アヒル本02-Chapter05pre-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes02/note_ahirubayes02.html)
-- [アヒル本03-Chapter05post-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes03/note_ahirubayes03.html)
+- [アヒル本02-Chapter05-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes02/note_ahirubayes02.html)
+- [アヒル本03-Chapter05-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes03/note_ahirubayes03.html)
 - [アヒル本04-Chapter07-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes04/note_ahirubayes04.html)
-- [アヒル本05](https://sugiaki1989.github.io/statistical_note/note_ahirubayes05/note_ahirubayes05.html)
-- [アヒル本06](https://sugiaki1989.github.io/statistical_note/note_ahirubayes06/note_ahirubayes06.html)
-- [アヒル本07](https://sugiaki1989.github.io/statistical_note/note_ahirubayes07/note_ahirubayes07.html)
-- [アヒル本08](https://sugiaki1989.github.io/statistical_note/note_ahirubayes08/note_ahirubayes08.html)
-- [アヒル本09](https://sugiaki1989.github.io/statistical_note/note_ahirubayes09/note_ahirubayes09.html)
-- [アヒル本10](https://sugiaki1989.github.io/statistical_note/note_ahirubayes10/note_ahirubayes10.html)
+- [アヒル本05-Chapter08の前に緑本-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes05/note_ahirubayes05.html)
+- [アヒル本06-Posterior-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes06/note_ahirubayes06.html)
+- [アヒル本07-Chapter08-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes07/note_ahirubayes07.html)
+- [アヒル本08-Chapter08-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes08/note_ahirubayes08.html)
+- [アヒル本09-Chapter08-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes09/note_ahirubayes09.html)
+- [アヒル本10-Chapter08-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes10/note_ahirubayes10.html)
+- [アヒル本11-Chapter09-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes10/note_ahirubayes11.html)
+- [アヒル本12-Chapter10-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes10/note_ahirubayes12.html)
+- [アヒル本13-Chapter10-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes10/note_ahirubayes13.html)
+- [アヒル本14-Chapter11-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes10/note_ahirubayes14.html)
+- [アヒル本15-Chapter11-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes10/note_ahirubayes15.html)
+- [8 Schoolの階層モデル](https://sugiaki1989.github.io/statistical_note/note_bayes01/note_bayes01.html)
 
 ## 数値解析
 
