@@ -1,6 +1,6 @@
 ---
-title: "ベイズ統計01"
-pagetitle: "ベイズ統計01"
+title: "ベイズ統計01-Eight Schools-"
+pagetitle: "ベイズ統計01-Eight Schools-"
 output:
   html_document:
   toc: TRUE

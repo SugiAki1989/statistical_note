@@ -1,0 +1,278 @@
+---
+title: "ベイズ統計02-二項分布とベータ分布-"
+pagetitle: "ベイズ統計02-二項分布とベータ分布-"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は「社会科学のためのベイズ統計モデリング」の第8章を写経していく。基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [社会科学のためのベイズ統計モデリング](https://www.asakura.co.jp/detail.php?book_code=12842)
+
+## 8.2.1 藤井七段の対戦成績
+
+今回使用するデータは将棋棋士の藤井七段の100試合の勝敗データ。この100試合のデータから藤井七段の強さを推定することが今回の分析目的。単純集計だと85勝15敗で勝率85%となる。
+
+```{r}
+library(dplyr)
+library(rstan)
+library(ggplot2)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+d <- read.table('https://raw.githubusercontent.com/HiroshiHamada/BMS/master/ch08/Fujii.txt')
+
+table(d)
+# ggplot(data = data,aes(x = game,y = win+lose,fill = win)) +
+#   geom_point(size = 2.5, shape = 21, stroke = 0.5) + 
+#   scale_fill_gradient(low  =  "black",high  =  "white") + 
+#   scale_x_continuous(breaks  =  c(1,seq(10,100,5))) +
+#   ylim(0.9,1.1) +
+#   theme( panel.background  =  element_blank(),
+#          panel.grid  =  element_blank(),
+#          axis.title.x  =  element_blank(),
+#          axis.text = element_blank(),
+#          axis.title.y  =  element_blank(),
+#          axis.text.y  =  element_blank(),
+#          axis.ticks.y  =  element_blank(),
+#          legend.position  =  "none") 
+```
+
+## 8.2.2 ベルヌーイ・モデル
+
+ここでは、勝ちを1、負けを0とする確率変数$Y_{i}$とする。$Y_{i}$は独立であり、$q$をパラメタとするベルヌーイ分布に従うと仮定する。事前分布は$Beta(\alpha=1,\beta=1)$のベータ分布に従うと仮定する。
+
+<div class="tbox">
+<th3>モデル1</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y_{i} &\sim& Bernoulli(q), \ \ i = 1...n\\
+q &\sim& Beta(\alpha, \beta)
+\end{eqnarray}
+$$
+</div>
+</div>
+
+ここで使用するベルヌーイ・モデルについては、第3章でわかりやすく解説されている。内容をメモしたものを貼り付けておく。
+
+[Bernoulli-Beta Model](/Users/aki/Documents/statistical_note/note_bayes02/bernoullibeta.png)
+
+$n+1$試合目の予測分布は下記のパラメタを持つベルヌーイ分布に従う。
+
+$$
+E[q] = \frac{\alpha+\sum y_{i}}{\alpha+\beta+n}
+$$
+
+## 8.2.3 藤井七段のデータ分析
+
+勝利確率$q$の事後分布と予測分布を1試合終るごとにデータから推定する。データを得る前の状態は不明なので、$q$の事前分布は$Beta(\alpha=1,\beta=1)$のベータ分布に従うと仮定する。
+
+```{r, class.output="scroll-1000"}
+data <- tibble(
+  game = 1:100,
+  win = d$V1,
+  lose = 1-win
+) %>%
+  mutate(
+    cumwin = cumsum(win),
+    cumlose = cumsum(lose),
+    mle = cumwin/game
+  )
+
+print(data, n = 100)
+```
+
+1試合が終わるごとに事後分布と事後予測分布を計算することで、強さの推移を可視化する。1試合が終わるごとに計算する内容を書き下すと下記の通りである。
+
+- 00試合目の結果より00勝00敗、予測分布による01試合目の予測勝利確率は$\frac{1+0}{1+1+0} = 0.500$となる
+- 01試合目の結果より01勝00敗、予測分布による02試合目の予測勝利確率は$\frac{1+1}{1+1+1} = 0.667$となる
+- 02試合目の結果より02勝00敗、予測分布による03試合目の予測勝利確率は$\frac{1+2}{1+1+2} = 0.750$となる
+- 03試合目の結果より03勝00敗、予測分布による04試合目の予測勝利確率は$\frac{1+3}{1+1+3} = 0.800$となる
+- 04試合目の結果より04勝00敗、予測分布による05試合目の予測勝利確率は$\frac{1+3}{1+1+3} = 0.833$となる
+- 05試合目の結果より05勝00敗、予測分布による06試合目の予測勝利確率は$\frac{1+4}{1+1+4} = 0.857$となる
+- ...snip
+- 29試合目の結果より29勝0敗、予測分布による30試合目の予測勝利確率は$\frac{1+29}{1+1+29} = 0.968$となる
+- 30試合目の結果より29勝1敗、予測分布による31試合目の予測勝利確率は$\frac{1+29}{1+1+30} = 0.938$となる
+- ...snip
+- 100試合目の結果より29勝1敗、予測分布による101試合目の予測勝利確率は$\frac{1+85}{1+1+100} = 0.843$となる
+
+可視化するためのデータを用意する。事後分布の平均、95%ベイズ信頼区間を計算している。
+
+```{r, class.output="scroll-1000"}
+## posterior
+postdata <- tibble(
+  game = 0:100,
+  win = c(NA, data$win),
+  lose = c(NA, data$lose),
+  cumwin = c(NA,data$cumwin),
+  cumlose = c(NA,data$cumlose),
+  post_alpha = c(1,data$cumwin+1),
+  post_beta = c(1,data$cumlose+1),
+  mle = c(NA,data$mle),
+  post_mu = post_alpha / (post_alpha+post_beta),
+  post_med = qbeta(0.500, post_alpha, post_beta),
+  CI_lower = qbeta(0.025, post_alpha, post_beta),
+  CI_upper = qbeta(0.975, post_alpha, post_beta)
+)
+
+print(postdata, n = 100)
+```
+
+
+連勝している間は1と推定する最尤推定と比べ、事後分布は不確実性を考慮して、最初の方は信用区間も広く、事後平均も低い。多くのデータが観察できた後半の試合では、平均も安定し、信用区間も狭くなっている。
+
+```{r}
+ggplot(data = postdata) +
+  geom_ribbon(aes(x = game,y = post_mu,
+                  ymin = CI_lower, ymax = CI_upper), fill = 'grey80')+
+  geom_line(aes(x = game,y = mle,linetype  =  'MLE')) +
+  geom_line(aes(x = game,y = post_mu, linetype= 'post. dist.')) +
+  labs(linetype = 'Estimation') +
+  ggtitle('Change in posterior mean of posterior distribution') +
+  theme_bw() 
+```
+
+事後分布の確率密度関数の変化をプロットする。最初は先程と同じく不確実性を考慮しているものの、最後の方は安定した分布になっている。
+
+```{r}
+# x <- seq(0,1,0.001)
+# plot(x, dbeta(x, shape1 = 86, shape2 = 16), type = 'l')
+ggplot(data = tibble(q = c(0,1)), aes(x = q)) +
+  purrr::pmap(list(a = postdata$post_alpha, b = postdata$post_beta, co = postdata$game),
+       function(a, b, co) 
+         stat_function(fun = dbeta, args = list(shape1 = a, shape2 = b), aes_q(color = co), size = 0.1)
+  ) + labs(color = 'game') +
+  scale_colour_gradient(low = 'grey80', high = 'black') + 
+  scale_x_continuous(breaks = seq(0, 1, 0.05)) +
+  ggtitle('Change in probability density function of posterior distribution') +
+  theme_bw()
+```
+
+## 8.2.5 先手後手で強さが変わるのか
+
+一般的には将棋は先手が有利で、後手が不利とも言われる。先手後手の要因を入れてモデルを拡張する。$i$試合目の先手後手を区別する変数$x_{i}$を導入し、先手は$x=1$とする。
+
+<div class="tbox">
+<th3>モデル1</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y_{i} &\sim& Bernoulli(x_{i}q_{1} + (1-x_{i})q_{0}), \ \ i = 1...n\\
+q_{0} &\sim& Beta(\alpha_{0}, \beta_{0}) \\
+q_{1} &\sim& Beta(\alpha_{1}, \beta_{1}) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+Stanのモデルは下記の通り。
+
+```
+data {
+  int N;
+  int X[N];
+  int Z[N];
+
+}
+
+parameters {
+  real<lower=0,upper=1> q1;
+  real<lower=0,upper=1> q0;
+}
+
+model {
+  for (n in 1:N) {
+    X[n] ~ bernoulli(Z[n]*q1+(1-Z[n])*q0);
+  }
+}
+```
+
+このモデルを少し深掘りしておく。下記の通り、`z`が切り替わることで、`x[n]`が従う分布が異なるパラメタから生成される考えている。
+
+```
+model {
+  for (n in 1:N) {
+    X[n] ~ bernoulli(Z[n]*q1+(1-Z[n])*q0);
+  }
+}
+// z = 1のとき
+// X[n] ~ bernoulli(1*q1); -> X[n] ~ bernoulli(q1);
+// z = 0のとき
+// X[n] ~ bernoulli(Z(1-0)*q0); -> X[n] ~ bernoulli(q0);
+```
+
+データを用意して、
+
+```{r}
+d <- read.table('https://raw.githubusercontent.com/HiroshiHamada/BMS/master/ch08/Fujii_first.txt', header = TRUE)
+data <- list(N = nrow(d), X = d$win, Z = d$first)
+data
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model <- stan_model('note_bayes02−001.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model, data = data, seed = 1989)
+```
+
+推定結果を確認する。後手と信用区間がすこし被るものの、先手の方が勝率が高くなっているため、藤井七段については先手の方が有利と言えそうである。
+
+- 先手の場合、勝率は`q1=0.89[0.79-0.96]`
+- 後手の場合、勝率は`q1=0.80[0.69-0.84]`
+
+```{r, class.output="scroll-1000"}
+print(fit)
+```
+
+事後分布を可視化しておく。
+
+```{r}
+stan_plot(
+  fit,
+  point_est = 'mean',
+  ci_level = 0.95,
+  outer_level = 1.00,
+  show_density = TRUE,
+  fill_color = 'grey') + 
+  theme_bw()
+```
+
+## 参考文献および参考資料
+
+- [社会科学のためのベイズ統計モデリング](https://www.asakura.co.jp/detail.php?book_code=12842)

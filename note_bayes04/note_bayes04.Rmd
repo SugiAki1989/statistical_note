@@ -1,0 +1,287 @@
+---
+title: "ベイズ統計04-普及モデル-"
+pagetitle: "ベイズ統計04-普及モデル-"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は「社会科学のためのベイズ統計モデリング」の第8章を写経していく。基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [社会科学のためのベイズ統計モデリング](https://www.asakura.co.jp/detail.php?book_code=12842)
+
+## 8.4.1 携帯電話の普及メカニズム
+
+携帯電話の普及メカニズムに関するモデルを構築するのが今回の目的。携帯電話は、1985年に登場し、90年代に急速に普及した。その普及率の生成過程をモデル化する。
+
+```{r}
+library(dplyr)
+library(rstan)
+library(ggplot2)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+d <- read.csv('https://raw.githubusercontent.com/HiroshiHamada/BMS/master/ch08/mobile-rate.csv')
+d$time <- seq(1993, 2016, 1)
+
+ggplot(d, aes(time, Y)) + 
+  theme_bw(base_size = 15) + 
+  geom_point(size = 2) + 
+  geom_line() + 
+  scale_x_continuous(breaks = seq(1993, 2016, 2)) +
+  labs(title = 'Mechanism of cell phone diffusion')
+```
+
+「曲線のあてはめ」と「データ生成過程からの関数系の導出」は異なる作業。普及の推移は関数$f$に似ているので、$y=f(t)$型で表現できそうだと考えるのが「あてはめ」という作業。あてはめはただ形が似ている以外の根拠はない。仮定を置くことで導出する。
+
+- 1. 契約数$y$は時間$t$の経過とともに継続的に増加する
+- 2. 契約数には上限$m$がある。$k$を増加の早さを決める。
+- 3. 未契約者はランダムに契約者と接触し、未契約者の一部が新たな契約者となる
+
+3つ目は普及メカニズムを示している。最初の契約者は少ないが、契約者が未契約者に接触することで一定の割合で契約者に転換し、その契約者がさらに未契約者に転換することで一定の割合で契約者になっていくというメカニズムを想像している。ある時点での契約者の増え方は、その瞬間の契約者と契約の充足率に比例すると考える。契約者$y$の瞬間的な増分は、下記の微分方程式で表すことができる。
+
+$$
+\begin{eqnarray}
+\frac{dy}{dt} = ky \left( 1 - \frac{y}{m}\right)
+\end{eqnarray}
+$$
+
+イメージしやすいように可視化しておく。$k=1, m=100$として、$y$と括弧の関係を見る。契約者が少ない間は増加しやすいが、充足上限に近づくと契約者の増加しにくくなる。
+
+- $y$が0だとカッコ内は0.0となって0が返る
+- $y$が10だとカッコ内は0.9となって9が返る
+- $y$が20だとカッコ内は0.8となって16が返る
+- $y$が50だとカッコ内は0.5となって25が返る
+- $y$が90だとカッコ内は0.1となって9が返る
+- $y$が100だとカッコ内は0.0となって0が返る
+
+```{r}
+f <- function(y, k, m){
+  res <- k * y * (1 - (y/m))
+  return(res)
+}
+
+plot(
+  1:100,
+  f(y = 1:100, k = 1, m = 100),
+  type = 'l'
+)
+```
+
+細かい導出は参考書を見るとして、この微分方程式から最終的に下記の関数が導出できる。
+
+$$
+\begin{eqnarray}
+Y &=& \frac{my_{0}}{(m-y_{0})e^{-kt}+y_{0}} + \epsilon \\
+\end{eqnarray}
+$$
+
+定数部分を$\mu$とすると、下記の通りモデル化できる。
+
+$$
+\begin{eqnarray}
+Y &=& \mu + \epsilon , \ \  \epsilon \sim Normal(0, \sigma)\\
+\end{eqnarray}
+$$
+
+下記のように書き直すとモデルがわかりやすくなる。つまり、平均$\frac{my_{0}}{(m-y_{0})e^{-kt}+y_{0}}$、標準偏差$\sigma$から$Y$が生成されると仮定している。
+
+
+
+<div class="tbox">
+<th3>モデル1</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+Y &\sim& Normal \left( \frac{my_{0}}{(m-y_{0})e^{-kt}+y_{0}}, \sigma \right)\\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+このようなデータ生成過程を考えず、単純に線形モデルを当てはめることもできる。
+
+$$
+\begin{eqnarray}
+Y &\sim& Normal \left( \sum_{i=0}^{k} \beta_{i}x_{i}, \sigma \right)\\
+\end{eqnarray}
+$$
+
+## 8.4.2 データとの対応
+
+Stanでサンプリングするために必要なデータを作成する。
+
+```{r}
+#予測分布用
+n_pred <- 60 
+#予測分布用に説明変数を作成
+t_pred <- seq(from = 1, to = 24, length = n_pred)
+#契約者数の初期値
+y0 <- 213.1 
+data <-
+  list(
+    n = nrow(d),
+    t = d$X,
+    Y = d$Y,
+    t_pred = t_pred,
+    n_pred = n_pred,
+    y0 = y0
+  )
+
+data
+```
+
+Stanのモデルは下記の通り。
+
+```
+data {
+  int n; 
+  int t[n];
+  int n_pred;
+  real Y[n]; real y0;
+  real t_pred[n_pred];
+}
+
+parameters {
+  real <lower=16344,upper=20000> m;
+  real <lower=0,upper=5> k;
+  real<lower=0> sigma;
+}
+
+transformed parameters{
+ real mu[n];
+ 
+ for (i in 1:n) {
+    mu[i] = (m*y0)/((m-y0)*exp(-k*t[i]) + y0);
+ }  
+}
+
+model{
+  for (i in 1:n) {
+    Y[i] ~ normal(mu[i], sigma);
+  }
+}
+
+generated quantities{
+	real y_pred[n_pred];
+	real log_lik[n];
+
+  for (i in 1:n_pred){
+	  y_pred[i] = normal_rng((m*y0)/((m-y0)*exp(-k*t_pred[i])+y0), sigma);
+  }
+	
+	for(i in 1:n){
+	  log_lik[i] = normal_lpdf(Y[i]|mu[i], sigma);
+  }
+}
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model <- stan_model('note_bayes04−001.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model, data = data, seed = 1989)
+```
+
+推定結果を確認する。
+
+```{r, class.output="scroll-1000"}
+print(fit)
+```
+
+事後分布を可視化しておく。
+
+```{r}
+stan_plot(
+  fit,
+  pars = c('m', 'k', 'sigma'),
+  point_est = 'mean',
+  ci_level = 0.95,
+  outer_level = 1.00,
+  show_density = TRUE,
+  fill_color = 'grey') + 
+  theme_bw()
+```
+
+平均と標準偏差の事後分布を使って、予測分布を可視化する。
+
+```{r}
+ms <- rstan::extract(fit)
+qua <- apply(ms$y_pred, 2, quantile, prob = c(0.025, 0.25, 0.5, 0.75, 0.975))
+d_est <- data.frame(X = t_pred, t(qua), check.names = FALSE)
+
+ggplot() +
+  theme_bw(base_size = 15) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `2.5%`, ymax = `97.5%`), fill = 'black', alpha = 1/6) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `25%`, ymax = `75%`), fill = 'black', alpha = 2/6) +
+  geom_line(data = d_est, aes(x = X, y = `50%`), size = 0.5) +
+  geom_point(data = d, aes(x = X, y = Y), size = 3) +
+  labs(x = 'Time (hour)', y = 'Y') +
+  scale_x_continuous(labels = seq(1993, 2016, 2), breaks = seq(1, 24, 2)) +
+  labs(title = 'Mechanism of cell phone diffusion')
+```
+
+参考書に書かれており通り、普及メカニズムを考慮したモデルと線形モデルでは、線形モデルのほうが予測精度が良い。ただ、データ生成過程を考慮してモデルを作ったのであれば、モデルを改良することができるため、$m,k$などを時点で変化するモデルなどに改良すれば、線形モデルでも優れたモデルに改良できる。
+
+線形モデルの推定を可視化を行っておく。ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model2 <- stan_model('note_bayes04−002.stan')
+```
+
+`sampling()`関数でサンプリングして、線形モデルでも予測分布を可視化しておく。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit2 <- sampling(object = model2, data = data, seed = 1989)
+
+ms2 <- rstan::extract(fit2)
+qua2 <- apply(ms2$y_pred, 2, quantile, prob = c(0.025, 0.25, 0.5, 0.75, 0.975))
+d_est2 <- data.frame(X = t_pred, t(qua2), check.names = FALSE)
+
+ggplot() +
+  theme_bw(base_size = 15) +
+  geom_ribbon(data = d_est2, aes(x = X, ymin = `2.5%`, ymax = `97.5%`), fill = 'black', alpha = 1/6) +
+  geom_ribbon(data = d_est2, aes(x = X, ymin = `25%`, ymax = `75%`), fill = 'black', alpha = 2/6) +
+  geom_line(data = d_est2, aes(x = X, y = `50%`), size = 0.5) +
+  geom_point(data = d, aes(x = X, y = Y), size = 3) +
+  labs(x = 'Time (hour)', y = 'Y') +
+  scale_x_continuous(labels = seq(1993, 2016, 2), breaks = seq(1, 24, 2)) +
+  labs(title = 'Mechanism of cell phone diffusion')
+```
+
+## 参考文献および参考資料
+
+- [社会科学のためのベイズ統計モデリング](https://www.asakura.co.jp/detail.php?book_code=12842)

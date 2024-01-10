@@ -1,0 +1,330 @@
+---
+title: "ベイズ統計03-対数正規分布-"
+pagetitle: "ベイズ統計02-対数正規分布-"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は「社会科学のためのベイズ統計モデリング」の第8章を写経していく。基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [社会科学のためのベイズ統計モデリング](https://www.asakura.co.jp/detail.php?book_code=12842)
+
+## 8.3.1 所得データの分析
+
+所得データを分析する。所得は対数正規分布で近似できることはよく知られている。
+
+```{r,class.output="scroll-1000"}
+library(dplyr)
+library(rstan)
+library(ggplot2)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+d <- read.csv('https://raw.githubusercontent.com/HiroshiHamada/BMS/master/ch08/SSPI2015.csv')
+d
+```
+
+SSPI2015の個人年収のヒストグラムを可視化すると、多くの回答者の所得が0であることがわかる。この部分は対数正規分布では上手く説明できないため、そもそものデータが生成された過程を考えてモデリングする必要がある。
+
+```{r}
+ggplot(d, aes(Y))+ 
+  geom_histogram(boundary = 0, binwidth = 30) + 
+  scale_x_continuous(breaks = seq(0,2000,100), limits = c(0, 2000)) + 
+  labs(title = 'SSP2015 SamplingData') +
+  theme_bw()
+```
+
+所得が0である回答者は1000人中105人おり、全体の10%を占めている。
+
+```{r}
+d %>% 
+  filter(Y == 0) %>% 
+  count()
+```
+
+これまで見たように、この所得データは単純に対数正規分布から生成されているようなデータではない。例えば、データが2段階に別れているとする。そもそも1段目でお金を稼げる状態にあるかどうかが決まり、稼ぐ事ができる場合、それらは対数正規分布に従うが、稼ぐことができない場合、所得は0となる。このようなメカニズムを想定したほうが、可視化されたヒストグラムを上手く説明できそうである。
+
+つまり、確率$q$で非稼得状態となり、その場合の所得$Y$は0となる。一方で、確率$1-q$で稼得状態となり、その場合の所得$Y$は対数正規分布から生成されるというメカニズムを仮定する。
+
+今回の分析では、このように「稼得状態に入るかどうか」「稼得者となり$Y \gt 0$の所得を稼ぐ」という2つのプロセスが合成された確率密度関数を利用する。ベルヌーイ分布は「実現値が1の時は非稼得状態」で、「実現値が0の時は稼得状態」とする。
+
+HLはハードル(Hurdle)と対数正規分布(LogNormal)の略で、ハードルモデルと呼ばれる。
+
+<div class="tbox">
+<th3>モデル1</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+HL(y | q, \mu, \sigma) &=&
+  \left\{
+    \begin{array}{l}
+      Bernoulli(1|q),  \ \ y=0\\
+      Bernoulli(0|q) × LogNormal(y | \mu, \sigma),  \ \ y \gt 0 \\
+    \end{array}
+  \right.\\
+  &=& \left\{
+    \begin{array}{l}
+      q,  \ \ y=0\\
+      (1-q) × \frac{1}{\sqrt{2 \pi \sigma^{2}}y}exp \left( \frac{(logy-\mu)^{2}}{2\sigma^{2}}\right),  \ \ y \gt 0 \\
+    \end{array}
+  \right.\\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+ただ、この$q$を推定するだけではなく、どういった人は非稼得状態になりやすいのかを知りたいため、$q$に対するモデルを考える。稼得状態になるかどうかはベルヌーイ分布で表します。このベルヌーイ分布のパラメタ$q$が性別(`FEM`)、年齢(`AGE`)、教育年数(`EDU`)に影響を受けると仮定する。また、稼得者状態になった場合の所得のパラメタ$\mu$も性別(`FEM`)、年齢(`AGE`)、教育年数(`EDU`)に影響を受けると仮定する。つまり、所得の分布は0の場合と、正の場合とで条件分岐する確率密度関数$HL(y | q, \mu, \sigma)$によって定まる。
+
+<div class="tbox">
+<th3>モデル2</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+q_{i} &=& logistic(a_{1} + a_{2}FEM_{i} + a_{3}AGE_{i} + a_{4}EDU_{i}) \\
+\mu_{i} &=& b_{1} + b_{2}FEM_{i} + b_{3}AGE_{i} + b_{4}EDU_{i} \\
+Y_{i} &\sim& HL(q_{i}, \mu_{i}, \sigma)
+\end{eqnarray}
+$$
+</div>
+</div>
+
+## 8.3.2 MCMCの結果
+
+Stanのモデルは下記の通り。
+
+```
+functions {
+  real ZIL_lpdf(real Y, real q, real mu, real sigma) {
+    if (Y == 0) {
+      return 
+        bernoulli_lpmf(1 | q);
+    } else {
+      return bernoulli_lpmf(0 | q) + lognormal_lpdf(Y | mu, sigma);
+    }
+  }
+}
+
+data {
+  int n;
+  real<lower=0> Y[n];
+  int<lower=0> FEM[n];
+  real AGE[n];  
+  real EDU[n];
+  }
+
+parameters {
+  real a[4];
+  real b[4];
+  real<lower=0> sigma;
+}
+
+transformed parameters {
+  real mu[n];
+  real<lower=0,upper=1> q[n];
+  
+  for (i in 1:n){
+    q[i] = inv_logit(a[1] + a[2]*FEM[i] + a[3]*AGE[i] + a[4]*EDU[i]);
+    mu[i] = b[1] + b[2]*FEM[i] + b[3]*AGE[i] + b[4]*EDU[i];
+    }
+}
+
+model {
+  for (i in 1:n){
+    Y[i] ~ ZIL(q[i], mu[i], sigma);
+  }
+}
+
+generated quantities{
+	real log_lik[n];
+	
+	for(i in 1:n){
+			log_lik[i] = ZIL_lpdf(Y[i]|q[i], mu[i], sigma);
+	}
+}
+```
+
+このモデルを少し深掘りしておく。確率密度関数`ZIL_lpdf`が定義しており、4つの値$y, q, \mu,\sigma$を受け取る。関数本体で条件分岐が行われてリ、具体的には、$Y=0$の場合とそれ以外の場合に分かれている。
+
+$Y=0$の場合、`bernoulli_lpmf(1|q)`は、ベルヌイ分布に従う確率変数が1である確率の対数確率質量関数(log probability mass function)を計算している。これは`q`が1である確率。$Y=1$の場合、`bernoulli_lpmf(0|q)`は、ベルヌイ分布に従う確率変数が0である確率の対数確率質量関数を計算している。これは`q`が0である確率であり、この場合は加えて`lognormal_lpdf(Y|mu, sigma)`は、平均`mu`で標準偏差`sigma`の対数正規分布に従う確率変数の対数確率密度関数を計算して足し込んでいる。
+
+```
+functions {
+  real ZIL_lpdf(real Y, real q, real mu, real sigma) {
+    if (Y == 0) {
+      return bernoulli_lpmf(1 | q);
+    } else {
+      return bernoulli_lpmf(0 | q) + lognormal_lpdf(Y | mu, sigma);
+    }
+  }
+}
+```
+
+モデルの定義も完了しているので、データを用意して、サンプリングを行う。
+
+```{r}
+data <- list(n = nrow(d),Y = d$Y, FEM = d$FEM,AGE = d$AGE,EDU = d$EDU)
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model <- stan_model('note_bayes03−001.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model, data = data, seed = 1989)
+```
+
+推定結果を確認する。2つの分布を合成したモデリングを行うことで、稼得状態かどうかを決める$q$と所得の大小を決める$\mu$への影響を同時に推定できる。
+
+- 稼得状態か非稼得状態を決める
+- `a[2]=FEM`: 女性であれば非稼得状態になりやすい
+- `a[3]=AGE`: 若いほど非稼得状態になりやすい
+- `a[4]=EDU`: 信用区間が0をまたぐため影響は小さい
+- 稼得状態の場合、所得の大小を決める
+- `b[2]=FEM`: 女性であれば所得が低くなりやすい
+- `b[3]=AGE`: 信用区間が0をまたぐため影響は小さい
+- `b[4]=EDU`: 学歴が長いほど所得が大きくなりやすい
+
+```{r, class.output="scroll-1000"}
+# print(fit, pars = c('a', 'b', 'sigma'))
+print(fit)
+```
+
+事後分布を可視化しておく。
+
+```{r}
+stan_plot(
+  fit,
+  pars = c('a', 'b', 'sigma'),
+  point_est = 'mean',
+  ci_level = 0.95,
+  outer_level = 1.00,
+  show_density = TRUE,
+  fill_color = 'grey') + 
+  theme_bw()
+```
+
+## 8.3.3 一般家線形モデルとの比較
+
+データ生成過程を考えない場合、対数正規分布を使ったモデリングを行うことも可能ではある。
+
+```
+data {
+  int n;
+  real<lower=0> Y[n];
+  int<lower=0> FEM[n];
+  real AGE[n];  
+  real EDU[n];
+  }
+
+parameters {
+  real b[4];
+  real<lower=0> sigma;
+}
+
+transformed parameters {
+  real mu[n];
+  
+  for (i in 1:n){
+    mu[i] = b[1] + b[2]*FEM[i] + b[3]*AGE[i] + b[4]*EDU[i];
+    }
+}
+
+model {
+  for (i in 1:n)
+    Y[i] ~ lognormal(mu[i], sigma);
+}
+
+generated quantities{
+	real log_lik[n];
+	for(i in 1:n){
+			log_lik[i] = lognormal_lpdf(Y[i]|mu[i], sigma);
+	}
+}
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model <- stan_model('note_bayes03−002.stan')
+```
+
+`sampling()`関数でサンプリングする。$Y=0$だと分析できないので、$Y=0+1=1$と変換してから分析する。
+
+```{r}
+data2 <- list(n = nrow(d),Y = d$Y2, FEM = d$FEM,AGE = d$AGE,EDU = d$EDU)
+```
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit_glm <- sampling(object = model, data = data2, seed = 1989)
+```
+
+推定結果を確認する。
+
+- 稼得状態の場合、所得の大小を決める
+- `b[2]=FEM`: 女性であれば所得が低くなりやすい
+- `b[3]=AGE`: 年齢が大きいほど所得が大きくなりやすい
+- `b[4]=EDU`: 学歴が長いほど所得が大きくなりやすい
+
+```{r, class.output="scroll-1000"}
+print(fit_glm)
+```
+
+事後分布を可視化しておく。
+
+```{r}
+stan_plot(
+  fit_glm,
+  pars = c('b', 'sigma'),
+  point_est = 'mean',
+  ci_level = 0.95,
+  outer_level = 1.00,
+  show_density = TRUE,
+  fill_color = 'grey') + 
+  theme_bw()
+```
+
+どちらのモデルが妥当かどうかは判断は難しい問題である。WAICの小ささであれば、ハードルモデルのほうが良いと言えるが、機械的な優劣はつけれない。ただ、ハードルモデルでは$Y$に1を足すことのバイアスを避けれたりするメリットは存在する。
+
+```{r}
+list(
+  HL = loo::waic(extract(fit)$log_lik),
+  GLM = loo::waic(extract(fit_glm)$log_lik)
+)
+```
+
+## 参考文献および参考資料
+
+- [社会科学のためのベイズ統計モデリング](https://www.asakura.co.jp/detail.php?book_code=12842)

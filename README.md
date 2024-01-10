@@ -40,6 +40,7 @@
 - [アヒル本14-Chapter11-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes10/note_ahirubayes14.html)
 - [アヒル本15-Chapter11-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes10/note_ahirubayes15.html)
 - [8 Schoolの階層モデル](https://sugiaki1989.github.io/statistical_note/note_bayes01/note_bayes01.html)
+- [二項分布とベータ分布](https://sugiaki1989.github.io/statistical_note/note_bayes01/note_bayes02.html)
 
 ## 数値解析
 

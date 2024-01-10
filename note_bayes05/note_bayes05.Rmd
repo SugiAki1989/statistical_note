@@ -1,0 +1,551 @@
+---
+title: "ベイズ統計05-遅延価値割引モデル-"
+pagetitle: "ベイズ統計05-遅延価値割引モデル-"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は「社会科学のためのベイズ統計モデリング」の第8章を写経していく。基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [社会科学のためのベイズ統計モデリング](https://www.asakura.co.jp/detail.php?book_code=12842)
+
+## 9.1 遅延価値割引のモデル
+
+2つの選択肢を与えられ、どちらの選択肢を選ぶか。
+
+- 今すぐ1万円もらえる
+- 1年後に1万円もらえる
+
+多くの人は「今すぐ1万円もらえる」という即時報酬を選ぶ。このような現象を遅延価値割引(Delay Discounting)と呼ぶ。時間経過を伴って、財やサービスの主観的な価値が下がる現象のこと。
+
+いくつかのモデルが提案されており、基本的なモデルが指数価値割引モデル、現在の公用が$U(A)$であるような財$A$に対し、$t$時間後の効用を
+
+$$
+\begin{eqnarray}
+U(A,t) = U(A) e^{-kt}
+\end{eqnarray}
+$$
+
+と表すモデルのこと。$k(k>0)$は割引率パラメタで、割引の度合いをコントロールする。$e^{-kt}$は割引因子と呼ばれ、割引のされ方を表現する。現在価値に対する将来価値の割引を表す。$k$が正の間、割引因子$e^{-kt}$は0から1の範囲を取るため、財$U(A)$は初期時点よりも必ず小さくなる。
+
+経済学の分野では、指数価値モデルが規範的なモデルとして利用されているが、心理学の分野では、他にも双曲価値モデルも提案されており、行動実験の結果から、双曲価値モデルのほうが現実を説明しやすいと言われる。時間が経過するに連れて、時点間の割引因子はの比は小さくなるためである。
+
+$$
+\begin{eqnarray}
+U(A,t) = U(A) \frac{1}{1+kt}
+\end{eqnarray}
+$$
+
+赤色が指数価値モデル、青色が双曲価値モデルを可視化したもの。双方$k=0.1, U(A)=50000$である。青色の双曲価値モデルは、時間経過と共に割引が緩やかになることがわかる。
+
+```{r}
+library(tidyverse)
+library(rstan)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+t <- seq(0, 24, 0.1)
+
+expmodel <- function(U, k, t){
+  return(U * exp(-k*t))
+}
+
+hyperbolicmodel <- function(U, k, t){
+  return(U * 1/(1+k*t))
+}
+
+df <- tibble(
+  t = t,
+  y1 = expmodel(50000, 0.1, t),
+  y2 = hyperbolicmodel(50000, 0.1, t)
+)
+
+ggplot() + 
+  theme_bw(base_size = 15) + 
+  geom_line(data = df, aes(t, y1), col = 'tomato') +
+  geom_line(data = df, aes(t, y2), col = 'royalblue') +
+  scale_x_continuous(breaks = seq(0, 24, 2)) +
+  labs(title = 'Delay Discounting Model(k=0.1)', y = "U(A)")
+```
+
+## 9.2 遅延価値割引の理論的整理
+
+[Sozou(1998)のモデル](https://www.jstor.org/stable/51159)に基づいてメカニズムを考える。将来得られる財の効用を割り引く理由として、遅延の間に財の獲得を妨げる事象が生起するリスクを人々が考慮している可能性がある。そのため、将来得られるはずの財は、一定の確率で獲得を失敗する可能性があるため、価値を割り引く。
+
+遅延価値割引の割引因子が$t$時間後にその財がまだ存在している確率によって計算され、その期待値が効用の割引になるとSozou(1998)のモデルでは考える。
+
+理論的背景の詳細については、参考書にかかれているため、下記の通りメモ程度に記載しておく。
+
+![SozouModel(1998)](/Users/aki/Downloads/SozouModel.png)
+
+## 9.3.1 選好を決定する方略
+
+遅延価値割引は、ある財について、現在と将来の効用を元に選好が決定されると考える。$d$時間後の財$A$を獲得できる場合$A^{delay}$、即時に財$A$を獲得できる場合$A^{soon}$とする。つまり、$d=0$のとき$A^{s}=A^{0}$と同じ。$A^{delay}$と$A^{soon}$の2つの財について、どちらを選好するかを確率モデルで表現する。即時報酬$A^{soon}$と遅延報酬$A^{delay}$の効用は、
+
+$$
+\begin{eqnarray}
+U(A,t) &=& U(A,0) = U(A^{s}) \\
+U(A,t) &=& U(A,d) = U(A^{d}) \\
+\end{eqnarray}
+$$
+
+即時報酬$A^{s}$を選好すれば0、遅延報酬$A^{d}$を選好すれば1とする確率変数を考える。それが、パラメタ$\theta^{d}$をもつベルヌイ分布に従うと考える。$A^{d} \succeq A^{s}$は$A^{d}$を$A^{s}$よりも選好することを表す。
+
+$$
+\begin{eqnarray}
+P(A^{d} \succeq A^{s}) = \theta^{d}
+\end{eqnarray}
+$$
+
+遅延報酬$A^{d}$が選択される確率は、即時報酬$A^{s}$と遅延報酬$A^{d}$の効用の差に基づいて決定されると考える。人は効用を最大化するように選好するわけではなく、ときとして効用が小さい方を選好する場合もある。
+
+選好関数としてソフトマックス行動戦略と呼ばれる選好関数を仮定する。$\beta$は逆温度パラメタと呼ばれ、$\beta=0$ならば確率は0.5となり、$\beta \rightarrow \infty$の場合、$U(A^{s})$が少しでも$U(A^{d})$より大きければ0、$U(A^{d})$が少しでも$U(A^{s})$より大きければ1になる。
+
+$$
+\begin{eqnarray}
+\theta^{d} = \frac{exp\{\beta U(A^{d})\}}{exp\{\beta U(A^{s})\}+exp\{\beta U(A^{d})\}}
+\end{eqnarray}
+$$
+
+このソフトマックス選好関数は即時報酬$A^{s}$と遅延報酬$A^{d}$の差を説明変数とした$\beta$を回帰係数としたロジスティック回帰分析と同様の確率モデルで表現できる。
+
+$$
+\begin{eqnarray}
+\theta^{d} &=& \frac{exp\{\beta \cdot U(A^{d})\}}{exp\{\beta  \cdot U(A^{s})\}+exp\{\beta  \cdot U(A^{d})\}} \\
+&=& \frac{exp\{\beta  \cdot U(A^{d})\}\frac{1}{exp\{\beta  \cdot U(A^{d})\}}}{(exp\{\beta \cdot  U(A^{s})\}+exp\{\beta  \cdot U(A^{d})\})\frac{1}{exp\{\beta  \cdot U(A^{d})\}}} \\
+&=& \frac{1}{1 + exp\{-\beta  \cdot [U(A^{d}) - U(A^{s})]\}} \\
+\end{eqnarray}
+$$
+
+効用関数は、指数割引モデル、双曲割引モデルを利用できる。
+
+$$
+\begin{eqnarray}
+U(A^{s}) &=& U(A,t) = U(A,0) = A e^{-0k} \\
+U(A^{1}) &=& U(A,t) = U(A,1) = A e^{-1k} \\
+U(A^{2}) &=& U(A,t) = U(A,2) = A e^{-2k} \\
+... \\
+U(A^{t}) &=& U(A,t) = U(A,t) = A e^{-tk} \\
+\end{eqnarray}
+$$
+
+## 9.3.2 行動データによるモデリング
+
+即時報酬$A^{s}$と遅延報酬$A^{d}$の主観的等価点を推定する手法が用いられる。主観的等価点とは、
+
+- 1. 即時報酬$A^{s}$を5万円、遅延報酬$A^{d}$は1年後に5万円という条件を提示
+- 2. 即時報酬$A^{s}$を4万円、遅延報酬$A^{d}$は1年後に5万円という条件を提示
+- 3. 即時報酬$A^{s}$を3万円、遅延報酬$A^{d}$は1年後に5万円という条件を提示
+- 4. 即時報酬$A^{s}$を2万円、遅延報酬$A^{d}$は1年後に5万円という条件を提示
+- 5. 即時報酬$A^{s}$を1万円、遅延報酬$A^{d}$は1年後に5万円という条件を提示
+
+このような質問を繰り返し、選好がひっくり返る点に即時報酬があると判断する。
+
+## 9.4 ベイズ統計モデリングによる遅延価値割引の推定
+
+サンプルデータとStanでサンプリングする際に利用するデータを用意する。
+
+```{r}
+dat <- read.csv('https://raw.githubusercontent.com/HiroshiHamada/BMS/master/ch09/discount_data.csv')
+
+N <- ncol(dat[-(1:3)])
+Trial <- nrow(dat)
+D <- dat$D
+amount_soon <- dat$amount_soon/10000
+amount_delay <- 5
+choice <- t(dat[-(1:3)]-1)
+
+datastan <- list(
+  N = N,
+  Trial = Trial,
+  D = D,
+  amount_delay = amount_delay,
+  amount_soon = amount_soon,
+  choice = choice
+  )
+
+datastan
+```
+
+即時報酬と遅延報酬の関係は5万円から5千円づつ減少し、10パターン存在する。そして、遅延報酬の遅延期間は「1ヶ月、3ヶ月、6ヶ月、12ヶ月、24ヶ月」の5パターン。つまり、合計50パターン存在する。被験者は30人で、列ごとに条件の組み合わせ、行ごとにその結果が対象のセルに記録される。
+
+- `D`: DelayのDで遅延報酬のタイミングを表す。
+- `amount_soon`: 即時報酬の金額
+- `sub1`: 被験者1(Subject)
+- `sub2`: 被験者2(Subject)
+
+```
+             [,1]  [,2]  [,3]  [,4] ... [,48] [,49] [,50]
+D               1     1     1     1 ...    24    24    24
+amount_soon 50000 45000 40000 35000 ...  5000 10000  5000
+sub1            0     1     1     1 ...     1     1     1
+sub2            0     1     1     1 ...     1     1     1
+sub3            0     0     0     0 ...     0     0     0
+..
+sub28           0     1     1     1 ...     1     1     1
+sub29           0     0     0     1 ...     0     0     0
+sub30           0     0     0     1 ...     1     1     1
+pid             1     1     1     1 ...     5     5     5
+```
+
+被験者1のデータでより詳しくデータの詳細を確認する。$A^{s}$を選好すれば0をとる確率変数。
+
+- `D=1, soon=50000`のとき`0`: 1ヶ月後の遅延報酬$A^{d}$は50000円、即時報酬$A^{s}$は50000円。回答は`0`なので即時報酬$A^{s}$を選択。
+- `D=1, soon=45000`のとき`1`: 1ヶ月後の遅延報酬$A^{d}$は50000円、即時報酬$A^{s}$は45000円。回答は`1`なので遅延報酬$A^{d}$を選択。
+- `D=1, soon=40000`のとき`1`: 1ヶ月後の遅延報酬$A^{d}$は50000円、即時報酬$A^{s}$は40000円。回答は`1`なので遅延報酬$A^{d}$を選択。
+- ...
+- `D=1, soon=5000`のとき`1`: 1ヶ月後の遅延報酬$A^{d}$は50000円、即時報酬$A^{s}$は5000円。回答は`1`なので遅延報酬$A^{d}$を選択。
+
+```
+             [,1]  [,2]  [,3]  [,4]  [,5]  [,6]  [,7]  [,8]  [,9] [,10] [,11] [,12] [,13] [,14] [,15] [,16] [,17] [,18] [,19] [,20] [,21] [,22] [,23] [,24] [,25] [,26] [,27] [,28] [,29] [,30] [,31] [,32] [,33] [,34] [,35] [,36] [,37] [,38] [,39] [,40] [,41] [,42] [,43] [,44] [,45] [,46] [,47] [,48] [,49] [,50]
+D               1     1     1     1     1     1     1     1     1     1     3     3     3     3     3     3     3     3     3     3     6     6     6     6     6     6     6     6     6     6    12    12    12    12    12    12    12    12    12    12    24    24    24    24    24    24    24    24    24    24
+amount_soon 50000 45000 40000 35000 30000 25000 20000 15000 10000  5000 50000 45000 40000 35000 30000 25000 20000 15000 10000  5000 50000 45000 40000 35000 30000 25000 20000 15000 10000  5000 50000 45000 40000 35000 30000 25000 20000 15000 10000  5000 50000 45000 40000 35000 30000 25000 20000 15000 10000  5000
+sub1            0     1     1     1     1     1     1     1     1     1     0     0     1     1     1     1     1     1     1     1     0     0     0     1     1     1     1     1     1     1     0     0     0     0     1     1     1     1     1     1     0     0     0     0     0     0     1     1     1     1
+```
+
+このように見たほうが、わかりやすいかもしれない。遅延期間が長くになるにつれて、回答`0`が増え、即時報酬$A^{s}$を選択しやすくなっている。下記は、24ヶ月後の例。
+
+- `D=24, soon=50000`のとき`0`: 24ヶ月後の遅延報酬$A^{d}$は50000円、即時報酬$A^{s}$は50000円。回答は`0`なので即時報酬$A^{s}$を選択。
+- `D=24, soon=45000`のとき`0`: 24ヶ月後の遅延報酬$A^{d}$は50000円、即時報酬$A^{s}$は45000円。回答は`0`なので即時報酬$A^{s}$を選択。
+- `D=24, soon=40000`のとき`0`: 24ヶ月後の遅延報酬$A^{d}$は50000円、即時報酬$A^{s}$は40000円。回答は`0`なので即時報酬$A^{s}$を選択。
+- ...
+- `D=24, soon=25000`のとき`0`: 24ヶ月後の遅延報酬$A^{d}$は50000円、即時報酬$A^{s}$は25000円。回答は`0`なので即時報酬$A^{s}$を選択。
+- `D=24, soon=20000`のとき`0`: 24ヶ月後の遅延報酬$A^{d}$は50000円、即時報酬$A^{s}$は20000円。回答は`1`なので遅延報酬$A^{d}$を選択。
+- ...
+- `D=24, soon=5000`のとき`0`: 24ヶ月後の遅延報酬$A^{d}$は50000円、即時報酬$A^{s}$は5000円。回答は`1`なので遅延報酬$A^{d}$を選択。
+
+```
+## 1ヶ月後
+              [,1]  [,2]  [,3]  [,4]  [,5]  [,6]  [,7]  [,8]  [,9] [,10] 
+D                1     1     1     1     1     1     1     1     1     1 
+amount_soon  50000 45000 40000 35000 30000 25000 20000 15000 10000  5000 
+sub1             0     1     1     1     1     1     1     1     1     1 
+--------------------------------------------------------------------------
+## 3ヶ月後
+             [,11] [,12] [,13] [,14] [,15] [,16] [,17] [,18] [,19] [,20] 
+D                3     3     3     3     3     3     3     3     3     3 
+amount_soon  50000 45000 40000 35000 30000 25000 20000 15000 10000  5000 
+sub1             0     0     1     1     1     1     1     1     1     1 
+--------------------------------------------------------------------------    
+## 6ヶ月後
+             [,21] [,22] [,23] [,24] [,25] [,26] [,27] [,28] [,29] [,30] 
+D                6     6     6     6     6     6     6     6     6     6 
+amount_soon  50000 45000 40000 35000 30000 25000 20000 15000 10000  5000 
+sub1             0     0     0     1     1     1     1     1     1     1 
+--------------------------------------------------------------------------
+## 12ヶ月後
+             [,31] [,32] [,33] [,34] [,35] [,36] [,37] [,38] [,39] [,40] 
+D               12    12    12    12    12    12    12    12    12    12 
+amount_soon  50000 45000 40000 35000 30000 25000 20000 15000 10000  5000 
+sub1             0     0     0     0     1     1     1     1     1     1 
+--------------------------------------------------------------------------
+## 24ヶ月後
+             [,41] [,42] [,43] [,44] [,45] [,46] [,47] [,48] [,49] [,50]
+D               24    24    24    24    24    24    24    24    24    24
+amount_soon  50000 45000 40000 35000 30000 25000 20000 15000 10000  5000
+sub1             0     0     0     0     0     0     1     1     1     1
+```
+
+モデルは下記の通り。最初は個人差を無視して、被験者全員が同じ割引率$k$をもつという仮定をおく。即時報酬$A^{s}_{i}$の大きさは、選択肢$i \in \{ 1,2,3,...,49,50\}$によって変更され、遅延報酬$A^{d}$は固定で50000円とする。$P_{i}$は選好データを表し、パラメタ$\theta^{d}$をもつベルヌイ分布に従うと仮定する。パラメタ$\theta^{d}$は、効用$U(A^{s}_{i}), U(A^{d}_{i})$の差がロジスティック関数で構造化されている。即時報酬の効用$U(A^{s}_{i})$は提示された即時報酬の金額$A_{i}$そのもの、遅延報酬の効用$U(A^{d})$が指数(双曲)価値割引される。
+
+<div class="tbox">
+<th3>モデル1</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+P_{i} &\sim& Bernoulli(\theta_{i}^{d}) \\
+\theta_{i}^{d} &=& logistic(\beta \{U(A^{d}) - U(A^{s}_{i}) \}) \\
+U(A^{s}_{i}) &=& U(A, t) = U(A_{i}, 0) = A_{i} \\
+U(A^{d}_{i}) &=& U(A, t) = U(50000, d) = 50000 \cdot e^{-kd} \\
+k &\sim& half\_Cauchy(0, 5) \\
+\beta &\sim& half\_Cauchy(0, 5)
+\end{eqnarray}
+$$
+</div>
+</div>
+
+Stanのモデルは下記の通り。
+
+```
+data {
+  int N;
+  int Trial;
+  real D[Trial];
+  real amount_delay;
+  real amount_soon[Trial];
+  int<lower=0,upper=1> choice[N,Trial];
+}
+
+parameters {
+  real<lower=0> k;
+  real<lower=0> beta;
+}
+
+model {
+  real v_soon;
+  real v_delay;
+  
+  for(t in 1:Trial) {
+ // 双曲割引の場合は、下記v_delayを書き直す。
+ // v_delay = amount_delay*1/(1+k*D[t]);
+    v_delay = amount_delay*exp(-k*D[t]);
+    v_soon = amount_soon[t];
+    for(n in 1:N){
+      target += bernoulli_logit_lpmf(choice[n,t] | beta*(v_delay-v_soon));
+    }
+  }
+  target += cauchy_lpdf(k | 0,5) - cauchy_lccdf(0 | 0,5);
+  target += cauchy_lpdf(beta | 0,5) - cauchy_lccdf(0 | 0,5);
+}
+```
+
+モデルの挙動を確認しておく。
+
+```
+// N    : 30
+// Trial: 50
+model {
+  for(t in 1:Trial) {
+    v_delay = amount_delay*exp(-k*D[t]);
+    v_soon = amount_soon[t];
+    
+    for(n in 1:N){
+      target += bernoulli_logit_lpmf(choice[n,t] | beta*(v_delay - v_soon));
+    }
+  }
+}
+
+// Trial=1, N=1のとき
+// v_delay = amount_delay*exp(-k*D[t]);
+// v_delay = 5*exp(-k*D[1]);
+// v_delay = 5*exp(-k*1);
+
+// v_soon = amount_soon[t];
+// v_soon = amount_soon[1];
+// v_soon = 5.0;
+
+// target += bernoulli_logit_lpmf(choice[n,t] | beta*(v_delay - v_soon));
+// target += bernoulli_logit_lpmf(choice[1,1] | beta*(5*exp(-k*1) - 5.0));
+// target += bernoulli_logit_lpmf(0 | beta*(5*exp(-k*1) - 5.0));
+--------------------------------------------------------------------------------
+// Trial=50, N=30のとき
+// v_delay = amount_delay*exp(-k*D[t]);
+// v_delay = 5*exp(-k*D[50]);
+// v_delay = 5*exp(-k*24);
+
+// v_soon = amount_soon[t];
+// v_soon = amount_soon[50];
+// v_soon = 0.5;
+
+// target += bernoulli_logit_lpmf(choice[n,t] | beta*(v_delay - v_soon));
+// target += bernoulli_logit_lpmf(choice[30,50] | beta*(5*exp(-k*24) - 0.5));
+// target += bernoulli_logit_lpmf(1 | beta*(5*exp(-k*24) - 0.5));
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model <- stan_model('exponential.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model, data = datastan, seed = 1989)
+```
+
+推定結果を確認する。割引率は$k=0.5$と推定された。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+事後分布を可視化しておく。
+
+```{r}
+stan_plot(
+  fit,
+  pars = c('k'),
+  point_est = 'mean',
+  ci_level = 0.95,
+  outer_level = 1.00,
+  show_density = TRUE,
+  fill_color = 'grey') + 
+  theme_bw()
+```
+
+推定された$k$を使って遅延価値割引の曲線を可視化する。
+
+```{r}
+ms <- rstan::extract(fit)
+# qua <- apply(ms$k, 2, quantile, prob = c(0.025, 0.25, 0.5, 0.75, 0.975))
+qua <- quantile(ms$k, prob = c(0.025, 0.25, 0.5, 0.75, 0.975))
+
+a <- purrr::map_dfc(.x = qua, .f = function(x){
+  expmodel(50000, x, t)
+})
+
+d_est <- tibble(t, a) 
+
+ggplot() +
+  theme_bw(base_size = 15) +
+  geom_ribbon(data = d_est, aes(x = t, ymin = `2.5%`, ymax = `97.5%`), fill = 'black', alpha = 1/6) +
+  geom_ribbon(data = d_est, aes(x = t, ymin = `25%`, ymax = `75%`), fill = 'black', alpha = 2/6) +
+  geom_line(data = d_est, aes(x = t, y = `50%`), size = 0.5) + 
+  labs(x = 'Time (Month)', y = 'U(A)') +
+  scale_x_continuous(breaks = seq(0, 30, 2)) +
+  scale_y_continuous(breaks = seq(0, 50000, 5000)) +
+  labs(title = 'Delay Discounting Exponential Model')
+```
+
+## 9.6.2 階層モデル
+
+割引率$k$に個人差を認めた階層モデルを推定する。階層モデルはパラメタについて、さらに確率分布を仮定し、そのパラメタを推定する二段構えになっているため階層モデルと呼ばれる。階層モデルを考えるに当たり、割引率の個人差がそのような確率分布に従うかを考える必要がある。割引率$k_{i}$はハザード率、主観的に財がなくなる時間を表していると考えている。0以上の値をとるが、必ずしも1以下とは限らない。ここでは、個人$j$の割引率$k$が対数正規分布に従うと仮定する。一瞬勘違いするが、$\mu_{k},\sigma_{k}$の添字の$k$は、割引率$k$のパラメタを意味する文字であって、$k$個あるという意味ではない。複数あるのは$k_{j}$の方であり、個人$j$個分存在する。
+
+<div class="tbox">
+<th3>モデル2</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+P_{j(i)} &\sim& Bernoulli(\theta_{j(i)}^{d}) \\
+\theta_{j(i)}^{d} &=& logistic(\beta \{U_{j}(A^{d}) - U(A^{s}_{i}) \}) \\
+U(A^{s}_{i}) &=& A_{i} \\
+U_{j}(A^{d}) &=& 50000 \cdot e^{-k_{j}d} \\
+\beta &\sim& half\_Cauchy(0, 5) \\
+k_{j} &\sim& LogNormal(\mu_{k}, \sigma_{k}) \\
+\mu_{k} &\sim& Normal(0,10^2) \\
+\sigma_{k} &\sim& half\_Cauchy(0, 5) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+モデルは下記の通り。
+
+```
+data {
+  int N;
+  int Trial;
+  real D[Trial];
+  real amount_delay;
+  real amount_soon[Trial];
+  int<lower=0,upper=1> choice[N,Trial];
+}
+
+parameters {
+  real<lower=0> k[N];
+  real<lower=0> beta;
+  real mu_k;
+  real<lower=0> sigma_k;
+}
+
+model {
+  real v_soon;
+  real v_delay;
+  for (t in 1:Trial) {
+    v_soon = amount_soon[t];
+    for(n in 1:N){
+      v_delay = amount_delay*exp(-k[n]*D[t]);
+      target += bernoulli_logit_lpmf(choice[n,t] | beta*(v_delay-v_soon));
+    }
+  }
+  target += lognormal_lpdf(k | mu_k,sigma_k);
+  target += normal_lpdf(mu_k | 0,10^2);
+  target += cauchy_lpdf(sigma_k | 0,5) - cauchy_lccdf(0 | 0,5);
+  target += cauchy_lpdf(beta | 0,5) - cauchy_lccdf(0 | 0,5);
+}
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model <- stan_model('exponential_h.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model, data = datastan, seed = 1989)
+```
+
+推定結果を確認する。割引率は$k=0.5$と推定された。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+事後分布を可視化しておく。
+
+```{r}
+stan_plot(
+  fit,
+  pars = c('k'),
+  point_est = 'mean',
+  ci_level = 0.95,
+  outer_level = 1.00,
+  show_density = TRUE,
+  fill_color = 'grey') + 
+  theme_bw()
+```
+
+推定された$k_{j}$を使って遅延価値割引の曲線を可視化する。
+
+```{r}
+ms <- rstan::extract(fit)
+# qua <- apply(ms$k, 2, quantile, prob = c(0.025, 0.25, 0.5, 0.75, 0.975))
+qua <- apply(ms$k, 2, quantile, prob = c(0.5))
+
+a <- purrr::map_dfc(.x = qua, .f = function(x){
+  expmodel(50000, x, t)
+})
+
+d_est <- tibble(t, a) %>% 
+  pivot_longer(
+    cols = -t,
+    names_to = 'subject',
+    names_prefix = '...',
+    values_to = 'y'
+  ) 
+d_est$subject <- as.numeric(d_est$subject)
+
+ggplot() +
+  theme_bw(base_size = 15) +
+  geom_line(data = d_est, aes(x = t, y = y, group = subject, col = subject), size = 0.5) + 
+  scale_x_continuous(breaks = seq(0, 30, 2)) +
+  scale_y_continuous(breaks = seq(0, 50000, 5000)) +
+  scale_colour_gradient(low = 'tomato', high = 'royalblue') +
+  labs(x = 'Time (Month)', y = 'U(A)', title = 'Delay Discounting Hierarchical Exponential Model')
+```
+
+## 参考文献および参考資料
+
+- [社会科学のためのベイズ統計モデリング](https://www.asakura.co.jp/detail.php?book_code=12842)
