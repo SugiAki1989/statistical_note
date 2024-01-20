@@ -1,0 +1,143 @@
+# Modeling Match Results in La Liga Using a Hierarchical Bayesian Poisson Model.
+
+```{r cache=FALSE}
+library(tidyverse)
+library(rstan)
+source("plotPost.R")
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+set.seed(12345)
+
+# Convenience function to generate the type of column names Jags outputs.
+col_name <- function(name, ...) {
+  paste0(name, "[", paste(..., sep=",") , "]")
+}
+
+load("laliga.RData")
+```
+
+```{r}
+# -1 Away win, 0 Draw, 1 Home win
+laliga$MatchResult <- sign(laliga$HomeGoals - laliga$AwayGoals) 
+
+# Creating a data frame d with only the complete match results
+d <- na.omit(laliga)
+# Sampling
+t <- c(
+  "Real Valladolid",
+  "Atlético Madrid",
+  "FC Barcelona",
+  "Villarreal CF",
+  "FC Sevilla",
+  "Real Madrid CF",
+  "FC Valencia",
+  "Real Zaragoza"
+  )
+
+d <- d %>%  filter(HomeTeam %in% t & AwayTeam %in% t)
+```
+
+```{r}
+teams <- unique(c(d$HomeTeam, d$AwayTeam))
+seasons <- unique(d$Season)
+
+data_list <- list(
+  HomeGoals = d$HomeGoals, 
+  AwayGoals = d$AwayGoals, 
+  HomeTeam = as.numeric(factor(d$HomeTeam, levels=teams)),
+  AwayTeam = as.numeric(factor(d$AwayTeam, levels=teams)),
+  Season = as.numeric(factor(d$Season, levels=seasons)),
+  n_teams = length(teams),
+  n_games = nrow(d), 
+  n_seasons = length(seasons)
+  )
+
+data_list
+```
+
+
+## Modeling Match Results: Iteration 1
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model1 <- stan_model('model1.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit1 <- sampling(object = model1, data = data_list, seed = 1989, chains = 4, iter = 10000, thin = 2)
+```
+
+推定結果を確認する。
+
+```{r, class.output="scroll-1000"}
+print(fit1, prob = c(0.025, 0.5, 0.975), digits_summary = 2)
+```
+
+## Modeling Match Results: Iteration 2
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model2 <- stan_model('model2.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit2 <- sampling(object = model2, data = data_list, seed = 1989, chains = 4, iter = 10000, thin = 2)
+```
+
+推定結果を確認する。
+
+```{r, class.output="scroll-1000"}
+print(fit2, prob = c(0.025, 0.5, 0.975), digits_summary = 2)
+```
+
+## Modeling Match Results: Iteration 3
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model3 <- stan_model('model3.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit3 <- sampling(object = model3, data = data_list, seed = 1989, chains = 4, iter = 10000, thin = 5)
+```
+
+推定結果を確認する。
+
+```{r, class.output="scroll-1000"}
+print(fit3, prob = c(0.025, 0.5, 0.975), digits_summary = 3)
+```
+
+apply(ms$skill[,1,], 2, quantile, prob  =  c(0.25, 0.5, 0.75))
+
+```{r}
+ms <- rstan::extract(fit3)
+d_est <- data.frame()
+for (n in 1:length(t)) {
+  qua <- apply(ms$skill[,n,], 2, quantile, prob  =  c(0.25, 0.5, 0.75))
+  d_est <- rbind(
+     d_est, 
+     data.frame(team = t[n], year = 2008:2012, t(qua), check.names = FALSE)
+     )
+}
+
+d_est
+```
+
+
+
+```{r}
+ggplot(data = d_est, aes(x = year, y = `50%`, group = team)) +
+  theme_bw(base_size = 15) +
+  #geom_ribbon(aes(ymin = `25%`, ymax = `75%`, fill = team), alpha = 0.2) +
+  geom_line(aes(col = team), linewidth = 0.5) +
+  geom_hline(yintercept = 0, linetype = 'dashed') + 
+  labs(x = 'Year', y = 'Strength', title = 'Time Series of Estimated Latent Strength') +
+  scale_x_continuous(breaks = 2008:2012) + 
+  scale_y_continuous(breaks = seq(-1,1,1), limit = c(-1, 1))
+```
