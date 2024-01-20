@@ -1,0 +1,409 @@
+---
+title: "ベイズで強さを推定する"
+pagetitle: "ベイズで強さを推定する"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+今回は第10章「収束しない場合の対処法」のチャプターを写経していく。
+
+## 10.1.5 ウサギとカメ
+
+収束に関わる識別可能性について、ウサギとカメの例題を通じて理解を深める。ウサギとカメのマラソンの勝敗結果(ウサギの26勝4敗、カメの4勝26敗)からウサギとカメの「強さ」を推定する。
+
+インデックスが1がカメで、インデックスが2がウサギである。敗者の列と勝者の列があって、勝敗結果によって各インデックスが記録される。1レース目では、`Loser`のインデックスが1なので、カメが敗者である。
+
+```{r}
+library(dplyr)
+library(rstan)
+library(ggplot2)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap10/input/data-usagitokame.txt')
+data <- list(N = 2, G = nrow(d), LW = d)
+data
+```
+
+モデルのメカニズムを考える。カメの強さ$\mu[1]$、ウサギの強さ$\mu[2]$とする。各レースごとに発揮できた力をパフォーマンスと考える。カメのパフォーマンスは平均$\mu[1]$、標準偏差$\sigma[1]$の正規分布から生成されると考える。$\sigma[1]$はカメのパフォーマンスのムラの大きさであり、ムラがあまりなければパフォーマンスはだいたい同じになるが、ムラが大きいとパフォーマンスは毎回大きく異なる。ウサギについても同様である。ここではデータが少ないので、勝負ムラは$\sigma[1]=\sigma[2]=\sigma$とする。
+
+尤度を考える際には、パフォーマンスの差だけが勝敗に関係し、強さを平行移動しても同じ尤度になる。そこで片方の強さを0に固定する$\mu[1]=0$。また、$(\mu[2]|\sigma)=(3,2)$は$(\mu[2]|\sigma)=(6,4)$は同じ尤度になるので、$\sigma=1$に固定する。
+
+<div class="tbox">
+<th3>モデル10-3</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+敗者のパフォーマンス\\
+performance[g,1] &\sim& Normal(\mu[Loser[g]],1)\\
+勝者のパフォーマンス\\
+performance[g,2] &\sim& Normal(\mu[Winner[g]],1) \\
+変数の制約\\
+performance[g,1] &\lt& performance[g,2] \\
+\mu[1] &=& 0
+\end{eqnarray}
+$$
+</div>
+</div>
+
+モデルは下記の通り。`ordered[2] performance[G]`としてパフォーマンスの制約を表現している。order型は順序付きベクトルと呼ばれ、長さ$N$の要素が$x_{1} \lt x_{2} \lt...\lt x_{N}$を満たす。雑誌ランキングなど、順序つきのデータがあった場合に、各雑誌の真の面白さを大小関係があるパラメタと考え、order型で宣言して推定する。
+
+```
+data {
+  int N;  // num of players
+  int G;  // num of games
+  int<lower=1, upper=N> LW[G,2];  // loser and winner of each game
+}
+
+parameters {
+  ordered[2] performance[G];
+  real b;
+}
+
+transformed parameters {
+  real mu[N];
+  mu[1] = 0;
+  mu[2] = b;
+}
+
+model {
+  for (g in 1:G){
+    for (i in 1:2){
+      performance[g,i] ~ normal(mu[LW[g,i]], 1);
+    }
+  }
+}
+```
+
+下記の部分を深掘りしておく。
+
+```
+transformed parameters {
+  real mu[N];
+  mu[1] = 0;
+  mu[2] = b;
+  // mu = (0, b)という関係になる
+}
+
+model {
+  for (g in 1:G){
+    for (i in 1:2){
+      performance[g,i] ~ normal(mu[LW[g,i]], 1);
+    }
+  }
+}
+// g=1,i=1
+// performance[1,1] ~ normal(mu[LW[1,1]], 1);
+// performance[1,1] ~ normal(mu[1], 1);
+// performance[1,1] ~ normal(0, 1);
+
+// g=1,i=2
+// performance[1,2] ~ normal(mu[LW[1,2]], 1);
+// performance[1,2] ~ normal(mu[2], 1);
+// performance[1,2] ~ normal(b, 1);
+
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model103 <- stan_model('note_ahirubayes12-103.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model103, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。カメの強さを$\mu[0]=0$とした場合、ウサギの強さ$\mu[1]$は1.6[0.8〜2.4]と推定された。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+今回のモデルのメカニズムは少しわかりにくいので、データ生成を通じて、どのようなメカニズムを想定しているのか確認しておく。
+
+```{r}
+set.seed(123)
+
+G <- 30
+mu_pf <- c(0, 1.5)
+pf <- sapply(mu_pf, function(mu) rnorm(G, mean = mu, sd = 1))
+```
+
+`sapply()`関数の部分がわかりにくいかもしれないので、小さい例を載せておく。平均`mu(0, 1.5)`、標準偏差1をもつ分布から、30レース分の乱数を生成している。
+
+```{r}
+pf
+```
+
+
+このデータに対して、行方向を基準に、大小を比較して、大きい方は2、小さい方は1としている。27レース目の`0.83778704 > -0.0487528`という関係なので、`2, 1`と順序が付与される。
+
+```{r}
+t(apply(pf, 1, order))
+```
+
+このような想定の元、レースの勝敗がきまる。
+
+```{r}
+d <- data.frame(t(apply(pf, 1, order)))
+colnames(d) <- c('Loser', 'Winner')
+tbl <- table(d$Winner)
+tbl
+```
+
+
+## 10.2.2 正の値を持つパラメタ
+
+正の値を持つパラメタの事前分布の第一候補は一様分布$U(0,1000$。ただ、場合によっては、大きな値を取ってしまうことがあるので、ある程度は制限をかけたい。その際に利用されるのが弱情報事前分布。
+
+共役関係から、かつては標準偏差の事前分布は逆ガンマ分布を利用すること多かったが、逆ガンマ分布パラメタの値によって、形状が大きく変化するため、原点0付近での確率密度が大きく異なる。下記は$InvGamma(0.1,0.1)$を可視化したもの。
+
+```{r}
+library(MCMCpack)
+x <- c(seq(1e-10, 0.0005, length = 100), seq(0.0005, 0.005, length = 100), seq(0.005, 0.02, length = 100), seq(0.02, 0.5, length = 100), seq(0.5, 3, length = 100), seq(3, 10, length = 100))
+p1 <- dinvgamma(x, shape = 0.001, scale = 0.001)
+p2 <- dinvgamma(x, shape = 0.1, scale = 0.1)
+d <- data.frame(x = x, y1 = p1, y2 = p2)
+
+ggplot() +
+  theme_bw(base_size = 18) +
+  geom_line(data = d, aes(x = x, y = y1), color = 'black', linewidth = 1, linetype = '31') +
+  geom_line(data = d, aes(x = x, y = y2), color = 'black', linewidth = 1) +
+  labs(x = 'y', y = 'probability density')
+```
+
+下記は$InvGamma(0.001,0.001)$を可視化したもの。このような形状の違いによる問題は対数正規分布でも起こりうる。
+
+```{r}
+ggplot() +
+  theme_bw(base_size = 18) +
+  geom_line(data = d, aes(x = x, y = y1), color = 'black', linewidth = 1, linetype = '31') +
+  geom_line(data = d, aes(x = x, y = y2), color = 'black', linewidth = 1) +
+  labs(x = 'y', y = 'probability density') +
+  scale_x_continuous(breaks = seq(from = 0, to = 0.01, by = 0.002), limits = c(0, 0.01))
+```
+
+これを避ける方法として、半t分布や半正規分布を利用する方法がある。半t分布は0近くの確率密度が十分あるので、逆ガンマ分布のような欠点が修正される。点線が半正規分布のグラフ。
+
+```{r}
+x <- seq(0, 5, length=101)
+p1 <- 2*dt(x, df=4)
+p2 <- 2*dnorm(x, mean=0, sd=1)
+d <- data.frame(x=x, y1=p1, y2=p2)
+
+ggplot() +
+  theme_bw(base_size=18) +
+  geom_line(data=d, aes(x=x, y=y1), linewidth=1) +
+  geom_line(data=d, aes(x=x, y=y2), linewidth=1, linetype='31') +
+  labs(x='y', y='probability density')
+```
+
+他にも指数分布、ガンマ分布などを利用されるが、可視化して一番妥当な分布を利用することが望ましい。ガンマ分布であれば、$\alpha,\beta$ともに固定値を与えて使うか、いずれか、または、両方が確率分布に従うと考えて、$Gamma(\alpha,\beta)$として利用する。パラメタが平均1、標準偏差0.32の正規分布で近似できるのであれば、$Gamma(10,10)$として利用する。
+
+ガンマ分布の例として、プロ棋士の勝敗データから、各騎士の強さと勝負ムラを推定する。1試合の勝敗ごとに点をやり取りするレーティングによって強さが数値化されている。下記が参考になる。
+
+- [将棋連盟　棋士別成績一覧（レーティング）](http://kishibetsu.com/rating.html)
+
+「初期値から落ち着くまでに適正な評価が難しい」「評価のタイミングに依存する」「インフレしやすい」などの問題があるが、その欠点をベイズで克服する。データは下記の1行1試合の形式で記録されている。1行目であれば、`22番`と`83番`が試合をして、買ったのは`83番`という形で記録されていると思われる。2行目であれば、`39番`と`27番`が試合をして、`39番`が勝ち、`27番`が負け。
+
+```{r}
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap10/input/data-shogi-player.txt')
+## 時間がかかるのでサイズを小さくする
+d <- d[1:500,]
+head(d)
+```
+
+
+モデルのメカニズムを考える。ウサギとカメのモデルとあまり変わらないが、各騎士の強さを$\mu[n]$、勝負ムラを$\sigma[n]$として、1回の勝負で発揮する力は、平均$\mu[n]$、標準偏差$\sigma[n]$の正規分布から生成されると考える。勝敗はそのパフォーマンスの大小で決まる。
+
+問題はウサギとカメのときのように、いずれかを0に固定するということができない。プレイヤーは166人おり、すべての棋士と対戦している棋士がいない。そのため、そのような棋士を基準にする方法はとれない。その代わりに、階層モデルを適用することで「各騎士の強さは$\mu[n]$は特定の分布に従う」という仮定をたてる。つまり、各騎士の強さ$\mu[n]$は平均0、標準偏差$\sigma_{\mu}$に従うと考える。そして、勝負ムラ$\sigma[n]$には弱情報事前分布(ガンマ分布(10,10))を利用する。勝負ムラの大きさは1前後に固定され、パフォーマンスのスケールが決まる。
+
+<div class="tbox">
+<th3>モデル10-4</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+performance[g,1] &\sim& Normal(\color{red}{\mu[}Loser[g]\color{red}{]},\color{blue}{\sigma[}Loser[g]\color{blue}{]})\\
+performance[g,2] &\sim& Normal(\color{red}{\mu[}Winner[g]\color{red}{]},\color{blue}{\sigma[}Winner[g]\color{blue}{]})\\
+performance[g,1] &\lt& performance[g,2] \\
+\color{red}{\mu[n]} &\sim& Normal(0, \sigma_{\mu}) \\ 
+\color{blue}{\sigma[n]}  &\sim& Gamma(10, 10) \\ 
+\end{eqnarray}
+$$
+</div>
+</div>
+
+モデルは下記の通り。
+
+```
+data {
+  int N;  // num of players
+  int G;  // num of games
+  int<lower=1, upper=N> LW[G,2];  // loser and winner of each game
+}
+
+parameters {
+  ordered[2] performance[G];
+  vector[N] mu;
+  real<lower=0> s_mu;
+  vector<lower=0>[N] s_pf;
+}
+
+model {
+  mu ~ normal(0, s_mu);
+  s_pf ~ gamma(10, 10);
+
+  for (g in 1:G){
+    for (i in 1:2){
+      performance[g,i] ~ normal(mu[LW[g,i]], s_pf[LW[g,i]]);
+    }
+  }
+}
+```
+
+この部分の動きを確認しておく。
+
+```
+model {
+  mu ~ normal(0, s_mu);
+  s_pf ~ gamma(10, 10);
+
+  for (g in 1:G){
+    for (i in 1:2){
+      performance[g,i] ~ normal(mu[LW[g,i]], s_pf[LW[g,i]]);
+    }
+  }
+}
+
+// ここでは試合数を減らしている
+// G=500, N=166
+// g=1, i=1, Loser
+// performance[1,1] ~ normal(mu[LW[1,1]], s_pf[LW[1,1]]);
+// performance[1,1] ~ normal(mu[22], s_pf[22]);
+// g=1, i=2, Wwinner
+// performance[1,2] ~ normal(mu[LW[1,2]], s_pf[LW[1,2]]);
+// performance[1,2] ~ normal(mu[83], s_pf[83]);
+// ...
+// g=500, i=1, Loser
+// performance[500,1] ~ normal(mu[LW[500,1]], s_pf[LW[500,1]]);
+// performance[500,1] ~ normal(mu[113], s_pf[113]);
+// g=500, i=2, Winner
+// performance[500,2] ~ normal(mu[LW[500,2]], s_pf[LW[500,2]]);
+// performance[500,2] ~ normal(mu[4], s_pf[4]);
+```
+
+
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model104 <- stan_model('note_ahirubayes12-104.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+N <- max(d)
+G <- nrow(d)
+data <- list(N = N, G = G, LW = d)
+
+fit <- sampling(object = model104, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 2)
+```
+
+サイズを小さくしているので、参考書とは異なるが、推定された`mu[134]`の事後平均は一番大きい、つまり、強いということがわかる。実際に対戦成績をみると、8試合中1試合しか負けていない。
+
+```{r}
+#           mean se_mean   sd  2.5%   50% 97.5% n_eff Rhat
+# mu[134]   0.40    0.05 0.45 -0.23  0.31  1.49    74 1.05
+#
+#           mean se_mean   sd 2.5%  50% 97.5% n_eff Rhat
+# s_pf[134] 0.98    0.00 0.30 0.47 0.95  1.63  4277    1
+
+d %>% filter(Loser == 134 | Winner == 134)
+```
+参考書の推定結果を元に以降は記載している。強さ$\mu[n]$の中央値が高いトップ5の棋士と
+
+```{r}
+ms <- rstan::extract(fit)
+qua <- apply(ms$mu, 2, quantile, prob = c(0.05, 0.5, 0.95))
+d_est <- data.frame(nid = 1:N, t(qua), check.names = FALSE)
+d_top5 <- head(d_est[rev(order(d_est$`50%`)),], 5)
+# d_top5
+# nid        5%      50%      95%
+#  47 1.5714078 1.868790 2.204545
+# 105 1.3110919 1.612636 1.967448
+# 134 1.0479643 1.337389 1.658967
+#  78 1.0090331 1.303693 1.637110
+#  65 0.9835042 1.282803 1.604898
+```
+
+勝負ムラ$\sigma[n]$の中央値が高いトップ3とワースト3を表示している。
+
+```{r}
+qua <- apply(ms$s_pf, 2, quantile, prob=c(0.05, 0.5, 0.95))
+d_est <- data.frame(nid = 1:N, t(qua), check.names = FALSE)
+d_top3 <- head(d_est[rev(order(d_est$`50%`)),], 3)
+# d_top3
+# nid        5%      50%      95%
+# 155 0.8346475 1.299498 1.922007
+#  53 0.7572167 1.240500 1.807479
+# 130 0.7775759 1.218723 1.783369
+
+d_bot3 <- head(d_est[order(d_est$`50%`),], 3)
+# d_bot3
+# nid        5%       50%      95%
+# 106 0.4059646 0.7278221 1.139531
+# 162 0.4381930 0.7876454 1.274487
+# 132 0.4573107 0.8034746 1.274778
+```
+
+## 参考文献および参考資料
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+- [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)

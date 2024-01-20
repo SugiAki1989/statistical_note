@@ -1,0 +1,329 @@
+---
+title: '男性プロテニスプレーヤーの強さに関する時系列モデリング'
+pagetitle: '男性プロテニスプレーヤーの強さに関する時系列モデリング'
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: 'show'
+highlight: 'kate'
+# theme: 'flatly'
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = 'center',
+  dev = 'ragg_png'
+)
+```
+
+<div class='update-right'>
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は下記のブログに記載されているテニス選手の強さを推定する内容を参考にさせていただき、写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [ベイズモデリングで男子プロテニスの強さを分析してみた](https://ie110704.net/2018/05/24/%E3%83%99%E3%82%A4%E3%82%BA%E3%83%A2%E3%83%87%E3%83%AA%E3%83%B3%E3%82%B0%E3%81%A7%E7%94%B7%E5%AD%90%E3%83%97%E3%83%AD%E3%83%86%E3%83%8B%E3%82%B9%E3%81%AE%E5%BC%B7%E3%81%95%E3%82%92%E5%88%86%E6%9E%90/)
+
+## 
+
+https://www.kaggle.com/code/akisugi/copy-bayesian
+
+https://ie110704.net/2018/05/24/%E3%83%99%E3%82%A4%E3%82%BA%E3%83%A2%E3%83%87%E3%83%AA%E3%83%B3%E3%82%B0%E3%81%A7%E7%94%B7%E5%AD%90%E3%83%97%E3%83%AD%E3%83%86%E3%83%8B%E3%82%B9%E3%81%AE%E5%BC%B7%E3%81%95%E3%82%92%E5%88%86%E6%9E%90/
+
+<div class="tbox">
+<th3>モデル</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+performance[g,1] &\sim& Normal(\mu[Loser[g] ],\sigma_{pf}[Loser[g] ]) \ \ g=1...G \\
+performance[g,2] &\sim& Normal(\mu[Winner[g]],\sigma_{pf}[Winner[g]]) \ \ g=1...G \\
+performance[g,1] &\lt& performance[g,2] \ \ g=1...G \\
+\mu[n] &\sim& Normal(0, \sigma_{\mu}) \ \ n=1...N  \\ 
+\sigma_{pf}[n] &\sim& Gamma(10, 10) \ \ n=1...N  \\ 
+\end{eqnarray}
+$$
+</div>
+</div>
+
+
+```{r}
+library(tidyverse)
+library(rstan)
+#library(brms)
+#library(bayesplot)
+library(patchwork)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+PATH <- '~/Desktop/df_matches.csv'  
+df_matches_mst <- read.csv(PATH)
+```
+
+```{r}
+START_YEAR <- 2015
+TARGET_PLAYERS <- c('Roger Federer', 'Rafael Nadal', 'Novak Djokovic', 'Andy Murray')
+```
+
+
+```{r, class.output="scroll-1000"}
+df_matches <- df_matches_mst %>% 
+  select(year, loser_name, winner_name) %>% 
+  filter(year >= START_YEAR) %>% 
+  filter(winner_name %in% TARGET_PLAYERS & loser_name %in% TARGET_PLAYERS)
+df_matches
+```
+
+```{r}
+tmp <- df_matches %>% 
+      pivot_longer(cols = -year, names_to = 'flag', values_to = 'name') %>% 
+      group_by(name) %>% 
+      count() %>% 
+  left_join(
+    x = .,
+    y = df_matches %>% group_by(winner_name) %>% count(),
+    by = join_by('name' == 'winner_name')
+  ) %>% 
+  rename(
+    games = n.x,
+    cnt_win = n.y
+  ) %>% 
+  mutate(
+    rate_win = cnt_win/games
+  )
+a <- ggplot(tmp, aes(name, games)) + geom_bar(stat = 'identity') +
+  theme_bw(base_size = 10) + labs(x = 'player', title = 'Number of Games')
+b <- ggplot(tmp, aes(name, rate_win)) + geom_bar(stat = 'identity') + 
+  theme_bw(base_size = 10) + labs(x = 'player', title = 'Rate of win')
+
+a | b
+```
+
+
+
+```{r}
+df_name2no <- tibble(
+  id = 1:length(TARGET_PLAYERS),
+  name = TARGET_PLAYERS
+)
+df_name2no
+```
+
+```{r}
+df_matches <- df_matches %>% 
+  left_join(
+    df_name2no %>% rename(winner = id),
+    by = join_by('winner_name' == 'name')
+  ) %>% 
+    left_join(
+    df_name2no %>% rename(loser = id),
+    by = join_by('loser_name' == 'name')
+  ) %>% 
+  select(year, loser, winner)
+```
+
+```{r, class.output="scroll-1000"}
+data <- list(
+  N = length(TARGET_PLAYERS),
+  G = nrow(df_matches),
+  LW = df_matches %>% select(-year)
+)
+```
+
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model <- stan_model('model.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model, data = data, seed = 1989)
+```
+
+推定結果を確認する。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+```{r}
+a <- stan_plot(
+  fit,
+  pars = c('mu'),
+  show_density = TRUE,
+  ci_level = 0.8,
+  outer_level = 1
+  )
+
+b <- stan_plot(
+  fit,
+  pars = c('s_pf'),
+  show_density = TRUE,
+  ci_level = 0.8,
+  outer_level = 1
+  )
+
+a | b
+```
+
+## 時系列モデル
+
+<div class="tbox">
+<th3>モデル</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+performance[y][g,1] &\sim& Normal(\mu[Loser][y],\sigma_{pf}[Loser][y]) \ \ g=1...G,y=1...Y \\
+performance[y][g,2] &\sim& Normal(\mu[Winner][y],\sigma_{pf}[Winner][y]) \ \ g=1...G,y=1...Y \\
+performance[y][g,1] &\lt& performance[y][g,2] \ \ g=1...G,y=1...Y \\
+
+\mu[n][1] &\sim& Normal(0, \sigma_{\mu}[n][1]) \ \ n=1...N\\
+\mu[n][y] &\sim& Normal(\mu[n][y-1], \sigma_{\mu}[n][y-1]) \ \ n=1...N,y=2...Y \\
+
+\sigma_{pf}[n][y] &\sim& Gamma(10, 10) \ \ n=1...N,y=1...Y \\
+\sigma_{\mu}[n][y] &\sim& Normal(0, 1) \ \ n=1...N,y=1...Y \\
+
+\end{eqnarray}
+$$
+</div>
+</div>
+
+
+
+```{r, class.output="scroll-1000"}
+START_YEAR <- 2005
+END_YEAR <- 2016
+
+df_matches_ts <- df_matches_mst %>% 
+  select(year, loser_name, winner_name) %>% 
+  filter(year >= START_YEAR & END_YEAR >= year) %>% 
+  filter(winner_name %in% TARGET_PLAYERS & loser_name %in% TARGET_PLAYERS)
+
+df_matches_ts
+```
+
+
+```{r}
+tmp_ts <- df_matches_ts %>% 
+      pivot_longer(cols = -year, names_to = 'flag', values_to = 'name') %>% 
+      group_by(name, year) %>% 
+      count() %>% 
+  left_join(
+    x = .,
+    y = df_matches_ts %>% group_by(winner_name, year) %>% count(),
+    by = join_by('name' == 'winner_name', 'year' == 'year')
+  ) %>% 
+  rename(
+    games = n.x,
+    cnt_win = n.y
+  ) %>% 
+  mutate(
+    cnt_win = if_else(is.na(cnt_win) == TRUE, 0, cnt_win),
+    rate_win = cnt_win/games
+  )
+
+a <- ggplot(tmp_ts, aes(year, games)) + geom_line(stat = 'identity') + facet_wrap( ~ name, nrow = 1) + 
+  theme_bw(base_size = 10) + labs(x = 'player', title = 'Number of Games')
+b <- ggplot(tmp_ts, aes(year, rate_win)) + geom_line(stat = 'identity') + facet_wrap( ~ name, nrow = 1) + 
+  theme_bw(base_size = 10) + labs(x = 'player', title = 'Rate of win')
+
+a / b
+```
+
+
+```{r, class.output="scroll-1000"}
+df_matches_ts <- df_matches_ts %>% 
+  left_join(
+    df_name2no %>% rename(winner = id),
+    by = join_by('winner_name' == 'name')
+  ) %>% 
+    left_join(
+    df_name2no %>% rename(loser = id),
+    by = join_by('loser_name' == 'name')
+  ) %>% 
+  # yearを1始まりに修正
+  mutate(year = year - (START_YEAR-1)) %>% 
+  select(year, loser, winner)
+df_matches_ts
+```
+
+```{r, class.output="scroll-1000"}
+data_ts <- list(
+  N = length(TARGET_PLAYERS),
+  G = nrow(df_matches_ts),
+  Y = length(unique(df_matches_ts$year)),
+  GY = df_matches_ts$year,
+  LW = df_matches_ts %>% select(-year)
+)
+data_ts
+```
+
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model_ts <- stan_model('model-ts.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit_ts <- sampling(object = model_ts, data = data_ts, seed = 1989)
+```
+
+推定結果を確認する。
+
+```{r, class.output="scroll-1000"}
+print(fit_ts, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+
+```{r, class.output="scroll-1000"}
+ms <- rstan::extract(fit_ts)
+d_est <- data.frame()
+for (n in 1:length(TARGET_PLAYERS)) {
+  qua <- apply(ms$mu[,n,], 2, quantile, prob  =  c(0.25, 0.5, 0.75))
+  d_est <- rbind(
+    d_est, 
+    data.frame(name = TARGET_PLAYERS[n], year = unique(df_matches_ts$year), t(qua), check.names = FALSE)
+    )
+}
+
+d_est
+```
+
+
+
+```{r}
+ggplot(data = d_est, aes(x = year, y = `50%`, group = name)) +
+  theme_bw(base_size = 10) +
+  theme(legend.position = 'none') +
+  geom_ribbon(aes(ymin = `25%`, ymax = `75%`, fill = name), alpha = 0.2) +
+  geom_line(aes(col = name), linewidth = 0.5) +
+  geom_hline(yintercept = 2, linetype = 'dashed') + 
+  labs(x = 'Year', y = 'Strength', title = 'Time Series of Estimated Latent Strength') +
+  scale_x_continuous(breaks = seq(unique(df_matches_ts$year)[1], unique(df_matches_ts$year)[12], 2)) + 
+  scale_y_continuous(breaks = seq(0,4,0.5), limit = c(0, 4)) + 
+  facet_wrap( ~ name, nrow = 1)
+
+```
+
+## 参考文献および参考資料
+
+- []()

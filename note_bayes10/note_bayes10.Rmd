@@ -1,0 +1,237 @@
+---
+title: 'ボートレースの勝率を推定する'
+pagetitle: 'ボートレースの勝率を推定する'
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: 'show'
+highlight: 'kate'
+# theme: 'flatly'
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = 'center',
+  dev = 'ragg_png'
+)
+```
+
+<div class='update-right'>
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は下記のブログに記載されているテニス選手の強さを推定する内容を参考にさせていただき、写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [RとStanではじめるベイズ統計モデリングによるデータ分析入門](https://www.kspub.co.jp/book/detail/5165362.html)
+
+第8章の「動的一般化線形モデル：二項分布を仮定した例」を写経する。
+
+## 8.2 GLMの復習
+
+一般化線形モデルは、確率分布、線形予測子、リンク関数を部品とするモデルでこれらの3つを考えてモデリングを行う。ここで扱うデータはボートレースの勝ち負け(0/1)が記録されているデータ。
+
+- 確率分布: 二項分布
+- 線形予測子: 真の状態$\mu[t]$
+- リンク関数: ロジット関数(ロジスティック関数の逆関数)を利用。二項分布のパラメタは0-1の範囲しか取れないため。
+
+動的一般化線形モデルは、線形予測子が動的なものに対応している一般化線形モデルの拡張とも言える。ここでは下記の二項分布を仮定した動的一般化線形モデルを利用する。
+
+<div class="tbox">
+<th3>モデル</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+\mu[t] &=& \mu[t-1] + \epsilon_{\mu} &\quad \epsilon_{\mu} \sim Normal(0, \sigma_{\mu}) \\
+y[t] &\sim& Bernoulli(logistic(\mu[t]) \\
+\text{Simple Version} \\
+\mu[t] &\sim& Normal(\mu[t-1], \sigma_{\mu}) \\
+y[t] &\sim& Bernoulli(logistic(\mu[t]) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+説明変数などがあれば下記のように時変係数モデルを参考に拡張する。
+
+$$
+\begin{eqnarray}
+\mu[t] &=& \mu[t-1] + \epsilon_{\mu} &\quad \epsilon_{\mu} \sim Normal(0, \sigma_{\mu}) \\
+\beta[t] &=& \beta[t-1] + \epsilon_{\beta} &\quad \epsilon_{\beta} \sim Normal(0, \sigma_{\beta}) \\
+\theta[t] &=& logistic(\mu[t] + \beta[t] \cdot x[t]) \\
+y[t] &\sim& Bernoulli(\theta[t])
+\end{eqnarray}
+$$
+
+ここでは`KFAS`パッケージに含まれる`boat`データを利用する。`boat`データはオックスフォード大学(が勝利した場合は0)とケンブリッジ大学(が勝利した場合は1)の間で毎年行われるボートレースの結果を記録しており、183個のうち28個が欠損値という時系列データ。
+
+```{r}
+library(tidyverse)
+library(rstan)
+#library(brms)
+#library(bayesplot)
+#library(patchwork)
+library(KFAS)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+data('boat')
+boat
+```
+
+データを見るとわかるが、2個目から7個目までは欠損値で、それ以降もところどころ欠損値がある。
+
+```{r, class.output="scroll-1000"}
+which(!is.na(boat))  
+```
+
+データを準備する。欠損値があるデータでも扱えるのが状態空間モデルの強み。データを渡す場合は、欠損値を除いたデータ`y`、長さ`len_obs`、インデックス`obs_no`が必要になる。
+
+```{r}
+boat_omit_NA <- na.omit(as.numeric(boat))
+
+# データの準備
+data_list <- list(
+  T       = length(boat),
+  len_obs = length(boat_omit_NA), # 観測値があるデータのみ
+  y       = boat_omit_NA,         # 欠損値を除外したデータのみ
+  obs_no  = which(!is.na(boat))   # 観測値があるデータのインデックス
+)
+data_list
+```
+
+
+Stanモデルはこちら。
+
+```
+data {
+  int T;               // データ取得期間の長さ
+  int len_obs;         // 観測値が得られた個数
+  int y[len_obs];      // 観測値
+  int obs_no[len_obs]; // 観測値が得られた時点
+}
+
+parameters {
+  real mu[T];         // 状態の推定値
+  real<lower=0> s_mu;  // 過程誤差の標準偏差
+}
+
+model {
+  s_mu ~ student_t(3, 0, 10);
+  
+  // 状態方程式に従い、状態が遷移する
+  for(t in 2:T) {
+    mu[t] ~ normal(mu[t-1], s_mu);
+  }
+  
+  // 観測方程式に従い、観測値が得られるが「観測値が得られた時点」でのみ実行
+  for(t in 1:len_obs) {
+    y[t] ~ bernoulli_logit(mu[obs_no[t]]);
+  }
+}
+
+generated quantities{
+  real probs[T];       // 推定された勝率
+  probs = inv_logit(mu);
+}
+
+```
+
+モデルの部分が気になるので、深掘りしておく。観測方程式に少し違和感があるので、`boat`データと照らし合わせて深掘りしておく。
+
+```
+model {
+  // 状態方程式に従い、状態が遷移する
+  for(t in 2:T) {
+    mu[t] ~ normal(mu[t-1], s_mu);
+  }
+  // 観測方程式に従い、観測値が得られるが「観測値が得られた時点」でのみ実行
+  for(t in 1:len_obs) {
+    y[t] ~ bernoulli_logit(mu[obs_no[t]]);
+  }
+}
+
+// 状態方程式
+// t=2: mu[2] ~ normal(mu[1], s_mu);
+// t=3: mu[3] ~ normal(mu[2], s_mu);
+// t=4: mu[4] ~ normal(mu[3], s_mu);
+// t=5: mu[5] ~ normal(mu[4], s_mu);
+// 状態方程式は欠損値があった時点であっても、前の時点の真の状態から生成される
+
+// 観測方程式
+// t=2: y[2] ~ bernoulli_logit(mu[obs_no[2]]) -> y[2] ~ bernoulli_logit(mu[8])
+// t=3: y[3] ~ bernoulli_logit(mu[obs_no[3]]) -> y[3] ~ bernoulli_logit(mu[11])
+// t=4: y[4] ~ bernoulli_logit(mu[obs_no[4]]) -> y[4] ~ bernoulli_logit(mu[12])
+// t=5: y[5] ~ bernoulli_logit(mu[obs_no[5]]) -> y[5] ~ bernoulli_logit(mu[13])
+// y = boat_omit_NA より「欠損値を除外したデータ」なので、
+// boatのデータ
+// boat[1] - y[1]:  0 <- boat[1]を意味する
+// boat[2] ------: NA 
+// boat[3] ------: NA 
+// boat[4] ------: NA 
+// boat[5] ------: NA 
+// boat[6] ------: NA 
+// boat[7] ------: NA
+// boat[8] - y[2]:  1 <- boat[8]を意味し、y[2]はmu[8]から生成されている関係性になる。
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model <- stan_model('model-ts.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model, data = data_list, seed = 1989)
+```
+
+推定結果を確認する。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+単純に勝率x%とせずに状態空間モデルを利用すれば、勝率の推移を計算できる、時点によっての各チームの勝率を推定できる。
+
+- 1829 - 1849: ケンブリッジが優勢
+- 1850 - 1914: オックスフォードが優勢もケンブリッジが勝つときもある
+- 1915 - 1970: 再びケンブリッジが優勢
+- 1971 - 1995: オックスフォードが優勢
+
+```{r, class.output="scroll-1000"}
+years <- seq(from = as.POSIXct("1829-01-01"), by = "1 year", len = length(boat))
+ms <- rstan::extract(fit)
+d_est <- data.frame(t(apply(ms$probs, 2, quantile, probs = c(0.025, 0.5, 0.975))))
+colnames(d_est) <- c("lwr", "fit", "upr")
+d_est <- cbind(data.frame(years, game = as.numeric(boat)), d_est)
+
+
+ggplot(data = d_est, aes(x = years)) + 
+  theme_bw(base_size = 15) +
+  geom_point(aes(x = years, y = game), alpha = 0.6, size = 0.9) + 
+  geom_line(aes(y = fit)) +
+  geom_ribbon(aes(x = years, y = fit, ymin = lwr, ymax = upr), alpha = 0.3) + 
+  labs(x = 'years', y = 'win rate', title = 'Cambridge University\'s Winning Percentage') + 
+  scale_x_datetime(breaks = scales::date_breaks("10 year"), date_labels = "%Y") +
+  theme_bw()
+```
+
+
+## 参考文献および参考資料
+
+- []()

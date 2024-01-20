@@ -1,0 +1,540 @@
+---
+title: "StanとRでベイズ統計モデリング16"
+pagetitle: "StanとRでベイズ統計モデリング16"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「StanとRでベイズ統計モデリング」の内容を写経することで、ベイズ統計への理解を深めていくために作成している。
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+
+基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、「StanとRでベイズ統計モデリング」を読み進めるための自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+今回は第12章「時間や空間を扱うモデル」の後半から写経していく。
+
+## 12.1 状態空間モデルことはじめ
+
+状態空間モデルは下記のグラフのように特定の構造、当てはめる曲線を想定できない場合に活用できるモデルである。
+
+```{r}
+library(dplyr)
+library(rstan)
+library(ggplot2)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap12/input/data-ss1.txt')
+
+ggplot() +
+  theme_bw(base_size = 15) +
+  geom_line(data = d, aes(x = X, y = Y), linewidth = 1) +
+  geom_point(data = d, aes(x = X, y = Y), size = 3) +
+  labs(x = 'Time (Day)', y = 'Y')
+```
+
+状態空間モデルは、現時刻の「真の状態」は1つの前の時刻の「真の状態」に似ていると考えられる。そこで時刻と「真の状態」の関係式に確率的な変動を加える。すなわち、時刻とともに「真の状態」が確率的に変化していくという関係式を考えることで、状態の変化と観測を分けて考える。
+
+```{r, echo=FALSE, out.width='30%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_ahirubayes16/fig12-2.png')
+```
+
+上の図の$\mu$はシステムモデル(状態方程式)、$Y$は観測モデル(観測方程式)と呼ぶ。
+
+## 12.1.1 解析の目的
+
+ここではイベントの来場データを利用して、3日先の来場者数の真値、予測をしたいとする。また、観測ノイズも知りたいとする。
+
+## 12.1.3 メカニズムの想像
+
+システムモデルでは、時点$t$の値$\mu[t]$は1つ前の時点の値$\mu[t-1]$と似ているはず。すなわち、$\mu[t] - \mu[t-1]$は小さい値$\epsilon_{\mu}[t]$になるだろうと考える。この$\mu[t]$は1階差分のトレンド項と呼ぶ。小さい値$\epsilon_{\mu}[t]$は正規分布に従うと仮定する。
+
+$$
+\begin{aligned}
+\mu[t] - \mu[t-1] &= \epsilon_{\mu}[t] &\quad \epsilon_{\mu}[t] &\sim \text{Normal}(0, \sigma_{\mu}) \\
+\end{aligned}
+$$
+
+書き直すと、下記のようになる。
+
+$$
+\begin{aligned}
+\mu[t] &= \mu[t-1] + \epsilon_{\mu}[t] &\quad \epsilon_{\mu}[t] &\sim \text{Normal}(0, \sigma_{\mu}) \\
+\end{aligned}
+$$
+
+1つ前の時点の値$\mu[t-1]$に平均0、標準偏差$\sigma_{\mu}$の正規分布に従いう確率的な変動が加わり、$\mu[t]$になると考える。一方、観測モデルでは、$\mu[t]$に平均0、標準偏差$\sigma_{Y}$の正規分布に従う観測ノイズが加わり、観測値$Y[t]$が生成されると考える。
+
+## 12.1.4 モデル式の記述
+
+これまでのメカニズムを考えるとモデルは下記のようになる。$T$は時点の数、$t$はそのインデックスを表す。$\mu[1]$は情報がないので無情報事前分布を使用する。
+
+<div class="tbox">
+<th3>モデル12-1</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+\mu[t] &=& \mu[t-1] + \epsilon_{\mu}[t-1]        &\quad t = 2,...,T \\
+Y[t] &=& \mu[t] + \epsilon_{Y}[t]              &\quad t = 1,...,T \\
+\epsilon_{\mu}[t] &\sim& Normal(0, \sigma_{\mu}) &\quad t = 1,...,T-1 \\
+\epsilon_{Y}[t] &\sim& Normal(0, \sigma_{Y})     &\quad t = 1,...,T \\\\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+このモデルは下記のように簡潔に書ける。
+
+<div class="tbox">
+<th3>モデル12-2</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+\mu[t] &\sim& Normal(\mu[t-1], \sigma_{\mu}) &\quad t = 2,...,T \\
+Y[t] &\sim& Normal(\mu[t], \sigma_{Y})     &\quad t = 1,...,T \\\\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+## 12.1.5 Stanで実装
+
+Stanのモデルは下記の通り。
+
+```
+data {
+  int T;
+  int T_pred;
+  real Y[T];
+}
+
+parameters {
+  real mu[T];
+  real<lower=0> s_mu;
+  real<lower=0> s_Y;
+}
+
+model {
+
+  for (t in 2:T) {
+    mu[t] ~ normal(mu[t-1], s_mu); 
+  }
+
+  for (t in 1:T) {
+    Y[t] ~ normal(mu[t], s_Y);
+  }
+}
+
+generated quantities {
+
+  real mu_all[T+T_pred];
+  real y_pred[T_pred];
+
+  mu_all[1:T] = mu;
+
+  for (t in 1:T_pred) {
+    int idx = T + t;
+    mu_all[idx] = normal_rng(mu_all[idx-1], s_mu);
+    y_pred[t] = normal_rng(mu_all[idx], s_Y);
+  }
+
+}
+```
+
+このモデルはベクトル化しても書ける。ただ、ベクトル化すると分かりにくくなるので、ベクトル化してない。ベクトル化すれば下記のように書ける。
+
+```
+mu[2:T] ~ normal(mu[1:(T-1)], s_mu);
+Y ~ normal(mu, s_Y)
+```
+
+これはベクトル化しない下記と等価である。`mu[2:T], mu[1:(T-1)]`は長さ$T-1$のベクトルを返す。
+
+```
+for (t in 2:T)
+  mu[t] ~ normal(mu[t-1], s_mu);
+```
+
+まだStan歴が浅く直感的に理解できないので、ベクトル化はしない。
+
+## 12.1.6 推定結果の解釈
+
+データを用意する。
+
+```{r, class.output="scroll-1000"}
+T <- nrow(d)
+T_pred <- 3
+data <- list(T = T, T_pred = T_pred, Y = d$Y)
+data
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model122 <- stan_model('note_ahirubayes16-122.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model122, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+## 12.1.7 状態の変化をなめらかにする
+
+事後分布を可視化すると下記のようになる。グラフを見ると予測期間のである3日の予測が水平で、これまでのトレンドを反映していないように見える。これは、想定しているモデルが1つ前の時点しか依存していないためである。
+
+```{r}
+ms <- rstan::extract(fit)
+# quantile(ms$s_mu, probs = c(0.1, 0.5, 0.9))
+# quantile(ms$s_Y, probs = c(0.1, 0.5, 0.9))
+
+qua <- apply(ms$mu_all, 2, quantile, probs = c(0.1, 0.25, 0.50, 0.75, 0.9))
+d_est <- data.frame(X = 1:(T+T_pred), t(qua), check.names = FALSE)
+
+ggplot() +  
+  theme_bw(base_size = 15) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `10%`, ymax = `90%`), fill = 'black', alpha = 1/6) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `25%`, ymax = `75%`), fill = 'black', alpha = 2/6) +
+  geom_line(data = d_est, aes(x = X, y = `50%`), linewidth = 1) +
+  geom_point(data = d, aes(x = X, y = Y), shape = 16, size = 2.5) +
+  geom_vline(xintercept = T, linetype = 'dashed') +
+  coord_cartesian(xlim = c(1, 24), ylim = c(10, 14)) +
+  labs(x = 'Time (Day)', y = 'Y')
+```
+
+
+これを解消するために2階差分のトレンド項を利用する。この項は$(\mu[t] - \mu[t-1]) - (\mu[t-1] - \mu[t-2])$は小さい値$\epsilon_{\mu}[t]$になるだろうと考える。
+
+<div class="tbox">
+<th3>モデル12-3</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+\mu[t] - \mu[t-1] &=&  \mu[t-1] - \mu[t-2] + \epsilon_{\mu}[t-2] &\quad t = 3,...,T \\
+\epsilon_{\mu}[t] &\sim& Normal(0, \sigma_{\mu})                 &\quad t = 1,...,T-2 \\
+Y[t] &\sim& Normal(\mu[t], \sigma_{Y})     &\quad t = 1,...,T \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+つまり、$\mu[t]$は下記の通り、書き直せる。
+
+$$
+\begin{eqnarray}
+\mu[t]  &=&  2\mu[t-1] - \mu[t-2] + \epsilon_{\mu}[t-2] &\quad t = 3,...,T \\
+\end{eqnarray}
+$$
+
+つまり、このモデルは下記のように表現できる。
+
+<div class="tbox">
+<th3>モデル12-4</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+\mu[t] &\sim& Normal(2\mu[t-1] - \mu[t-2], \sigma_{\mu}) &\quad t = 3,...,T \\
+Y[t] &\sim& Normal(\mu[t], \sigma_{Y})     &\quad t = 1,...,T \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+Stanのモデルは下記の通り。
+
+```
+data {
+  int T;
+  int T_pred;
+  real Y[T];
+}
+
+parameters {
+  real mu[T];
+  real<lower=0> s_mu;
+  real<lower=0> s_Y;
+}
+
+model {
+  // ベクトル化バージョン  
+  // mu[3:T] ~ normal(2*mu[2:(T-1)] - mu[1:(T-2)], s_mu);
+  // Y ~ normal(mu, s_Y);
+
+  for (t in 2:T) {
+    mu[t] ~ normal(mu[t-1], s_mu); 
+  }
+
+  for (t in 1:T) {
+    Y[t] ~ normal(mu[t], s_Y);
+  }
+}
+
+generated quantities {
+
+  real mu_all[T+T_pred];
+  real y_pred[T_pred];
+
+  mu_all[1:T] = mu;
+
+  for (t in 1:T_pred) {
+    int idx = T + t;
+    mu_all[idx] = normal_rng(mu_all[idx-1], s_mu);
+    y_pred[t] = normal_rng(mu_all[idx], s_Y);
+  }
+
+}
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model124 <- stan_model('note_ahirubayes16-124.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model124, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+可視化すると、先程のように水平にならず、これまでの傾向を反映できている。
+
+```{r}
+ms <- rstan::extract(fit)
+# quantile(ms$s_mu, probs = c(0.1, 0.5, 0.9))
+# quantile(ms$s_Y, probs = c(0.1, 0.5, 0.9))
+
+qua <- apply(ms$mu_all, 2, quantile, probs = c(0.1, 0.25, 0.50, 0.75, 0.9))
+d_est <- data.frame(X = 1:(T+T_pred), t(qua), check.names = FALSE)
+
+ggplot() +  
+  theme_bw(base_size = 18) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `10%`, ymax = `90%`), fill = 'black', alpha = 1/6) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `25%`, ymax = `75%`), fill = 'black', alpha = 2/6) +
+  geom_line(data = d_est, aes(x = X, y = `50%`), linewidth = 1) +
+  geom_point(data = d, aes(x = X, y = Y), shape = 16, size = 2.5) +
+  geom_vline(xintercept = T, linetype = 'dashed') +
+  coord_cartesian(xlim = c(1, 24), ylim = c(10, 14)) +
+  labs(x = 'Time (Day)', y = 'Y')
+```
+
+## 12.2 季節調整項
+
+次は周期性を含むデータに対して状態空間モデルを適用する。
+
+```{r}
+d <- read.csv('https://raw.githubusercontent.com/MatsuuraKentaro/RStanBook/master/chap12/input/data-ss2.txt')
+ggplot() +
+  theme_bw(base_size = 15) +
+  geom_line(data = d, aes(x = X, y = Y), linewidth = 1) +
+  geom_point(data = d, aes(x = X, y = Y), size = 3) +
+  labs(x = 'Time (Day)', y = 'Y')
+```
+
+## 12.2.1 メカニズムの想像
+
+このような時系列データを扱う際は、分解して和を取るのが一般的。$Y[t] = \mu[t] + season[t] + \epsilon_{Y}[t]$として、トレンド、季節、ノイズに分解する。季節項は周期$L$を持っており、$L$個の和は小さい値$\epsilon_{season}[t]$になると考える。つまり周期である以上、多いときもあれば、小さいときもあるので、相殺すれば小さくなるだろうと考えている。
+
+$$
+\begin{eqnarray}
+\sum_{l=0}^{L-1} season[t-l] &=& \epsilon_{season}[t]  &\quad \epsilon_{season}[t] \sim Normal(0, \sigma_{season})
+\end{eqnarray}
+$$
+
+変形したほうがわかりやすい。$season[t]$は、$season[t]$以外の項目の和にマイナスを乗じたものとノイズで表現できる。
+
+$$
+\begin{eqnarray}
+season[t] &=& - \sum_{l=1}^{L-1} season[t-l] + \epsilon_{season}[t]  &\quad \epsilon_{season}[t] \sim Normal(0, \sigma_{season})
+\end{eqnarray}
+$$
+
+## 12.2.2 モデルの記述
+
+先程のメカニズムをまとめると下記のようになる。
+
+<div class="tbox">
+<th3>モデル12-5</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+\mu[t] &=& \mu[t-1] + \epsilon_{\mu}[t-1]                              &\quad t = 2,...,T \\
+season[t] &=& - \sum_{l=1}^{L-1} season[t-l] + \epsilon_{season}[t-3]  &\quad t = 4,...,T \\
+Y[t] &=& \mu[t] + season[t] + \epsilon_{Y}[t]                          &\quad t = 1,...,T \\
+\epsilon_{\mu}[t] &\sim& Normal(0, \sigma_{\mu})                       &\quad t = 1,...,T-1 \\
+\epsilon_{season}[t] &\sim& Normal(0, \sigma_{season})                 &\quad t = 1,...,T-3 \\
+\epsilon_{Y}[t] &\sim& Normal(0, \sigma_{Y})                           &\quad t = 1,...,T \\\\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+簡潔に書くとこうなる。
+
+<div class="tbox">
+<th3>モデル12-6</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+\mu[t] &\sim& Normal(\mu[t-1], \sigma_{\mu})                             &\quad t = 2,...,T \\
+season[t] &\sim& Normal(- \sum_{l=1}^{L-1} season[t-l], \sigma_{season}) &\quad t = 4,...,T \\
+Y[t] &\sim& Normal(\mu[t] + season[t], \sigma_{Y})                       &\quad t = 1,...,T \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+## 12.2.3 Stanで実装
+
+```
+data {
+  int T;
+  real Y[T];
+}
+
+parameters {
+  real mu[T];
+  real season[T];
+  real<lower=0> s_mu;
+  real<lower=0> s_season;
+  real<lower=0> s_Y;
+}
+
+transformed parameters {
+  real y_mean[T];
+  
+  // ベクトル化バージョン
+  // y_mean = mu + season;
+  for (t in 1:T) {
+    y_mean[t] = mu[t] + season[t];
+  }
+}
+
+model {
+  // ベクトル化バージョン
+  // mu[2:T] ~ normal(mu[1:(T-1)], s_mu);
+  // for(t in 4:T)
+  //   season[t] ~ normal(-sum(season[(t-3):(t-1)]), s_season);
+  // Y ~ normal(y_mean, s_Y);
+
+  for (t in 2:T) {
+    mu[t] ~ normal(mu[t-1], s_mu);
+  }
+
+  for (t in 4:T) {
+    season[t] ~ normal(-sum(season[(t-3):(t-1)]), s_season);
+  }
+  
+  for (t in 1:T) {
+    Y[t] ~ normal(y_mean[t], s_Y);
+  }
+}
+```
+
+## 12.2.4 推定結果の解釈
+
+データを用意する。
+
+```{r, class.output="scroll-1000"}
+T <- nrow(d)
+data <- list(T = T, Y = d$Y)
+data
+```
+
+ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model126 <- stan_model('note_ahirubayes16-126.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+fit <- sampling(object = model126, data = data, seed = 1989)
+```
+
+推定結果は下記の通り。
+
+```{r, class.output="scroll-1000"}
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+```
+
+推定結果から、トレンド項、季節項を分けてベイズ信用区間を書くと、影響が分離されていることがわかる。
+
+```{r}
+ms <- rstan::extract(fit)
+
+qua <- apply(ms$mu, 2, quantile, probs = c(0.1, 0.25, 0.50, 0.75, 0.9))
+d_est <- data.frame(X = 1:T, t(qua), check.names = FALSE)
+
+a <- ggplot() +  
+  theme_bw(base_size = 15) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `10%`, ymax = `90%`), fill = 'black', alpha = 1/6) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `25%`, ymax = `75%`), fill = 'black', alpha = 2/6) +
+  geom_line(data = d_est, aes(x = X, y = `50%`), linewidth = 0.5) +
+  geom_point(data = d, aes(x = X, y = Y), shape = 16, size = 1) +
+  geom_line(data = d, aes(x = X, y = Y), linewidth = 0.25) +
+  labs(x = 'Time (Quarter)', y = 'Y') +
+  coord_cartesian(xlim = c(1, 44))
+
+qua <- apply(ms$season, 2, quantile, probs = c(0.1, 0.25, 0.50, 0.75, 0.9))
+d_est <- data.frame(X = 1:T, t(qua), check.names = FALSE)
+
+b <- ggplot() +  
+  theme_bw(base_size = 18) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `10%`, ymax = `90%`), fill = 'black', alpha = 1/6) +
+  geom_ribbon(data = d_est, aes(x = X, ymin = `25%`, ymax = `75%`), fill = 'black', alpha = 2/6) +
+  geom_line(data = d_est, aes(x = X, y = `50%`), linewidth = 0.5) +
+  labs(x = 'Time (Quarter)', y = 'Y') +
+  coord_cartesian(xlim = c(1, 44))
+
+a|b
+```
+## 参考文献および参考資料
+
+- [StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/bookdetail/9784320112421)
+- [StanとRでベイズ統計モデリング サポートページ](https://github.com/MatsuuraKentaro/RStanBook)
+- [Stan Reference Manual](https://mc-stan.org/docs/reference-manual/index.html)

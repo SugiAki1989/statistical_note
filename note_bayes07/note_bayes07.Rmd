@@ -1,0 +1,425 @@
+---
+title: 'RとStanではじめるベイズ統計モデリングによるデータ分析入門-Part4:GLMM-'
+pagetitle: 'RとStanではじめるベイズ統計モデリングによるデータ分析入門-Part4:GLMM-'
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: 'show'
+highlight: 'kate'
+# theme: 'flatly'
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = 'center',
+  dev = 'ragg_png'
+)
+```
+
+<div class='update-right'>
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は「RとStanではじめるベイズ統計モデリングによるデータ分析入門」を写経していく。基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [RとStanではじめるベイズ統計モデリングによるデータ分析入門](https://www.kspub.co.jp/book/detail/5165362.html)
+
+## 4.1.1 本章の目的と概要
+
+階層ベイズモデルの具体例として過分散が生じているデータに対する一般化線形混合モデル(GLMM)の推定を行う。以降で必要なパッケージやデータを読み込んでおく。
+
+```{r}
+library(tidyverse)
+library(rstan)
+library(brms)
+library(bayesplot)
+library(patchwork)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+PATH <- 'https://raw.githubusercontent.com/logics-of-blue/book-r-stan-bayesian-model-intro/master/book-data/'  
+fish_num_climate_2 <- read.csv(paste0(PATH,'4-1-1-fish-num-2.csv'))
+fish_num_climate_3 <- read.csv(paste0(PATH,'4-2-1-fish-num-3.csv'))
+fish_num_climate_4 <- read.csv(paste0(PATH,'4-3-1-fish-num-4.csv'))
+```
+
+## 4.1.3 分析の準備
+
+湖で1時間釣りをしたときの釣果数、天気、気温のサンプルデータを利用する。サンプルサイズは100。このデータの特徴は、釣り人、釣り道具、釣りをしている時の湖の様子は全く統一されていないため、観測されている天気や気温以外の「計測されていない要因」が理由で釣果数が変化することを想定しないといけない。
+
+```{r}
+fish_num_climate_2$id <- as.factor(fish_num_climate_2$id)
+head(fish_num_climate_2, n = 10)
+```
+
+## 4.1.4 通常のポアソン回帰モデルを適用した結果
+
+観測できていない要因はさておき、とりあえず天気と気温を利用して釣果数をポアソン回帰モデルで推定する。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+glm_pois_brms <- brm(
+  formula = fish_num ~ weather + temperature,  # modelの構造を指定
+  family = poisson(),                          # ポアソン分布を使う
+  data = fish_num_climate_2,                   # データ
+  seed = 1,                                    # 乱数の種
+  prior = c(set_prior("", class = "Intercept"))# 無情報事前分布にする
+)
+
+```
+
+推定結果はこちら。
+
+```{r}
+glm_pois_brms
+```
+
+予測区間を可視化する。広めの99％予測区間の外側にも多くのデータが存在しており、$\lambda$で平均と分散を決めるポアソン分布では対応できていない。想定された分散よりも大きくデータがばらついている。
+
+```{r}
+set.seed(1)
+eff_glm_pre <- conditional_effects(
+  glm_pois_brms, 
+  method = "predict",
+  effects = "temperature:weather",
+  probs = c(0.005, 0.995))
+
+plot(eff_glm_pre, points = T)
+```
+
+## 4.1.5 過分散対処のためのGLMMの構造
+
+モデルの改良を試みる。1時間釣りをした時の釣果数は、気温、天気によって一般化線形モデルで表現する。釣果数はポアソン分布に従い、$\lambda$が気温と湿度で変化すると想定していた。ただ、これではうまく説明できなかった。
+
+<div class='tbox'>
+<th3>ポアソン回帰</th3>
+<div class='inner'>
+$$
+\begin{eqnarray}
+log(\lambda_{i}) &=& \beta_{0} + \beta_{1}x_{i1} + \beta_{2}x_{i2} \\
+y_{i} &\sim& Poisson(\lambda_{i}) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+調査のたびに調査した人、道具、技術、湖の状態は変化するが観測できていない。そのため、これらの変化を表現できるようにモデルにランダム効果を取り込む。つまり、調査ごとに変化するランダムな影響$r_{i}$を組み込み。ランダムな影響$r_{i}$は平均0、分散$\sigma^{2}_{r}$の正規分布に従うとする。$\sigma^{2}_{r}$はランダム効果$r_{i}$というパラメタの分散を表すパラメタであるため、ハイパーパラメタとも呼ばれる。ランダム効果$r_{i}$は100人分存在するため、100個の事後分布が得られるが、好き勝手な分布にならないように、この分散パラメタの大きさを限定することで、ランダム効果$r_{i}$の大きさを限定する。
+
+<div class='tbox'>
+<th3>ポアソン回帰+ランダム効果</th3>
+<div class='inner'>
+$$
+\begin{eqnarray}
+r_{i} &\sim& Normal(0, \sigma^{2}_{r}) \\
+log(\lambda_{i}) &=& \beta_{0} + \beta_{1}x_{i1} + \beta_{2}x_{i2} + r_{i} \\
+y_{i} &\sim& Poisson(\lambda_{i}) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+$\beta_{0},\beta_{1},\beta_{2}$というパラメタは固定効果と呼ばれ、新たに追加したランダム効果とは異なる。ランダム効果は何らかの確率分布に従って生成される。固定効果とランダム効果が含まれるモデルを混合モデル、一般家線形混合モデルと呼ぶ。このように、上位の層の確率変数の実現値が、下位の層の確率分布のパラメタとなるモデルを階層ベイズモデルとも呼ぶ。
+
+## 4.1.10 brmsによるGLMMの推定
+
+`(1|id)`という表記を追加することで、ランダム効果を追加できる。縦棒の左の1は切片を意味する。縦棒の右がグループ名を意味する。つまり、`id`ごとで切片にランダム効果を入れることを意味する。
+
+```{r}
+glmm_pois_brms <- brm(
+  formula = fish_num ~ weather + temperature + (1|id), # ランダム効果
+  family = poisson(),                            # ポアソン分布を使う
+  data = fish_num_climate_2,                     # データ
+  seed = 1,                                      # 乱数の種
+  prior = c(set_prior("", class = "Intercept"),
+            set_prior("", class = "sd"))         # 無情報事前分布にする
+)
+```
+
+`Group-Level Effects`はランダム効果に関わるパラメタで、`Population-Level Effects`は固定効果を表す。
+
+```{r}
+# 結果の表示
+# plot(glmm_pois_brms)
+# stancode(glmm_pois_brms)
+glmm_pois_brms
+```
+
+パッケージを使わずに自ら推定する場合は下記を参照。
+
+```
+################################
+# Stan
+################################
+# # ダミー変数を作る
+# formula_pois <- formula(fish_num ~ weather + temperature)
+# design_mat <- model.matrix(formula_pois, fish_num_climate_2)
+# sunny_dummy <- as.numeric(design_mat[, "weathersunny"])
+# 
+# # データの作成
+# data_list_1 <- list(
+#   N = nrow(fish_num_climate_2),
+#   fish_num = fish_num_climate_2$fish_num,
+#   temp = fish_num_climate_2$temperature,
+#   sunny = sunny_dummy
+# )
+# # 結果の表示
+# data_list_1
+# 
+# # MCMCの実行
+# glmm_pois_stan <- stan(
+#   file = "4-1-1-glmm-pois.stan",
+#   data = data_list_1,
+#   seed = 1
+# )
+# 
+# # 収束の確認
+# mcmc_rhat(rhat(glmm_pois_stan))
+# 
+# # 参考：トレースプロットなど
+# mcmc_sample <- rstan::extract(glmm_pois_stan, permuted = FALSE)
+# mcmc_combo(
+#   mcmc_sample, 
+#   pars = c("Intercept", "b_sunny", "b_temp", "sigma_r", "lp__"))
+# 
+# 
+# # 結果の表示
+# print(glmm_pois_stan,
+#       pars = c("Intercept", "b_sunny", "b_temp", "sigma_r"),
+#       probs = c(0.025, 0.5, 0.975))
+################################
+# Model
+################################
+// data {
+//   int N;                   // サンプルサイズ
+//   int fish_num[N];         // 釣獲尾数
+//   vector[N] sunny;         // 晴れダミー変数
+//   vector[N] temp;          // 気温データ
+// }
+// 
+// parameters {
+//   real Intercept;          // 切片
+//   real b_temp;             // 係数(気温)
+//   real b_sunny;            // 係数(晴れの影響)
+//   vector[N] r;             // ランダム効果
+//   real<lower=0> sigma_r;   // ランダム効果の標準偏差
+// }
+// 
+// transformed parameters{
+//   vector[N] lambda = Intercept + b_sunny*sunny + b_temp*temp + r;
+// }
+// 
+// model {
+//   r ~ normal(0, sigma_r);
+//   fish_num ~ poisson_log(lambda);
+// }
+```
+
+## 4.2.1 本章の目的と概要
+
+先程はすべてのデータに対してランダム効果を含めるモデルを推定したが、ここではランダム効果をグループ単位で含めるモデルを推定する。つまり、同一グループ内では、同じランダム効果を加わえるモデルを推定する。ランダム効果の加え方が異なるだけで、ランダム切片モデルと同じである。
+
+## 4.2.2 分析の準備
+
+湖で1時間釣りをしたときの釣果数、天気、気温のサンプルデータを利用する。サンプルサイズは100。先程のデータとの違いは、調査員が10人(A-J)おり、10回分の自分が担当した釣果数に関しては調査員が識別できるようになっている。調査員ごとに釣りの技術が異なるので、このようなバイアスを排除したいという意図がある。
+
+```{r}
+fish_num_climate_3 %>% 
+  group_by(human) %>% 
+  summarise(
+    cnt = n(),
+    m_fish_num = mean(fish_num)
+    )
+```
+
+## 4.2.3 ランダム切片モデルの構造
+
+$k$はA-Jの10人分で、ランダム効果は平均0、分散$\sigma^{2}_{r}$に従うと仮定する。ランダム効果としては$r_{A}=+1, r_{B}=-2,...,r_{J}=+3$のような形で、釣果数に影響を与える。
+
+<div class='tbox'>
+<th3>ポアソン回帰+ランダム切片モデル</th3>
+<div class='inner'>
+$$
+\begin{eqnarray}
+r_{k} &\sim& Normal(0, \sigma^{2}_{r}) \\
+log(\lambda_{i}) &=& \beta_{0} + \beta_{1}x_{i1} + \beta_{2}x_{i2} + r_{k} \\
+y_{i} &\sim& Poisson(\lambda_{i}) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+## 4.2.4 ランダム効果の使い所
+
+ランダム効果を固定効果として取り込むことで、切片を調整することはもちろん可能ではある。分析の目的は、天気や気温と釣果数の関係を調べることであり、各調査員の釣り技術を分析することではない。固定効果として調べることも可能だけれども、その必要はないので、ランダム効果としている。
+
+## 4.2.5 brmsによるランダム切片モデルの推定
+
+`(1|human)`と指定すればOK。考え方を変えると`(1|id)`でも`id`が100グループあると考えれば良い。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+glmm_pois_brms_human <- brm(
+  formula = fish_num ~ weather + temperature + (1|human),
+  family = poisson(),
+  data = fish_num_climate_3,
+  seed = 1,
+  prior = c(set_prior("", class = "Intercept"),
+            set_prior("", class = "sd"))
+)
+```
+
+推定結果はこちら。ランダム効果のばらつきの大きさ$\sigma_{r}$は0.65となっている。
+
+```{r}
+# plot(glmm_pois_brms_human)
+# stanplot(glmm_pois_brms_human, type = "rhat")
+glmm_pois_brms_human
+```
+
+各々の調査者の影響の大きさを調べたい場合は、`ranef()`関数を利用する。ランダム効果としては$r_{A}=0.76, r_{B}=0.08,...,r_{J}=-0.15$のような形で、釣果数に影響を与えている。$r_{F}=-0.73$であるため、Fさんは釣りが苦手であることがわかる。
+
+```{r}
+ranef(glmm_pois_brms_human)
+```
+
+## 4.2.6 回帰曲線の図示
+
+ランダム切片効果モデルを可視化する。
+
+```{r}
+eff_glmm_human1 <- conditional_effects(
+  glmm_pois_brms_human,
+  effects = "temperature",
+  re_formula = NULL)
+plot(eff_glmm_human1, points = TRUE)
+```
+
+`effects = "temperature:weather"`と指定することで交互作用を表現でき、`conditions`を指定することでグループごとに可視化できる。グループごとに可視化することで調査員の能力を反映したグラフを確認できる。
+
+```{r}
+conditions <- data.frame(human = LETTERS[1:10])
+
+eff_glmm_human2 <- conditional_effects(
+  glmm_pois_brms_human,
+  effects = "temperature:weather",
+  re_formula = NULL,
+  conditions = conditions)
+
+plot(eff_glmm_human2, points = TRUE)
+```
+
+## 4.3.1 本章の目的と概要
+
+最後はランダム係数モデルを推定する。係数にランダム効果を入れることで、説明変数の固定効果の強さが増減するモデルを表現できる。
+
+## 4.3.2 分析の準備
+
+釣果数と気温の関係を記録しているデータを利用する。調査員Jに関しては記録が4しかない。
+
+```{r}
+fish_num_climate_4 %>% 
+  group_by(human) %>% 
+  summarise(
+    cnt = n(),
+    m_fish_num = mean(fish_num)
+    )
+```
+
+## 4.3.3 交互作用を用いたモデル化
+
+釣りをした人と気温の違いによって、釣果数が変化するモデルであれば、交互作用(カテゴリ×数量)を想定したモデルでも良い。ただ、交互作用モデルは調査員間の関係を考慮できない。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+glm_pois_brms_interaction <- brm(
+  formula = fish_num ~ temperature * human,
+  family = poisson(),
+  data = fish_num_climate_4,
+  seed = 1,
+  prior = c(set_prior("", class = "Intercept"))
+)
+```
+
+
+可視化するとわかりやすい。番号10は調査員Jのことであり、4つしか記録がない。そのため、この4つのデータからのみ推定を行うため、傾きがマイナスになっている。
+
+```{r}
+# glm_pois_brms_interaction
+# stanplot(glm_pois_brms_interaction, type = "rhat")
+eff_1 <- marginal_effects(glm_pois_brms_interaction,
+                          effects = "temperature",
+                          conditions = conditions)
+plot(eff_1, points = TRUE)
+```
+
+ただ、この結果は分析担当者の感覚としては違和感がある場合があったとする。データが多ければプラスの傾きで推定することができたはずだとする。ランダム効果を用いることで、全体と似たような傾向を表現するように調整できる。これををランダム効果の縮約という。これは、ランダム効果が特定の確率分布に従って生成されるという仮定を立てているためである。これはランダム係数効果に限った話ではない。
+
+## 4.3.5 ランダム係数モデルの構造
+
+ランダム係数効果は、ランダム切片効果と共に利用されることが多いため、ここでは双方を含めたモデルを推定する。
+
+<div class='tbox'>
+<th3>ポアソン回帰+ランダム係数切片モデル</th3>
+<div class='inner'>
+$$
+\begin{eqnarray}
+r_{k} &\sim& Normal(0, \sigma^{2}_{r}) \\
+\tau_{k} &\sim& Normal(0, \sigma^{2}_{\tau}) \\
+log(\lambda_{i}) &=& \beta_{0} + (\beta_{1} + \tau_{k})x_{i1} + r_{k} \\
+y_{i} &\sim& Poisson(\lambda_{i}) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+## 4.3.6 brmsによるランダム係数モデルの推定
+
+ランダム係数とランダム切片効果モデルを推定する際は`temperature||human`と指定する。縦棒の左が「ランダム効果を与えられる変数」で、縦棒の右がグループの変数を表す。
+
+縦棒を減らして、`temperature|human`とも指定できる。この場合、ランダム切片とランダム係数に相関を認めているモデルであり、先程のモデルはランダム切片とランダム係数に相関がないと考えていることになる。釣りが上手い=ランダム切片がプラス、気温があがる=ランダム係数もプラスとなるような関係が想定できるなら、こちらのモデルを利用するべき。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+glmm_pois_brms_keisu <- brm(
+  formula = fish_num ~ temperature + (temperature||human),
+  family = poisson(),
+  data = fish_num_climate_4,
+  seed = 1,
+  iter = 6000,
+  warmup = 5000,
+  control = list(adapt_delta = 0.97, max_treedepth = 15)
+)
+```
+
+## 4.3.7 回帰曲線の図示
+
+可視化すると番号10の調査員Jの傾きはプラスになっている。これはランダム効果で縮約された結果である。
+
+```{r}
+# glmm_pois_brms_keisu
+# plot(glmm_pois_brms_keisu)
+# prior_summary(glmm_pois_brms_keisu)
+# stanplot(glmm_pois_brms_keisu, type = "rhat")
+
+eff_2 <- marginal_effects(glmm_pois_brms_keisu,
+                          re_formula = NULL,
+                          effects = "temperature",
+                          conditions = conditions)
+plot(eff_2, points = TRUE)
+
+```
+
+
+## 参考文献および参考資料
+
+- [RとStanではじめるベイズ統計モデリングによるデータ分析入門](https://www.kspub.co.jp/book/detail/5165362.html)

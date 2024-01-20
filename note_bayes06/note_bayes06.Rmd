@@ -1,0 +1,309 @@
+---
+title: 'RとStanではじめるベイズ統計モデリングによるデータ分析入門-Part3:brmsパッケージ-'
+pagetitle: 'RとStanではじめるベイズ統計モデリングによるデータ分析入門-Part3:brmsパッケージ-'
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: 'show'
+highlight: 'kate'
+# theme: 'flatly'
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = 'center',
+  dev = 'ragg_png'
+)
+```
+
+<div class='update-right'>
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は「RとStanではじめるベイズ統計モデリングによるデータ分析入門」を写経していく。基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [RとStanではじめるベイズ統計モデリングによるデータ分析入門](https://www.kspub.co.jp/book/detail/5165362.html)
+
+## 5.2 brmsとは
+
+brmsとは、Bayesian Regression Models using 'Stan'の頭文字をとったもので、Stanを使ってベイジアンな回帰分析ができるパッケージのこと。Stanのコードを書かなくても一般化線形モデルや一般化線形混合モデルも推定できる。
+
+## 5.4 分析の準備
+
+ここでも参考書に従って、ビールと気温に関するサンプルデータを読み込んでおく。
+
+```{r}
+library(tidyverse)
+library(rstan)
+library(brms)
+library(patchwork)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+file_beer_sales_2 <- read.csv('https://raw.githubusercontent.com/logics-of-blue/book-r-stan-bayesian-model-intro/master/book-data/3-2-1-beer-sales-2.csv')
+
+head(file_beer_sales_2, 10)
+```
+
+## 5.5 brmsによる単回帰モデルの推定
+
+brmsパッケージで単回帰モデルを推定するためには、`brm()`関数を利用する。`glm()`関数のようにモデル式、リンク関数や確率分布、データを指定すればOK。逆に、これらの情報を決めればStanのコードが自動生成できる。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+simple_lm_brms <- brm(
+  formula = sales ~ temperature,
+  family = gaussian(link = "identity"),  
+  data = file_beer_sales_2,              
+  seed = 1                               
+)
+```
+
+推定結果を確認すると、Stanでモデルを自作したときと同じようにパラメタの事後分布が得られている。
+
+```{r}
+simple_lm_brms
+```
+
+MCMCサンプルを取得する時は、推定結果に対して`as.mcmc()`関数を利用すれば良い。
+
+```{r, class.output="scroll-1000"}
+list(
+  Size = dim(as.mcmc(simple_lm_brms, combine_chains = TRUE)),
+  MCMC = head(as.mcmc(simple_lm_brms, combine_chains = TRUE), 50)
+  )
+```
+
+トレースプロットや事後分布がは`plot()`関数を利用すれば確認できる。
+
+```{r}
+plot(simple_lm_brms)
+```
+
+## 5.6 brmsの基本的な使い方
+
+`bf()`関数を利用することで、モデル式は別で指定できる。`brmsformula, bform`というクラスなので、通常の`formula`クラスではないので注意。
+
+```{r}
+simple_lm_formula <- bf(sales ~ temperature)
+class(simple_lm_formula)
+```
+
+MCMCの設定に関してもStanでサンプリングする時のように指定できる。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+simple_lm_brms_2 <- brm(
+  formula = simple_lm_formula, # bf関数で作成済みのformulaを指定
+  family = gaussian(),     　　# 正規分布を使う(リンク関数省略)
+  data = file_beer_sales_2,　　# データ
+  seed = 1,                　　# 乱数の種
+  chains = 4,              　　# チェーン数
+  iter = 2000,             　　# 乱数生成の繰り返し数
+  warmup = 1000,           　　# バーンイン期間
+  thin = 1                 　　# 間引き数(1なら間引き無し) 
+)
+```
+
+## 5.7 事前分布の変更
+
+事前分布には無情報事前分布がデフォルトで指定されている。確認する場合は`prior_summary()`関数を利用する。事前分布の一覧を確認できる。
+
+```{r}
+prior_summary(simple_lm_brms)
+```
+
+事前分布を変更する際は、`prior`引数に`set_prior()`関数を利用して事前分布を指定する。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+simple_lm_brms_3 <- brm(
+  formula = sales ~ temperature,
+  family = gaussian(),
+  data = file_beer_sales_2, 
+  seed = 1,
+  prior = c(
+    set_prior("normal(50,100000)", class = "b", coef = ""),
+    set_prior("normal(5,100000)", class = "b", coef = "temperature")
+  )
+)
+```
+
+指定した事前分布を利用していることがわかる。
+
+```{r}
+prior_summary(simple_lm_brms_3)
+```
+
+実際にサンプリングで使用されているStanコードは`stancode()`関数で確認できる。理由は分からないが、`intercept`の事前分布はStanコードを見ても変更されていない模様。`temperature`のパラメタは指定した通りとなっている。
+
+```{r}
+stancode(simple_lm_brms_3)
+```
+
+Stanに渡しているデータについては、`standata()`関数で確認できる。
+
+```{r}
+standata(simple_lm_brms_3)
+```
+
+## 5.9 補足: make_stancode関数によるStanコードの生成
+
+`make_stancode()`関数でStanコードを生成できる。気になった点を下記にまとめておく。
+
+- data : 説明変数にはデザイン行列を使用し、データに合わせて柔軟にモデリングできるようになっている
+- transformed data: 説明変数を中心化して変換
+- generated quantities: 中心化しているため切片が推定できず、推定後に構築
+
+```{r}
+make_stancode(
+  formula = sales ~ temperature,
+  family = gaussian(),
+  data = file_beer_sales_2, 
+  prior = c(prior("", class = "Intercept"),
+            prior("", class = "sigma"))
+)
+```
+## 5.9 補足: make_standata関数によるStanに渡すデータの作成
+
+`make_standata()`関数でStanにわたすデータを生成できる。
+
+```{r}
+make_standata(
+  formula = sales ~ temperature,
+  family = gaussian(),
+  data = file_beer_sales_2
+)
+```
+
+## 5.12 brmsによる事後分布の可視化
+
+パラメタの事後分布に関する95%ベイズ信用区間を確認したいのであれば、`stanplot()`関数が便利。
+
+```{r}
+stanplot(simple_lm_brms, 
+         type = "intervals",
+         pars = "^b_",
+         prob = 0.8,        # 太い線の範囲
+         prob_outer = 0.95  # 細い線の範囲
+)
+```
+
+## 5.13 brmsによる予測
+
+推定したモデルを利用して予測値を計算したい時は、`fitted()`関数を利用する。指定した値で得られる予測値の信用区間が計算される。
+
+```{r}
+new_data <- data.frame(temperature = c(20:25))
+fitted(simple_lm_brms, new_data)
+```
+
+MCMCの結果を利用して予測値の信用区間を自ら計算することも可能。
+
+```{r}
+mcmc_sample <- as.mcmc(simple_lm_brms, combine_chains = TRUE)
+mcmc_b_Intercept   <- mcmc_sample[,"b_Intercept"]
+mcmc_b_temperature <- mcmc_sample[,"b_temperature"]
+mcmc_sigma         <- mcmc_sample[,"sigma"]
+
+map_dfr(.x = 20:25, .f = function(x){
+  out <- mcmc_b_Intercept + x * mcmc_b_temperature
+  m <- mean(out)
+  q <- quantile(out, probs = c(0.025, 0.975))
+  return(tibble(x = x, Estimate = m, Q2.5 = q[1], Q97.5 = q[2]))
+})
+```
+
+## 5.14 predict関数を使わない予測の実装
+
+予測値といえば`predict()`関数かもしれないが、`fitted()`関数で得られる結果よりも`Q2.5, Q97.5`の幅が広くなっている。これは信用区間ではなく、予測区間が計算されているためであり、予測区間の算出にあたっては乱数(`rnorm()`)を使用しているため、毎回結果が異なる。
+
+```{r}
+set.seed(1)
+predict(simple_lm_brms, new_data)
+```
+
+MCMCの結果を利用して予測値の予測区間を自ら計算することも可能。
+
+```{r}
+set.seed(1)
+map_dfr(.x = 20:25, .f = function(x){
+  out <- mcmc_b_Intercept + x * mcmc_b_temperature
+  pred <- rnorm(n = 4000, mean = out, sd = mcmc_sigma)
+  m <- mean(pred)
+  q <- quantile(pred, probs = c(0.025, 0.975))
+  return(tibble(x = x, Estimate = m, Q2.5 = q[1], Q97.5 = q[2]))
+})
+
+# mcmc_sigma、nなどの直書きを避ける例
+# simulate_predictions <- function(x, n_sim, mcmc_b_Intercept, mcmc_b_temperature, mcmc_sigma) {
+#   out <- mcmc_b_Intercept + x * mcmc_b_temperature
+#   pred <- rnorm(n = n_sim, mean = out, sd = mcmc_sigma)
+#   m <- mean(pred)
+#   q <- quantile(pred, probs = c(0.025, 0.975))
+#   return(tibble(x = x, Estimate = m, Q2.5 = q[1], Q97.5 = q[2]))
+# }
+# 
+# result <- map_dfr(.x = 20:25, .f = function(x) {
+#   simulate_predictions(x, n_sim = 4000, mcmc_b_Intercept, mcmc_b_temperature, mcmc_sigma)
+# })
+```
+
+ちなみに、`interval='confidence'`としても、信用区間は計算できないので注意。
+
+## 回帰直線の図示
+
+
+ちなみに`predict()`関数を使用せずとも、予測値を算出できる。Stanではgenerated quantitiesブロックで予測値を生成するが、
+
+```
+generated quantities {
+  vector[N_pred] mu_pred;           // ビールの売り上げの期待値
+  vector[N_pred] sales_pred;        // ビールの売り上げの予測値
+
+  for (i in 1:N_pred) {
+    mu_pred[i] = Intercept + beta*temperature_pred[i];
+    sales_pred[i] = normal_rng(mu_pred[i], sigma);
+  }
+}
+```
+
+brmsでは`conditional_effects()`関数を利用することで、回帰直線の95%ベイズ信用区間付きのグラフが得られる。`marginal_effects()`関数は非推奨になっている。
+
+```{r}
+eff <- conditional_effects(simple_lm_brms, method = "posterior_epred")
+plot(eff, points = TRUE)
+```
+
+`conditional_effects(method = "predict")`関数を利用することで、回帰直線の95%ベイズ予測区間付きのグラフが得られる。
+
+```{r}
+set.seed(1)
+eff_pre <- conditional_effects(simple_lm_brms, method = "predict")
+plot(eff_pre, points = TRUE)
+```
+
+他にも、複数の説明変数があった時に、交互作用を表現したりもできる。
+
+```
+# 参考：複数の説明変数があるときは、特定の要因だけを切り出せる
+conditional_effects(simple_lm_brms, effects = "temperature")
+
+# 参考：複数の説明変数を同時に図示
+conditional_effects(brms_model, effects = "x1:x2")
+```
+
+## 参考文献および参考資料
+
+- [RとStanではじめるベイズ統計モデリングによるデータ分析入門](https://www.kspub.co.jp/book/detail/5165362.html)
