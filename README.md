@@ -47,10 +47,10 @@
 - [社会科学のためのベイズ統計モデリング-Chapter09-](https://sugiaki1989.github.io/statistical_note/note_bayes05/note_bayes05.html)
 - [RとStanではじめるベイズ統計モデリングによるデータ分析入門-Part3:brmsパッケージ-](https://sugiaki1989.github.io/statistical_note/note_bayes06/note_bayes06.html)
 - [RとStanではじめるベイズ統計モデリングによるデータ分析入門-Part4:GLMM-](https://sugiaki1989.github.io/statistical_note/note_bayes07/note_bayes07.html)
-- [強さを推定する](https://sugiaki1989.github.io/statistical_note/note_bayes08/note_bayes08.html)
+- [制約付きデータ型のordered型](https://sugiaki1989.github.io/statistical_note/note_bayes08/note_bayes08.html)
 - [テニス選手の強さを推定する](https://sugiaki1989.github.io/statistical_note/note_bayes09/note_bayes09.html)
 - [ボートレースの勝率を推定する](https://sugiaki1989.github.io/statistical_note/note_bayes10/note_bayes10.html)
-- [](https://sugiaki1989.github.io/statistical_note/note_bayes11/note_bayes11.html)
+- [ラ・リーガの各チームの強さを推定する](https://sugiaki1989.github.io/statistical_note/note_bayes11/note_bayes11.html)
 - [](https://sugiaki1989.github.io/statistical_note/note_bayes12/note_bayes12.html)
 
 ## 数値解析

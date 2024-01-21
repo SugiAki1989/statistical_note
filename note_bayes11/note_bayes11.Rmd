@@ -1,3 +1,45 @@
+---
+title: 'ラ・リーガの各チームの強さを推定する'
+pagetitle: 'ラ・リーガの各チームの強さを推定する'
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: 'show'
+highlight: 'kate'
+# theme: 'flatly'
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = 'center',
+  dev = 'ragg_png'
+)
+```
+
+<div class='update-right'>
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回はRasmus Bååth先生のブログに記載されているサッカーチームの強さを推定する内容を参考にさせていただき、写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [Modeling Match Results in La Liga Using a Hierarchical Bayesian Poisson Model: Part one.](https://www.sumsar.net/blog/2013/07/modeling-match-results-in-la-liga-part-one/)
+- [Modeling Match Results in La Liga Using a Hierarchical Bayesian Poisson Model: Part two.](https://www.sumsar.net/blog/2013/07/modeling-match-results-in-la-liga-part-two/)
+- [Modeling Match Results in La Liga Using a Hierarchical Bayesian Poisson Model: Part three](https://www.sumsar.net/blog/2013/08/modeling-match-results-in-la-liga-part-three/)
+
+こちらのブログではJAGSを利用しており、再現はStanで行うため、結果は完全に一致しない。また、JAGSとStanでは正規分布のパラメタの与え方が異なるので、そのあたりは修正を行っている。
+
 # Modeling Match Results in La Liga Using a Hierarchical Bayesian Poisson Model.
 
 ```{r cache=FALSE}
@@ -18,6 +60,7 @@ col_name <- function(name, ...) {
 
 load("laliga.RData")
 ```
+
 
 ```{r}
 # -1 Away win, 0 Draw, 1 Home win
@@ -61,6 +104,51 @@ data_list
 
 ## Modeling Match Results: Iteration 1
 
+サッカーの試合における各チームのゴール数はどのように分布するのだろうか？まず、サッカーの試合はすべてほぼ同じ長さで、両チームともゴールを決めるチャンスが多く、各ゴールチャンスが同じ確率でゴールを決めると仮定してみよう。これらの仮定を考えると、各チームのゴール数の分布はポアソン分布でうまく捕らえることができるはずだ。実際のゴール数分布と、同じ平均ゴール数を持つポアソン分布の簡単で汚い比較は、この考え方を裏付けている。
+
+```{r fig.height=5, fig.width=5}
+old_par <- par(mfcol=c(2,1), mar=rep(2.2, 4))
+hist(c(d$AwayGoals, d$HomeGoals), xlim=c(-0.5, 8), breaks = -1:9 + 0.5)
+mean_goals <- mean(c(d$AwayGoals, d$HomeGoals))
+hist(rpois(9999, mean_goals), xlim=c(-0.5, 8), breaks = -1:9 + 0.5)
+par(old_par)
+```
+
+すべてのチームが同じように優れているわけではなく（そうでなければスウェーデンがワールドカップで優勝してしまう）、すべてのチームが潜在的なスキル変数を持っていると仮定し、あるチームのスキルから相手チームのスキルを引いたものが試合の予測結果を定義する。ゴール数はポアソン分布であると仮定されるので、チームのスキルが分布の平均の対数スケール上にあることは自然である。チーム$j$と対戦したときのチーム$i$のゴール数分布は次のようになる。
+
+
+$$
+\begin{eqnarray}
+Goals &\sim& \text{Poisson}(\lambda) \\
+\log(\lambda) &=&  \text{baseline} + \text{skill}_i - \text{skill}_j \\
+\end{eqnarray}
+$$
+
+ここでベースラインは、両チームの実力が等しい場合の対数の平均ゴール数である。ホームチーム$i$とアウェイチーム$j$の試合のゴール結果は次のようにモデル化される： 
+
+$$
+\begin{eqnarray}
+HomeGoals_{i,j} &\sim& \text{Poison}(\lambda_{\text{home},i,j}) \\
+AwayGoals_{i,j} &\sim& \text{Poison}(\lambda_{\text{away},i,j}) \\
+\log(\lambda_{\text{home},i,j}) &=& \text{baseline} + \text{skill}_i - \text{skill}_j \\
+\log(\lambda_{\text{away},i,j}) &=& \text{baseline} + \text{skill}_j - \text{skill}_i
+\end{eqnarray}
+$$
+これにいくつかの事前分布を加えれば、ベイズモデルができあがる！私は、ベースラインと全$n$チームのスキルに関する事前分布を次のように設定した。
+
+$$
+\begin{eqnarray}
+\text{baseline} &\sim& \text{Normal}(0, 4^2) \\
+\text{skill}_{1 \ldots n} &\sim& \text{Normal}(\mu_\text{teams}, \sigma_{\text{teams}}^2) \\
+\mu_\text{teams} &\sim& \text{Normal}(0, 4^2) \\
+\sigma_\text{teams} &\sim& \text{Uniform}(0, 3) \\
+\end{eqnarray}
+$$
+
+私はサッカーについて何も知らないので、これらの事前分布は非常に曖昧に作られている。例えば、ベースラインの事前分布のSDは4だが、これは平均ゴール数の対数スケールなので、$0$の平均からの1SDに相当し、$[0.02,54.6]$ゴールの範囲をカバーする。実に幅広い事前分布である。
+
+これをJAGSモデルにするには、ちょっとした調整が必要である。モデルはすべての試合結果をループする必要があり、いくつかのforループが追加されます。JAGSは分散の代わりに精度（分散の逆数）で正規分布をパラメータ化するので、ハイパー事前分布を変換する必要があります。最後に、あるチームのスキルを定数に「固定」する必要があります。
+
 ```{r, eval=TRUE, echo=TRUE, results='hide'}
 model1 <- stan_model('model1.stan')
 ```
@@ -77,7 +165,58 @@ fit1 <- sampling(object = model1, data = data_list, seed = 1989, chains = 4, ite
 print(fit1, prob = c(0.025, 0.5, 0.975), digits_summary = 2)
 ```
 
+生成されたMCMCサンプルを使って、どのチームでも信頼できるスキル値を見ることができます。FCセビージャとFCバレンシアのトレース・プロットとスキル・パラメータの分布を見てみましょう。
+
+```{r fig.height=3}
+plot(s1[,col_name("skill", which(teams == "FC Sevilla"))])
+plot(s1[,col_name("skill", which(teams == "FC Valencia"))])
+```
+
+セビージャとバレンシアは同じようなスキルを持ち、バレンシアの方がわずかに優れているようだ。MCMC標本を使って，パラメータ値の分布を見ることができるだけでなく，チーム間の試合をシミュレートして，ゴール数の信頼できる分布や，ホームチームの勝利，アウェイチームの勝利，引き分けの確率を見ることも簡単です．以下の関数は、1チームをホームチーム、1チームをアウェイチームとして試合をシミュレートし、`laliga`データセット内の任意の試合の実際の結果と一緒に予測結果をプロットします。バレンシア（ホームチーム）対セビージャ（アウェイチーム）を見てみよう。下のグラフは、1行目がシミュレーション、2行目が過去のデータです。
+
+```{r fig.height=5}
+# Plots histograms over home_goals, away_goals, the difference in goals and a barplot over the credible match results.
+plot_goals <- function(home_goals, away_goals) {
+  n_matches <- length(home_goals)
+  goal_diff <- home_goals - away_goals
+  match_result <- ifelse(goal_diff < 0, "away_win", ifelse(goal_diff > 0, "home_win", "equal"))
+  hist(home_goals, xlim=c(-0.5, 10), breaks=(0:100) - 0.5)
+  hist(away_goals, xlim=c(-0.5, 10), breaks=(0:100) - 0.5)
+  hist(goal_diff, xlim=c(-6, 6), breaks=(-100:100) - 0.5 )
+  barplot(table(match_result) / n_matches , ylim=c(0, 1))
+}
+
+# Simulates game goals scores using the MCMC samples from the m1 model.
+plot_pred_comp1 <- function(home_team, away_team, ms) {
+  old_par <- par(mfrow = c(2, 4))
+  baseline <- ms[, "baseline"]
+  home_skill <- ms[, col_name("skill", which(teams == home_team))]
+  away_skill <- ms[, col_name("skill", which(teams == away_team))]
+  home_goals <- rpois(nrow(ms),  exp(baseline +  home_skill - away_skill))
+  away_goals <- rpois(nrow(ms),  exp(baseline +  away_skill - home_skill))
+  plot_goals(home_goals, away_goals)
+  home_goals <- d$HomeGoals[ d$HomeTeam == home_team & d$AwayTeam == away_team]
+  away_goals <- d$AwayGoals[ d$HomeTeam == home_team & d$AwayTeam == away_team]
+  plot_goals(home_goals, away_goals)
+  par(old_par)
+}
+
+plot_pred_comp1("FC Valencia", "FC Sevilla", ms1)
+```
+
+シミュレーションのデータは過去のデータによく合っており、過去のデータとシミュレーションの両方が、バレンシアの方がセビージャよりわずかに高い確率で勝つことを示している。場所を入れ替えて、セビージャをホームチーム、バレンシアをアウェイチームとしてみよう。
+
+```{r fig.height=5}
+plot_pred_comp1("FC Sevilla", "FC Valencia",ms1)
+
+```
+
+ここで、現在のモデルに問題があることがわかった。シミュレーションデータは、ホームチームとアウェイチームが入れ替わった以外は同じように見えるが、過去のデータを見ると、セビージャがバレンシアに勝つのはホームチームである場合が多い。私たちのモデルは、ホームチームであることの利点を考慮していないため、これを予測できない。これは幸い簡単に修正できる！
+
+
 ## Modeling Match Results: Iteration 2
+
+ホームアドバンテージを考慮するために必要なモデルの唯一の変更は、ベースラインをホームベースラインとアウェイベースラインの2つに分けることである。以下のJAGSモデルはこの変更を実装している。
 
 ```{r, eval=TRUE, echo=TRUE, results='hide'}
 model2 <- stan_model('model2.stan')
@@ -95,7 +234,76 @@ fit2 <- sampling(object = model2, data = data_list, seed = 1989, chains = 4, ite
 print(fit2, prob = c(0.025, 0.5, 0.975), digits_summary = 2)
 ```
 
+
+`home_baseline`と`away_baseline`のトレースプロットと分布を見ると、かなりのホームアドバンテージがあることがわかる。
+
+```{r fig.height=3}
+plot(s2[,"home_baseline"])
+plot(s2[,"away_baseline"])
+```
+
+`exp(home_baseline)`と`exp(away_baseline)`の差を見ると、ホームアドバンテージはホームチームのゴール数でおよそ0.5点多いことがわかる。
+
+```{r fig.height=4, fig.width=7, results='hide'}
+plotPost(exp(ms2[,"home_baseline"]) - exp(ms2[,"away_baseline"]), compVal=0, 
+        xlab="Home advantage in number of goals")
+```
+
+2つのモデルのDICを比較しても、新しいモデルの方が優れていることがわかる。
+
+```{r}
+dic_m1 <- dic.samples(m1, 10000, "pD")
+dic_m2 <- dic.samples(m2, 10000, "pD")
+diffdic(dic_m1, dic_m2)
+```
+
+最後に、バレンシア（ホームチーム）対セビージャ（アウェイチーム）のシミュレーション結果を見てみよう。
+
+```{r fig.height=5}
+plot_pred_comp2 <- function(home_team, away_team, ms) {
+  old_par <- par(mfrow = c(2, 4))
+  home_baseline <- ms[, "home_baseline"]
+  away_baseline <- ms[, "away_baseline"]
+  home_skill <- ms[, col_name("skill", which(teams == home_team))]
+  away_skill <- ms[, col_name("skill", which(teams == away_team))]
+  home_goals <- rpois(nrow(ms),  exp(home_baseline +  home_skill - away_skill))
+  away_goals <- rpois(nrow(ms),  exp(away_baseline +  away_skill - home_skill))
+  plot_goals(home_goals, away_goals)
+  home_goals <- d$HomeGoals[ d$HomeTeam == home_team & d$AwayTeam == away_team]
+  away_goals <- d$AwayGoals[ d$HomeTeam == home_team & d$AwayTeam == away_team]
+  plot_goals(home_goals, away_goals)
+  par(old_par)
+}
+
+plot_pred_comp2("FC Valencia", "FC Sevilla", ms2)
+```
+
+そして同様に、セビージャ（ホームチーム）対バレンシア（アウェイチーム）。
+
+```{r fig.height=5}
+plot_pred_comp2("FC Sevilla", "FC Valencia",ms2)
+```
+
+セビージャもバレンシアもホームチームとしてプレーした方が勝ちやすいことがわかる。
+
+モデリングプロセスのこの時点で、私はスキル・パラメーターをオフェンス・スキルとディフェンス・スキルの2つの要素に分割してみることにした。しかし、おそらくチームのオフェンスとディフェンスのスキルは関連性が高い傾向にあるからだろう。しかし、このモデルでもうひとつ変更したいことがある。
+
 ## Modeling Match Results: Iteration 3
+
+データセット`laliga`には5つの異なるシーズンのデータが含まれており、現在のモデルの仮定は、チームがすべてのシーズンで同じスキルを持つというものである。これはおそらく現実的な仮定ではなく、チームはおそらく年ごとにパフォーマンスが異なる。さらに、以下の図が示すように、1部リーグから脱落した結果、`laliga`データセットのすべてのシーズンに参加していないチームもある：
+
+```{r fig.height=5, fig.width=7}
+qplot(Season, HomeTeam, data=d, ylab="Team", xlab = "Particicipation by Season")
+```
+
+そこで、モデルの2回目の反復では、チームのスキルの年ごとの変動を含めるように修正した。これは、各チームがシーズンごとに1つのスキル・パラメーターを持つようにし、シーズン$t$のチームのスキル・パラメーターをシーズン$t+1$のチームのスキル・パラメーターの事前分布に使用することによって、スキル・パラメーターを連結することによって行われました。
+
+$$
+\text{skill}_{t+1} \sim \text{Normal}(\text{skill}_{t}, \sigma_{\text{season}}^2)
+$$
+
+に対して、曖昧な事前分布が与えられた最初のシーズンを除いて、すべての異なる$t$に対して、$\sigma_{text{season}}^2$ を推定する。ここで、$\sigma_{text{season}}^2$はデータセット全体を使って推定したパラメータである。ホームとアウェイのベースラインには同じ種類の事前分布を与え、以下はその結果のJAGSモデルである。
+
 
 ```{r, eval=TRUE, echo=TRUE, results='hide'}
 model3 <- stan_model('model3.stan')
@@ -113,7 +321,20 @@ fit3 <- sampling(object = model3, data = data_list, seed = 1989, chains = 4, ite
 print(fit3, prob = c(0.025, 0.5, 0.975), digits_summary = 3)
 ```
 
-apply(ms$skill[,1,], 2, quantile, prob  =  c(0.25, 0.5, 0.75))
+以下のグラフは、`season_sigma`パラメータのトレースプロットと分布を示している。
+
+```{r fig.height=3}
+plot(s3[,"season_sigma"])
+```
+
+このモデルのDICを計算し、以前のモデルと比較したところ、実質的な違いは見られなかった。
+
+```{r}
+dic_m3 <- dic.samples(m3, 40000, "pD")
+diffdic(dic_m2, dic_m3)
+``` 
+
+しかし、私は現在のモデル（m3）の前提条件がより合理的だと信じているので、このモデルにこだわるつもりだ。
 
 ```{r}
 ms <- rstan::extract(fit3)
@@ -130,7 +351,6 @@ d_est
 ```
 
 
-
 ```{r}
 ggplot(data = d_est, aes(x = year, y = `50%`, group = team)) +
   theme_bw(base_size = 15) +
@@ -141,3 +361,225 @@ ggplot(data = d_est, aes(x = year, y = `50%`, group = team)) +
   scale_x_continuous(breaks = 2008:2012) + 
   scale_y_continuous(breaks = seq(-1,1,1), limit = c(-1, 1))
 ```
+## Ranking the Teams of La Liga
+
+さて、モデルにはかなり満足したので、序章で設定した目標を達成しよう。まず、2012/2013シーズンから推定されたスキル・パラメーターを用いて、リーガ・エスパニョーラのチームをランキングする。スキル・パラメーターの値は、スキル・パラメーターをゼロに「固定」したチームのスキルとの相対値なので、解釈が難しい。より解釈しやすい尺度に置き換えるために、まず全チームの平均スキルを差し引くことでスキルパラメータをゼロセンターにし、次にホームベースラインを加え、その結果を指数化します。この再スケーリングされたスキルパラメーターは、ホームチームと対戦したときの予想ゴール数のスケールとなる。以下は、再スケーリングしたスキルパラメータの中央値と、68%および95%の信頼区間をキャタピラプロットしたものです。このプロットはスキルの中央値に従って並べられ、したがってチームのランキングも表示されます。
+
+```{r fig.height=8, dpi=90}
+# The ranking of the teams for the 2012/13 season.
+team_skill <- ms3[, str_detect(string=colnames(ms3), "skill\\[5,")]
+team_skill <- (team_skill - rowMeans(team_skill)) + ms3[, "home_baseline[5]"]
+team_skill <- exp(team_skill)
+colnames(team_skill) <- teams
+team_skill <- team_skill[,order(colMeans(team_skill), decreasing=T)]
+old_par <- par(mar=c(2,0.7,0.7,0.7), xaxs='i')
+caterplot(team_skill, labels.loc="above", val.lim=c(0.7, 3.8))
+par(old_par)
+```
+
+FCバルセロナとレアル・マドリードCFだ。この2チームの差を見てみよう。
+
+```{r fig.height=3, fig.width=7, results='hide'}
+plotPost(team_skill[, "FC Barcelona"] - team_skill[, "Real Madrid CF"], compVal = 0, xlab = "← Real Madrid     vs     Barcelona →")
+```
+
+FCバルセロナは、`r round(mean(team_skill[, "FC Barcelona"] - team_skill[, "Real Madrid CF"] > 0) * 100)`%の確率でより良いチームである。頑張れバルセロナ！
+
+## Predicting the End Game of La Liga 2012/2013
+
+`laliga`のデータセットでは、2012/2013シーズンの最後の50試合の結果が欠落していた。
+我々のモデルを用いて、これらの50試合の結果を予測し、シミュレーションすることができる。以下のRコードは、各試合（結果がわかっている試合とわかっていない試合の両方）について、いくつかの尺度を計算します：
+
+* シミュレーションされたゴール数の最頻値、つまり最も可能性の高いゴール数。もし私たちが試合のゴール数に賭けることを求められたら、これを使うでしょう。
+* シミュレーションゴール数の平均、これは試合における平均ゴール数の最良の推測です。
+* 各試合の最も可能性の高い試合結果。
+* 信頼できるホームスコア、アウェイスコア、試合結果の分布からのランダムサンプル。これが、代替現実におけるリーガ・エスパニョーラの実際の展開である。
+
+```{r tidy=FALSE}
+n <- nrow(ms3)
+m3_pred <- sapply(1:nrow(laliga), function(i) {
+  home_team <- which(teams == laliga$HomeTeam[i])
+  away_team <- which(teams == laliga$AwayTeam[i])
+  season <- which(seasons == laliga$Season[i])
+  home_skill <- ms3[, col_name("skill", season, home_team)] 
+  away_skill <- ms3[, col_name("skill", season, away_team)]
+  home_baseline <- ms3[, col_name("home_baseline", season)]
+  away_baseline <- ms3[, col_name("away_baseline", season)]
+
+  home_goals <- rpois(n, exp(home_baseline + home_skill - away_skill))
+  away_goals <- rpois(n, exp(away_baseline + away_skill - home_skill))
+  home_goals_table <- table(home_goals)
+  away_goals_table <- table(away_goals)
+  match_results <- sign(home_goals - away_goals)
+  match_results_table <- table(match_results)
+  
+  mode_home_goal <- as.numeric(names(home_goals_table)[ which.max(home_goals_table)])
+  mode_away_goal <- as.numeric(names(away_goals_table)[ which.max(away_goals_table)])
+  match_result <-  as.numeric(names(match_results_table)[which.max(match_results_table)])
+  rand_i <- sample(seq_along(home_goals), 1)
+  
+  c(mode_home_goal = mode_home_goal, mode_away_goal = mode_away_goal, match_result = match_result,
+    mean_home_goal = mean(home_goals), mean_away_goal = mean(away_goals),
+    rand_home_goal = home_goals[rand_i], rand_away_goal = away_goals[rand_i],
+    rand_match_result = match_results[rand_i])
+})
+m3_pred <- t(m3_pred)
+head(m3_pred, 100)
+```
+
+まず、データ中のゴール数の分布を、全試合の予測最頻値、平均値、ランダムゴール数と比較してみよう（ホームチームのゴール数に注目）。 
+まず、ホームチームの実際のゴール数分布である。
+
+```{r fig.height=3, fig.width=4}
+hist(laliga$HomeGoals, breaks= (-1:10) + 0.5, xlim=c(-0.5, 10))
+```
+
+ほとんどすべての試合で、最も可能性の高いゴール数は1つです。実際、リーガ・エスパニョーラの試合について何も知らない場合、ホームチームの1ゴールに賭けることは、`r round(mean(m3_pred[ , "mode_home_goal"] == 1) * 100)` %の確率でベストベットです。
+
+```{r fig.height=3, fig.width=4}
+hist(m3_pred[ , "mode_home_goal"], breaks= (-1:10) + 0.5, xlim=c(-0.5, 10))
+```
+
+ほとんどの試合で、予想ゴール数は2です。つまり、最も安全なベットが1ゴールだったとしても、2ゴール前後が予想されます。
+
+```{r fig.height=3, fig.width=4}
+hist(m3_pred[ , "mean_home_goal"], breaks= (-1:10) + 0.5, xlim=c(-0.5, 10))
+```
+
+最頻値と平均ゴール数の分布は、実際のゴール数とは似ても似つかない。しかし、ランダム化されたゴール数（各試合のゴール数がその試合のホームゴール数分布からランダムに抽出されたもの）の分布は、実際のホームゴール数に似ていると予想される。下のヒストグラムを見ると、これは事実のようだ。
+
+```{r fig.height=3, fig.width=4}
+hist(m3_pred[ , "rand_home_goal"], breaks= (-1:10) + 0.5, xlim=c(-0.5, 10))
+```
+
+また、モデルがどの程度データを予測するかを見ることもできる。これはおそらくクロスバリデーションを用いて行うべきですが、有効なパラメータの数はデータポイントの数よりはるかに少ないので、直接比較することで少なくとも適切な範囲の予測精度を推定することができます。
+
+```{r}
+mean(laliga$HomeGoals == m3_pred[ , "mode_home_goal"], na.rm=T)
+mean((laliga$HomeGoals - m3_pred[ , "mean_home_goal"])^2, na.rm=T)
+```
+
+つまり平均して、モデルは正しいホームゴール数を `r round(mean(laliga$HomeGoals == m3_pred[ , "mode_home_goal"], na.rm=T) * 100)` %の確率で予測し、平均二乗誤差 `r round(mean((laliga$HomeGoals - m3_pred[ , "mean_home_goal"])^2, na.rm=T), 2)` の平均ゴール数を推測します。次に、実際の試合結果と予測された試合結果を見てみましょう。下のグラフは、1がホームチームの勝利、0が引き分け、-1がアウェイチームの勝利で、データの試合結果を示しています。
+
+```{r fig.height=3, fig.width=4}
+hist(laliga$MatchResult, breaks= (-2:1) + 0.5)
+```
+
+ほとんどすべての試合において、最も安全な賭けはホームチームに賭けることである。引き分けは珍しくないが、最も安全な賭けであることはない。
+
+```{r fig.height=3, fig.width=4}
+hist(m3_pred[ , "match_result"], breaks= (-2:1) + 0.5)
+```
+
+ホームゴール数の場合と同様に、ランダム化された試合結果は、実際の試合結果と似た分布を持つ。
+
+```{r fig.height=3, fig.width=4}
+hist(m3_pred[ , "rand_match_result"], breaks= (-2:1) + 0.5)
+```
+
+```{r}
+mean(laliga$MatchResult == m3_pred[ , "match_result"], na.rm=T)
+```
+
+このモデルは、正しい試合結果を `r round(mean(laliga$MatchResult == m3_pred[ , "match_result"], na.rm=T) * 100)` %の確率で予測している。かなり良い！
+
+さて、モデルがリーガ・エスパニョーラの歴史を合理的に予測することをチェックしたので、リーガ・エスパニョーラの終盤戦を予測してみましょう！以下のコードは、終盤戦の予測されたモードと平均ゴール数、そして各ゲームの予測された勝者を表示します。
+
+```{r results='asis'}
+laliga_forecast <- laliga[is.na(laliga$HomeGoals), c("Season", "Week", "HomeTeam", "AwayTeam")]
+m3_forecast <- m3_pred[is.na(laliga$HomeGoals),] 
+laliga_forecast$mean_home_goals <- round(m3_forecast[,"mean_home_goal"], 1) 
+laliga_forecast$mean_away_goals <- round(m3_forecast[,"mean_away_goal"], 1)
+laliga_forecast$mode_home_goals <- m3_forecast[,"mode_home_goal"] 
+laliga_forecast$mode_away_goals <- m3_forecast[,"mode_away_goal"]
+laliga_forecast$predicted_winner <- ifelse(m3_forecast[ , "match_result"] == 1, laliga_forecast$HomeTeam, 
+                                           ifelse(m3_forecast[ , "match_result"] == -1, laliga_forecast$AwayTeam, "Draw"))
+
+rownames(laliga_forecast) <- NULL
+print(xtable(laliga_forecast, align="cccccccccc"), type="html")
+```
+
+これらの予測は、勝者になる可能性の高い選手に賭けるには良いが、実際の終盤戦がどのように展開するかは反映していない。それでは最後に、先に計算したシミュレーション結果を表示して、リーガ・エスパニョーラ終盤戦の可能なバージョンを見てみましょう。
+
+```{r results='asis'}
+laliga_sim <- laliga[is.na(laliga$HomeGoals), c("Season", "Week", "HomeTeam", "AwayTeam")]
+laliga_sim$home_goals <- m3_forecast[,"rand_home_goal"] 
+laliga_sim$away_goals <- m3_forecast[,"rand_away_goal"]
+laliga_sim$winner <- ifelse(m3_forecast[ , "rand_match_result"] == 1, laliga_forecast$HomeTeam, 
+                            ifelse(m3_forecast[ , "rand_match_result"] == -1, laliga_forecast$AwayTeam, "Draw"))
+
+rownames(laliga_sim) <- NULL
+print(xtable(laliga_sim, align="cccccccc"), type="html")
+```
+
+現在、引き分けに終わる試合が多い。また、第36節、マラガはアウェイチームながらレアル・マドリードを破った。すべてのマラガファンにとって素晴らしい日だ！
+
+
+## Calculating the Predicted Payout for Sevilla vs Valencia, 2013-06-01
+
+この記事を書いている時点（2013-05-28）で、2012/2013シーズンのほとんどの試合が終了し、バルセロナはすでに優勝している（そして、私のモデルが予測したように、最も実力のあるチームである）。しかし、例えば、2013年6月1日のセビージャ（ホームチーム）対バレンシア（アウェイチーム）のような試合も残っている。ベイズ・モデリングとMCMCサンプリングを使用することのパワーの1つは、いったんパラメータのMCMCサンプルが得られれば、パラメータ推定値の不確実性を保持したまま、これらの推定値から得られる任意の量を計算するのが簡単だということです。それでは、セビージャ対バレンシアの試合のゴール数の予測分布を見て、私のモデルを使ってお金を稼ぐことができるか見てみましょう。まず、セビージャとバレンシアのゴール数の分布を計算するためにMCMCサンプルを使うことから始めます。
+
+```{r}
+n <- nrow(ms3)
+home_team <- which(teams == "FC Sevilla")
+away_team <- which(teams == "FC Valencia")
+season <- which(seasons == "2012/13")
+home_skill <- ms3[, col_name("skill", season, home_team)] 
+away_skill <- ms3[, col_name("skill", season, away_team)]
+home_baseline <- ms3[, col_name("home_baseline", season)]
+away_baseline <- ms3[, col_name("away_baseline", season)]
+
+home_goals <- rpois(n, exp(home_baseline + home_skill - away_skill))
+away_goals <- rpois(n, exp(away_baseline + away_skill - home_skill))
+```
+
+この2つの分布の要約を見ると、接戦になるだろうが、ホームチームのセビージャがわずかに有利であることがわかる。
+
+```{r fig.height=5}
+old_par <- par(mfrow = c(2, 2), mar=rep(2.2, 4))
+plot_goals(home_goals, away_goals)
+par(old_par)
+```
+
+
+この記事を書いている時点（2013-05-28）では、ベッティングサイト[www.betsson.com](http://www.betsson.com)でこのゲームの結果に賭けた場合、以下のようなペイアウト（つまり、ベットが成功した場合、いくら戻ってくるか）が得られます：
+
+```
+ Sevilla  Draw  Valencia 
+   3.2    3.35    2.15
+```
+
+シミュレーションしたゴール数分布を使って、私のモデルの予測ペイアウトを計算することができる。
+
+```{r}
+1 / c(Sevilla =  mean(home_goals > away_goals), Draw = mean(home_goals == away_goals), Valencia = mean(home_goals < away_goals))
+```
+
+
+私のモデルは`r round(1 / mean(home_goals > away_goals),2)`のペイアウト（つまり、セビージャの勝利の可能性が高い）を予測しているのに対し、betsson.comは3.2というはるかに高いペイアウトを示しているので、私は明らかにセビージャに賭けるべきだ。最終的なゴールの結果にベットすることも可能なので、異なるゴールの結果に対して私のモデルが予測するペイアウトを計算してみましょう。
+
+```{r results='asis'}
+goals_payout <- laply(0:6, function(home_goal) {
+  laply(0:6, function(away_goal) {
+    1 / mean(home_goals == home_goal & away_goals  == away_goal)
+  })
+})
+
+colnames(goals_payout) <- paste("Valencia", 0:6, sep=" - ")
+rownames(goals_payout) <- paste("Sevilla", 0:6, sep=" - ")
+goals_payout <- round(goals_payout, 1)
+print(xtable(goals_payout, align="cccccccc"), type="html")
+```
+
+最も可能性の高い結果は1 - 1で、予想配当は`r goals_payout[1 + 1,1 + 1]`。betsson.comもこれに同意し、このベットの最低配当である5.3を提供している。十分ではない！bettson.comのペイアウトを見ると、Sevilla - Valencia: 2 - 0のペイアウトは16.0と、私の予想ペイアウトである`r goals_payout[2 + 1, 0 + 1]`よりはるかに良い。これは私の予想配当である `r goals_payout[2 + 1, 0 + 1]` よりもはるかに良い配当である！
+
+## Wrap-up
+
+私のモデルには多くの利点があると思う。概念的に非常にシンプルで、理解しやすく、実装しやすく、拡張しやすい。データのパターンと分布をよく捉えている。これによって、リーガ・エスパニョーラのどのシーズンのどのチームとの試合でも、どのような結果になるかの確率を*簡単に*計算することができる。2009/2010シーズンのRCDマジョルカ（ホームチーム）対マラガCF（アウェイチーム）が引き分けになる確率を計算したいですか？簡単です！グラナダCF対アスレティック・クラブ・ビルバオの総ゴール数が素数になる確率は？問題ない！もし、2008/2009年のレアル・マドリードと2012/2013年のバルセロナが2010/2011年に対戦し、両チームともホームアドバンテージがあったとしたら？まあ、それは可能だが...。
+
+改善すべき点もいくつかある（多くはそれほど難しいことではない）。
+
+- 現在、ホームチームとアウェイチームのゴール分布の間には依存関係がないと仮定されているが、これは現実的ではないかもしれない。もしかしたら、一方のチームがより多くのゴールを決めた場合、もう一方のチームは「勢いを失う」かもしれないし（両チームの得点には負の相関がある）、その代わりにもう一方のチームはより努力するかもしれない（正の相関がある）。このような依存関係は、コピュラを使ってモデルに加えることができるかもしれません。
+- ベイズ統計の利点の1つは、情報量の多い事前分布を使えることです。私はサッカーの知識がないので、漠然とした事前分布を使いましたが、もっと知識のあるサッカーファンの助けを借りれば、モデルにもっと有益な事前分布を与えることができるでしょう。
+- このモデルの予測性能はそれほど徹底的に検証されていないので、健全な量のクロスバリデーションで改善できるだろう。
+- グラフはもっときれいであるべきだが、これはUseR2014のデータ分析コンテストのためのものであり、データ視覚化コンテストのためのものではない。
