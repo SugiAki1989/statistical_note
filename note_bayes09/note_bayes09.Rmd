@@ -34,29 +34,14 @@ knitr::opts_chunk$set(
   
 このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は下記のブログに記載されているテニス選手の強さを推定する内容を参考にさせていただき、写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
 
+今回は下記の記事を部分的に再現してみた。記事とKernelは、Pythonで書かれているため、Rで書き直している。
+
 - [ベイズモデリングで男子プロテニスの強さを分析してみた](https://ie110704.net/2018/05/24/%E3%83%99%E3%82%A4%E3%82%BA%E3%83%A2%E3%83%87%E3%83%AA%E3%83%B3%E3%82%B0%E3%81%A7%E7%94%B7%E5%AD%90%E3%83%97%E3%83%AD%E3%83%86%E3%83%8B%E3%82%B9%E3%81%AE%E5%BC%B7%E3%81%95%E3%82%92%E5%88%86%E6%9E%90/)
+- [kaggle kernel: ](https://www.kaggle.com/itoeiji/player-s-strength-analysis-using-bayesian)
 
-## 
+## テニスの試合結果データ
 
-https://www.kaggle.com/code/akisugi/copy-bayesian
-
-https://ie110704.net/2018/05/24/%E3%83%99%E3%82%A4%E3%82%BA%E3%83%A2%E3%83%87%E3%83%AA%E3%83%B3%E3%82%B0%E3%81%A7%E7%94%B7%E5%AD%90%E3%83%97%E3%83%AD%E3%83%86%E3%83%8B%E3%82%B9%E3%81%AE%E5%BC%B7%E3%81%95%E3%82%92%E5%88%86%E6%9E%90/
-
-<div class="tbox">
-<th3>モデル</th3>
-<div class="inner">
-$$
-\begin{eqnarray}
-performance[g,1] &\sim& Normal(\mu[Loser[g] ],\sigma_{pf}[Loser[g] ]) \ \ g=1...G \\
-performance[g,2] &\sim& Normal(\mu[Winner[g]],\sigma_{pf}[Winner[g]]) \ \ g=1...G \\
-performance[g,1] &\lt& performance[g,2] \ \ g=1...G \\
-\mu[n] &\sim& Normal(0, \sigma_{\mu}) \ \ n=1...N  \\ 
-\sigma_{pf}[n] &\sim& Gamma(10, 10) \ \ n=1...N  \\ 
-\end{eqnarray}
-$$
-</div>
-</div>
-
+[Association of Tennis Professionals Matches](https://www.kaggle.com/datasets/gmadevs/atp-matches-dataset)のデータを使用。1試合ごとに試合の詳細が記録されている(53508×48)。元のデータには`year`カラムがなく、データ抽出時点に`tourney_date`から作成している。
 
 ```{r}
 library(tidyverse)
@@ -70,22 +55,70 @@ rstan_options(auto_write=TRUE)
 options(mc.cores=parallel::detectCores())
 
 PATH <- '~/Desktop/df_matches.csv'  
-df_matches_mst <- read.csv(PATH)
+df_matches_mst <- read.csv(PATH) %>% select(-X)
+head(df_matches_mst, 10)
 ```
+
+このデータを利用して、選手の強さを推定する。その後、モデルを発展させて時系列で選手の強さを推定する。
+
+## テニス選手の強さモデル
+
+[StanとRでベイズ統計モデリング](https://www.kyoritsu-pub.co.jp/book/b10003786.html)のp189を参考にモデルを作成する。
+
+モデルのメカニズムを考える。各選手の強さを$\mu[n]$、勝負ムラを$\sigma_{pf}[n]$として、1回の勝負で発揮する力は、平均$\mu[n]$、標準偏差$\sigma_{pf}[n]$の正規分布から生成されると考える。勝敗はそのパフォーマンスの大小で決まる。
+
+階層モデルを適用し、「各選手の強さは$\mu[n]$は特定の分布に従う」という仮定をたてる。つまり、各選手の強さ$\mu[n]$は平均0、標準偏差$\sigma_{\mu}$に従うと考える。そして、勝負ムラ$\sigma_{pf}[n]$には弱情報事前分布(ガンマ分布(10,10))を利用する。勝負ムラの大きさは1前後に固定され、パフォーマンスのスケールが決まる。正の値をとって、正規分布のような形をしてほしいという事前情報を与えたい場合にガンマ分布(10,10)が役立つ。
+
+<div class="tbox">
+<th3>モデル</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+performance[g,1] &\sim& Normal(\mu[Loser[g] ],\sigma_{pf}[Loser[g] ]) &\quad  g=1...G \\
+performance[g,2] &\sim& Normal(\mu[Winner[g]],\sigma_{pf}[Winner[g]]) &\quad  g=1...G \\
+performance[g,1] &\lt& performance[g,2] &\quad  g=1...G \\
+\mu[n] &\sim& Normal(0, \sigma_{\mu}) &\quad  n=1...N  \\ 
+\sigma_{pf}[n] &\sim& Gamma(10, 10) &\quad  n=1...N  \\ 
+\end{eqnarray}
+$$
+</div>
+</div>
+
+メカニズムに関して、[こちら](https://qiita.com/sk_bono36/items/c6ce9e27d4e655a52e62)のQiitaの記事でわかりやすく説明されている図があったのでお借りする。各選手の強さ$\mu[n]$は平均0、標準偏差$\sigma_{\mu}$に従う。標準偏差$\sigma_{\mu}$が小さければ、選手の強さは均衡し、大きければ選手の強さは均衡しなくなる。プロ選手であるため、この標準偏差$\sigma_{\mu}$はある程度狭いことが想定できる。
+
+```{r, echo=FALSE, out.width='60%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_bayes09/mechanism.png')
+```
+
+2000年から2017年までの試合記録があるので、まずは直近2015年からのデータを使用する。
+
+```{r}
+df_matches_mst %>% 
+  summarise(
+    min_year = min(year),
+    max_year = max(year)
+  )
+```
+
+選手については、下記の4選手を対象にします。参考先の記事では18選手を対象にしている。
 
 ```{r}
 START_YEAR <- 2015
 TARGET_PLAYERS <- c('Roger Federer', 'Rafael Nadal', 'Novak Djokovic', 'Andy Murray')
 ```
 
+期間と選手に関して、データを限定する(37×3)。
 
 ```{r, class.output="scroll-1000"}
 df_matches <- df_matches_mst %>% 
   select(year, loser_name, winner_name) %>% 
   filter(year >= START_YEAR) %>% 
   filter(winner_name %in% TARGET_PLAYERS & loser_name %in% TARGET_PLAYERS)
-df_matches
+
+head(df_matches, 10)
 ```
+
+モデルで強さを推定する前に簡易集計して勝率を可視化する。ジョコビッチ選手、フェデラー選手、マレー選手、ナダル選手の順に勝率が高く、ジョコビッチ選手の勝率は80%にもなる。
 
 ```{r}
 tmp <- df_matches %>% 
@@ -104,6 +137,7 @@ tmp <- df_matches %>%
   mutate(
     rate_win = cnt_win/games
   )
+
 a <- ggplot(tmp, aes(name, games)) + geom_bar(stat = 'identity') +
   theme_bw(base_size = 10) + labs(x = 'player', title = 'Number of Games')
 b <- ggplot(tmp, aes(name, rate_win)) + geom_bar(stat = 'identity') + 
@@ -112,7 +146,7 @@ b <- ggplot(tmp, aes(name, rate_win)) + geom_bar(stat = 'identity') +
 a | b
 ```
 
-
+Stanにデータを渡す際に、扱いやすくするために負け選手インデックス、勝ち選手インデックスに変換する。ここでは簡単に選手マスタを作成し、
 
 ```{r}
 df_name2no <- tibble(
@@ -121,6 +155,8 @@ df_name2no <- tibble(
 )
 df_name2no
 ```
+
+試合データに紐付けることで、選手名をインデックスを変換した。
 
 ```{r}
 df_matches <- df_matches %>% 
@@ -133,7 +169,11 @@ df_matches <- df_matches %>%
     by = join_by('loser_name' == 'name')
   ) %>% 
   select(year, loser, winner)
+
+head(df_matches, 10)
 ```
+
+選手の強さを推定するにあたり、必要なカラムを取り出しておく。
 
 ```{r, class.output="scroll-1000"}
 data <- list(
@@ -141,8 +181,8 @@ data <- list(
   G = nrow(df_matches),
   LW = df_matches %>% select(-year)
 )
+data
 ```
-
 
 ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
 
@@ -156,13 +196,22 @@ model <- stan_model('model.stan')
 fit <- sampling(object = model, data = data, seed = 1989)
 ```
 
-推定結果を確認する。
+推定結果を確認する。Rhatも1前後で収束に問題はなさそうである。
 
 ```{r, class.output="scroll-1000"}
-print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+print(fit, prob = c(0.025, 0.5, 0.975), digits_summary = 2)
 ```
 
+各選手の強さ$\mu$の事後分布、勝負ムラ$\sigma_{pf}$の事後分布を可視化する。参考先の記事とは対象にしている選手が異なるので、推定結果に関しては違いがあるので注意。
+
+ここでは、ジョコビッチ選手が1番強いと推定されたが、この4選手だけで言えば、フェデラー選手も同じくらい強いと推定されている。勝負ムラ$\sigma_{pf}$については、特に選手間で違いがなさそうである。
+
 ```{r}
+# 1 Roger Federer 
+# 2 Rafael Nadal  
+# 3 Novak Djokovic
+# 4 Andy Murray   
+
 a <- stan_plot(
   fit,
   pars = c('mu'),
@@ -184,27 +233,73 @@ a | b
 
 ## 時系列モデル
 
+時系列モデルでは、各選手の$y$年度の強さを$\mu[n][y]$、勝負ムラを$\sigma_{pf}[n][y]$とし、$y$年度に行われる勝負で発揮するパフォーマンスは、平均$\mu[n][y]$、標準偏差$\sigma_{pf}[n][y]$の正規分布から生成されると考える。試合の結果はパフォーマンスの大小で決まる。時系列モデルの特徴として、各選手のある年度での強さ$\mu[n][y]$は、その1つ前の年度の強さ$\mu[n][y-1]$から生成されると考える。つまり、去年強かったら、今年も強いだろうし、来年もその強さは引き継がれるだろうと仮定する。
+
+- y: 年度
+- Loser : 負け選手のインデックス
+- Winner : 勝ち選手のインデックス
+
 <div class="tbox">
-<th3>モデル</th3>
+<th3>時系列モデル</th3>
 <div class="inner">
 $$
 \begin{eqnarray}
-performance[y][g,1] &\sim& Normal(\mu[Loser][y],\sigma_{pf}[Loser][y]) \ \ g=1...G,y=1...Y \\
-performance[y][g,2] &\sim& Normal(\mu[Winner][y],\sigma_{pf}[Winner][y]) \ \ g=1...G,y=1...Y \\
-performance[y][g,1] &\lt& performance[y][g,2] \ \ g=1...G,y=1...Y \\
+performance[y][g,1] &\sim& Normal(\mu[Loser][y],\sigma_{pf}[Loser][y]) &\quad  g=1...G,y=1...Y \\
+performance[y][g,2] &\sim& Normal(\mu[Winner][y],\sigma_{pf}[Winner][y]) &\quad  g=1...G,y=1...Y \\
+performance[y][g,1] &\lt& performance[y][g,2] &\quad  g=1...G,y=1...Y \\
 
-\mu[n][1] &\sim& Normal(0, \sigma_{\mu}[n][1]) \ \ n=1...N\\
-\mu[n][y] &\sim& Normal(\mu[n][y-1], \sigma_{\mu}[n][y-1]) \ \ n=1...N,y=2...Y \\
+\mu[n][1] &\sim& Normal(0, \sigma_{\mu}[n][1]) &\quad  n=1...N\\
+\mu[n][y] &\sim& Normal(\mu[n][y-1], \sigma_{\mu}[n][y-1]) &\quad   n=1...N,y=2...Y \\
 
-\sigma_{pf}[n][y] &\sim& Gamma(10, 10) \ \ n=1...N,y=1...Y \\
-\sigma_{\mu}[n][y] &\sim& Normal(0, 1) \ \ n=1...N,y=1...Y \\
+\sigma_{pf}[n][y] &\sim& Gamma(10, 10) &\quad  n=1...N,y=1...Y \\
+\sigma_{\mu}[n][y] &\sim& Normal(0, 1) &\quad  n=1...N,y=1...Y \\
 
 \end{eqnarray}
 $$
 </div>
 </div>
 
+Stanのモデルは下記の通りである。
 
+```
+data {
+    int N;
+    int G;
+    int Y;
+    int<lower=1> GY[G];
+    int<lower=1, upper=N> LW[G, 2];
+}
+
+parameters {
+    ordered[2] performance[G];
+    matrix<lower=0>[N, Y] mu;
+    matrix<lower=0>[N, Y] s_mu;
+    matrix<lower=0>[N, Y] s_pf;
+}
+
+model {
+    for (g in 1:G)
+      for (i in 1:2)
+        performance[g, i] ~ normal(mu[ LW[g, i], GY[g] ], s_pf[ LW[g, i], GY[g] ]);
+
+    // 各選手の初年度の強さは平均0、標準偏差$\sigma_{\mu}[n][1]$の半正規分布に従う
+    for (n in 1:N)
+      mu[n, 1] ~ normal(0, s_mu[n, 1]);
+
+    for (n in 1:N)
+      for (y in 2:Y)
+        mu[n, y] ~ normal(mu[n, y-1], s_mu[n, y]);
+    
+    // 各選手の年度別の強さの変化具合$\sigma_\mu[n][y]$は半正規分布に従う
+    for (n in 1:N)
+      s_mu[n] ~ normal(0, 1);
+
+    for (n in 1:N)
+      s_pf[n] ~ gamma(10, 10);
+}
+```
+
+推定に使用する期間は2005年から2016年のデータとして、選手は先程と同じく4選手のみとする(213×3)。
 
 ```{r, class.output="scroll-1000"}
 START_YEAR <- 2005
@@ -215,9 +310,10 @@ df_matches_ts <- df_matches_mst %>%
   filter(year >= START_YEAR & END_YEAR >= year) %>% 
   filter(winner_name %in% TARGET_PLAYERS & loser_name %in% TARGET_PLAYERS)
 
-df_matches_ts
+head(df_matches_ts, 10)
 ```
 
+推定する前に各選手の勝率の推移を可視化しておく。ジョコビッチ選手の勝率推移は上昇傾向、ナダル選手とフェデラー選手は下降傾向、マレー選手は停滞しているように見える。
 
 ```{r}
 tmp_ts <- df_matches_ts %>% 
@@ -238,14 +334,26 @@ tmp_ts <- df_matches_ts %>%
     rate_win = cnt_win/games
   )
 
-a <- ggplot(tmp_ts, aes(year, games)) + geom_line(stat = 'identity') + facet_wrap( ~ name, nrow = 1) + 
-  theme_bw(base_size = 10) + labs(x = 'player', title = 'Number of Games')
-b <- ggplot(tmp_ts, aes(year, rate_win)) + geom_line(stat = 'identity') + facet_wrap( ~ name, nrow = 1) + 
-  theme_bw(base_size = 10) + labs(x = 'player', title = 'Rate of win')
+a <- ggplot(tmp_ts, aes(year, games)) + 
+  geom_line(stat = 'identity') + 
+  scale_x_continuous(breaks = seq(2005, 2016, 1)) +
+  facet_wrap( ~ name, nrow = 1) + 
+  theme_bw(base_size = 10) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = 'player', title = 'Number of Games') 
+
+b <- ggplot(tmp_ts, aes(year, rate_win)) + 
+  geom_line(stat = 'identity') + 
+  scale_x_continuous(breaks = seq(2005, 2016, 1)) +
+  facet_wrap( ~ name, nrow = 1) + 
+  theme_bw(base_size = 10) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = 'player', title = 'Rate of win')
 
 a / b
 ```
 
+先程と同じく、インデックスに変換しておく(213×3)。
 
 ```{r, class.output="scroll-1000"}
 df_matches_ts <- df_matches_ts %>% 
@@ -260,8 +368,11 @@ df_matches_ts <- df_matches_ts %>%
   # yearを1始まりに修正
   mutate(year = year - (START_YEAR-1)) %>% 
   select(year, loser, winner)
+
 df_matches_ts
 ```
+
+Stanに渡すデータを作成する。
 
 ```{r, class.output="scroll-1000"}
 data_ts <- list(
@@ -273,7 +384,6 @@ data_ts <- list(
 )
 data_ts
 ```
-
 
 ここでは、`stan_model()`関数で最初にコンパイルしておいてから、
 
@@ -287,12 +397,13 @@ model_ts <- stan_model('model-ts.stan')
 fit_ts <- sampling(object = model_ts, data = data_ts, seed = 1989)
 ```
 
-推定結果を確認する。
+推定結果を確認する。Rhatも問題なく収束している。
 
 ```{r, class.output="scroll-1000"}
-print(fit_ts, prob = c(0.025, 0.5, 0.975), digits_summary = 1)
+print(fit_ts, prob = c(0.025, 0.5, 0.975), digits_summary = 2)
 ```
 
+信用区間付きのグラフを作成するためにデータを加工する。
 
 ```{r, class.output="scroll-1000"}
 ms <- rstan::extract(fit_ts)
@@ -305,25 +416,38 @@ for (n in 1:length(TARGET_PLAYERS)) {
     )
 }
 
+# インデックスを年度に戻す
+d_est$year <- d_est$year+2004
 d_est
 ```
 
+各選手の2005年から2016年までの強さの推移を可視化すると、
 
+- ジョコビッチ選手: 2010年に強さが一気に上昇し、そのあとも強さは上昇傾向にある
+- ナダル選手: 最初に上昇傾向を示し、強さは安定的に推移し、最後は少し下降傾向にある
+- フェデラー選手: 徐々に強くなっているものの最後に一気に上昇し、強さを維持している。
+- マレー選手: 徐々に強くなっている傾向を示している
+
+ただ、フェデラー選手に関しては、2016年は試合に出ていないため、状態空間モデルのように強さ$\mu$の状態方程式が機能している。
 
 ```{r}
-ggplot(data = d_est, aes(x = year, y = `50%`, group = name)) +
+c <- ggplot(data = d_est, aes(x = year, y = `50%`, group = name)) +
   theme_bw(base_size = 10) +
   theme(legend.position = 'none') +
   geom_ribbon(aes(ymin = `25%`, ymax = `75%`, fill = name), alpha = 0.2) +
   geom_line(aes(col = name), linewidth = 0.5) +
   geom_hline(yintercept = 2, linetype = 'dashed') + 
   labs(x = 'Year', y = 'Strength', title = 'Time Series of Estimated Latent Strength') +
-  scale_x_continuous(breaks = seq(unique(df_matches_ts$year)[1], unique(df_matches_ts$year)[12], 2)) + 
+  scale_x_continuous(breaks = seq(2005, 2016, 1)) +
   scale_y_continuous(breaks = seq(0,4,0.5), limit = c(0, 4)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   facet_wrap( ~ name, nrow = 1)
 
+a / b / c
 ```
 
 ## 参考文献および参考資料
 
-- []()
+- [ベイズモデリングで男子プロテニスの強さを分析してみた](https://ie110704.net/2018/05/24/%E3%83%99%E3%82%A4%E3%82%BA%E3%83%A2%E3%83%87%E3%83%AA%E3%83%B3%E3%82%B0%E3%81%A7%E7%94%B7%E5%AD%90%E3%83%97%E3%83%AD%E3%83%86%E3%83%8B%E3%82%B9%E3%81%AE%E5%BC%B7%E3%81%95%E3%82%92%E5%88%86%E6%9E%90/)
+- [kaggle kernel: ](https://www.kaggle.com/itoeiji/player-s-strength-analysis-using-bayesian)
+- [Association of Tennis Professionals Matches](https://www.kaggle.com/datasets/gmadevs/atp-matches-dataset)
