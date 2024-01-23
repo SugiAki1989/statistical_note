@@ -1,0 +1,206 @@
+---
+title: 'ラ・リーガの各チームの強さを推定する(モデル3)'
+pagetitle: 'ラ・リーガの各チームの強さを推定する(モデル3)'
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: 'show'
+highlight: 'kate'
+# theme: 'flatly'
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = 'center',
+  dev = 'ragg_png'
+)
+```
+
+<div class='update-right'>
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回はRasmus Bååth先生のブログに記載されているサッカーチームの強さを推定する内容を参考にさせていただき、写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [Modeling Match Results in La Liga Using a Hierarchical Bayesian Poisson Model: Part one.](https://www.sumsar.net/blog/2013/07/modeling-match-results-in-la-liga-part-one/)
+- [Modeling Match Results in La Liga Using a Hierarchical Bayesian Poisson Model: Part two.](https://www.sumsar.net/blog/2013/07/modeling-match-results-in-la-liga-part-two/)
+- [Modeling Match Results in La Liga Using a Hierarchical Bayesian Poisson Model: Part three](https://www.sumsar.net/blog/2013/08/modeling-match-results-in-la-liga-part-three/)
+
+こちらのブログではJAGSを利用しており、再現はStanで行うため、結果は完全に一致しない。また、JAGSとStanでは正規分布のパラメタの与え方が異なるので、そのあたりは修正を行っているが、ブログの数式はそのまま表示しているので、数式とStanモデルでは差異がある点は注意が必要である。
+
+1つ前のノートでは、ブログをStanで再現することを中心にしていたため、データをサンプリングしていたが、ここではサンプリングせずにパラメタを推定する。また、モデル3を中心にメカニズムを深掘りしておく。
+
+# 準備
+
+まずは必要なデータやパッケージを準備しておく。ブログで使用されている通り、使用するデータはラ・リーガの5つのシーズン(`2008/09, 2009/10, 2010/11, 2011/12, 2012/13`)の試合結果が記録されているデータを利用する。
+
+```{r cache=FALSE}
+library(tidyverse)
+library(rstan)
+library(patchwork)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+load("laliga.RData")
+head(laliga)
+```
+
+モデリングや可視化で必要になるカラムを作成しておく。`2012/13`シーズンのいくつかのレコードには欠損値が含まれているので、そのレコードは除外しておく。
+
+```{r}
+d <- na.omit(laliga)
+dim(d)
+teams <- unique(c(d$HomeTeam, d$AwayTeam))
+seasons <- unique(d$Season)
+
+data_list <- list(
+  HomeGoals = d$HomeGoals, 
+  AwayGoals = d$AwayGoals, 
+  HomeTeam = as.numeric(factor(d$HomeTeam, levels = teams)),
+  AwayTeam = as.numeric(factor(d$AwayTeam, levels = teams)),
+  Season = as.numeric(factor(d$Season, levels=seasons)),
+  n_teams = length(teams),
+  n_games = nrow(d), 
+  n_seasons = length(seasons)
+  )
+
+map(.x = data_list,.f = function(x){head(x,100)})
+```
+
+数字とチーム名の対応は下記の通りである。
+
+```{r}
+data.frame(
+  no = as.numeric(factor(unique(d$HomeTeam), levels=teams)),
+  teams
+  )
+```
+
+メカニズムは下記の図の通り。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_bayes12/model3.png')
+```
+
+モデルはこちら。
+
+```
+data {
+  int<lower=1> n_games;             // 1850
+  int<lower=1> n_seasons;           // 5
+  int<lower=1> n_teams;             // 29
+  int<lower=1> Season[n_games];    
+  int<lower=1> HomeTeam[n_games]; 
+  int<lower=1> AwayTeam[n_games]; 
+  int<lower=0> HomeGoals[n_games];
+  int<lower=0> AwayGoals[n_games];
+}
+parameters {
+  vector[n_seasons] home_baseline;
+  vector[n_seasons] away_baseline;
+  matrix[n_teams, n_seasons] skill;
+  real<lower=0> group_sigma;
+  real<lower=0> season_sigma;
+}
+
+transformed parameters {
+  vector[n_games] lambda_home;
+  vector[n_games] lambda_away;
+
+  for (i in 1:n_games) {
+    lambda_home[i] = exp(home_baseline[Season[i]] + skill[HomeTeam[i], Season[i]] - skill[AwayTeam[i], Season[i]]);
+    lambda_away[i] = exp(away_baseline[Season[i]] + skill[AwayTeam[i], Season[i]] - skill[HomeTeam[i], Season[i]]);
+  }
+}
+model {
+  group_sigma ~ uniform(0, 1000);
+  home_baseline[1] ~ normal(0, 4);
+  away_baseline[1] ~ normal(0, 4);
+
+  for (n in 1:n_teams) {
+    skill[n, 1] ~ normal(0, group_sigma);
+  }
+
+  for (season_i in 2:n_seasons) {
+    for (n in 1:n_teams) {
+      skill[n, season_i] ~ normal(skill[n, season_i-1], season_sigma);
+      }
+    home_baseline[season_i] ~ normal(home_baseline[season_i-1], season_sigma);
+    away_baseline[season_i] ~ normal(away_baseline[season_i-1], season_sigma);
+  }
+
+  for (i in 1:n_games) {
+    HomeGoals[i] ~ poisson(lambda_home[i]);
+    AwayGoals[i] ~ poisson(lambda_away[i]);
+  }
+}
+
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model3 <- stan_model('model3.stan')
+fit3 <- sampling(object = model3, data = data_list, seed = 1989, chains = 4, iter = 10000, thin = 5)
+```
+
+推定結果を確認する。
+
+```{r, class.output="scroll-1000"}
+print(fit3, prob = c(0.025, 0.5, 0.975), digits_summary = 3)
+```
+
+各チームのスキルの時系列の推移を可視化しておく。
+
+```{r}
+ms3 <- rstan::extract(fit3)
+d_est <- data.frame()
+for (n in 1:length(teams)) {
+  qua <- apply(ms3$skill[,n,], 2, quantile, prob  =  c(0.25, 0.5, 0.75))
+  d_est <- rbind(
+     d_est, 
+     data.frame(team = teams[n], year = 2008:2012, t(qua), check.names = FALSE)
+     )
+}
+
+d_est_target <- d_est %>% 
+  filter(team %in% c(
+    "Atlético Madrid",
+    "FC Valencia",
+    #"FC Barcelona",
+    #"Real Madrid CF",
+    "Villarreal CF",
+    "Real Sociedad San Sebastian"
+  ))
+```
+
+今回のデータセットの時期における実績は下記の通りで、圧倒的にバルセロナ、レアル・マドリードが優位であるので、このチームを除いて可視化した結果も記載しておく。
+
+- 2008-09: バルセロナ	/ レアル・マドリード
+- 2009-10: バルセロナ	/ レアル・マドリード
+- 2010-11: バルセロナ	/ レアル・マドリード
+- 2011-12: レアル・マドリード	/ バルセロナ
+- 2012-13: バルセロナ	/ レアル・マドリード
+
+```{r}
+ggplot(data = d_est_target, aes(x = year, y = `50%`, group = team)) +
+  theme_bw(base_size = 12) +
+  geom_ribbon(aes(ymin = `25%`, ymax = `75%`, fill = team), alpha = 0.2) +
+  geom_line(aes(col = team), linewidth = 0.5) +
+  geom_hline(yintercept = 0, linetype = 'dashed') + 
+  labs(x = 'Year', y = 'Strength', title = 'Time Series of Estimated Latent Strength') +
+  scale_x_continuous(breaks = 2008:2012)
+```

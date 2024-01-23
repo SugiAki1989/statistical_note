@@ -61,8 +61,8 @@ model {
   home_baseline ~ normal(0, 4);
   away_baseline ~ normal(0, 4);
 
-  for (j in 1:n_teams) {
-    skill[j] ~ normal(0, group_sigma);
+  for (n in 1:n_teams) {
+    skill[n] ~ normal(0, group_sigma);
   }
   
   for (i in 1:n_games) {
