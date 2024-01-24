@@ -51,7 +51,8 @@
 - [テニス選手の強さを推定する](https://sugiaki1989.github.io/statistical_note/note_bayes09/note_bayes09.html)
 - [ボートレースの勝率を推定する](https://sugiaki1989.github.io/statistical_note/note_bayes10/note_bayes10.html)
 - [ラ・リーガの各チームの強さを推定する](https://sugiaki1989.github.io/statistical_note/note_bayes11/note_bayes11.html)
-- [](https://sugiaki1989.github.io/statistical_note/note_bayes12/note_bayes12.html)
+- [ラ・リーガの各チームの強さを推定する(モデル3を深ぼる)](https://sugiaki1989.github.io/statistical_note/note_bayes12/note_bayes12.html)
+- [レースなどの着順データの強さを推定する](https://sugiaki1989.github.io/statistical_note/note_bayes13/note_bayes13.html)
 
 ## 数値解析
 

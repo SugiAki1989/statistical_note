@@ -1,0 +1,358 @@
+---
+title: 'レースなどの着順データの強さを推定する'
+pagetitle: 'レースなどの着順データの強さを推定する'
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: 'show'
+highlight: 'kate'
+# theme: 'flatly'
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = 'center',
+  dev = 'ragg_png'
+)
+```
+
+<div class='update-right'>
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回はランキング(順位)が結果として記録されるようなデータを扱う。なんとかランキングや競馬や競艇なども同じような形で扱うことができる。
+
+# 準備
+
+ここでは競馬の着順が記録されているデータを作成する。データの生成過程を知っているので、問題なく推定できるかを検証する。まずは必要なライブラリや設定を行う。
+
+```{r}
+library(tidyverse)
+library(rstan)
+library(ggplot2)
+library(patchwork)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+```
+
+データの生成過程として下記を想定する。
+
+- 馬は10頭
+- 毎試合、無作為に選ばれた5頭が競い合う
+- 試合は500試合
+- 潜在的な強さ$\mu$は、1番目が1番弱く、10番目が1番強いと仮定
+- 勝負ムラ$\sigma_{pf}$は、1番目が1番大きく、10番目が1番小さいと仮定
+- 着順は毎試合ごとに各馬の潜在的な強さを平均、勝負ムラを標準偏差とする正規分布により生成された値を降順で並び替え、着順とする
+
+```{r}
+N <- 10
+G1 <- 500
+MU <- seq(-3, 3, length.out = N)
+S <- seq(5, 0.1, length.out = N)
+
+res <- data.frame()
+set.seed(1989)
+for (i in 1:G1) {
+  pick <- sample(1:N, 5, replace = FALSE)
+  pf <- rnorm(length(pick), mean = MU[pick], sd = S[pick])
+  or <- order(pf, decreasing = FALSE)
+  df <- data.frame(id = i, horceid = pick[or], pf = pf[or], rank = 5:1)
+  res <- rbind(res, df)
+}
+
+# 5試合分を表示する
+res[1:25,]
+```
+
+このデータをStanに渡せるように変換しておく。着順が遅い順で、左から右(5位->4位->3位->2位->1位)に並んでいるデータを作成する必要があるので、横長のデータにしておく。
+
+```{r}
+# 着順が遅い順で、左から右(5位->4位->3位->2位->1位)に並んでいる
+d <- res %>% 
+  pivot_wider(
+    id_cols = id,
+    names_from = rank,
+    values_from = horceid
+  ) %>% 
+  select(-id) %>% as.matrix()
+
+# 5試合分を表示する
+d[1:5,]
+```
+
+データを用意する。
+
+```{r}
+data <- list(
+  N = N, 
+  G = nrow(d), 
+  LW = d
+)
+
+map(.x = data, .f = function(x){head(x, 10)})
+```
+
+モデルについては、これまでも扱っているモデルを利用する。
+
+<div class='tbox'>
+<th3>モデル</th3>
+<div class='inner'>
+$$
+\begin{eqnarray}
+performance[g,1] &\sim& Normal(\mu[Player[g] ],\sigma_{pf}[Player[g] ]) &\quad  g=1...G \\
+...\\
+performance[g,5] &\sim& Normal(\mu[Player[g] ],\sigma_{pf}[Player[g] ]) &\quad  g=1...G \\
+
+performance[g,1] &\lt& performance[g,2] \lt ... \lt performance[g,5] &\quad  g=1...G \\
+\mu[n] &\sim& Normal(0, \sigma_{\mu}) &\quad  n=1...N  \\ 
+\sigma_{pf}[n] &\sim& Gamma(10, 10) &\quad  n=1...N  \\ 
+\end{eqnarray}
+$$
+</div>
+</div>
+
+着順を扱えるようにStanのモデルでは`ordered`型を利用している。
+
+```
+parameters {
+  ordered[5] performance[G];
+  vector[N] mu;
+  real<lower=0> s_mu;
+  vector<lower=0>[N] s_pf;
+}
+```
+
+モデルの挙動を深掘りしておく。`performance`の部分が増えただけで、これまでと大きくは変わらない。
+
+```
+model {
+  mu ~ normal(0, s_mu);
+  s_pf ~ gamma(10, 10);
+
+  for (g in 1:G){
+    for (i in 1:5){
+      performance[g,i] ~ normal(mu[LW[g,i]], s_pf[LW[g,i]]);
+    }
+  }
+}
+
+// g=1, i=1...5
+performance[1,1] ~ normal(mu[LW[1,2]], s_pf[LW[1,1]]); -> performance[1,1] ~ normal(mu[2] , s_pf[2] );
+performance[1,2] ~ normal(mu[LW[1,2]], s_pf[LW[1,2]]); -> performance[1,2] ~ normal(mu[3] , s_pf[3] );
+performance[1,3] ~ normal(mu[LW[1,3]], s_pf[LW[1,3]]); -> performance[1,3] ~ normal(mu[9] , s_pf[9] );
+performance[1,4] ~ normal(mu[LW[1,4]], s_pf[LW[1,4]]); -> performance[1,4] ~ normal(mu[7] , s_pf[7] );
+performance[1,5] ~ normal(mu[LW[1,5]], s_pf[LW[1,5]]); -> performance[1,5] ~ normal(mu[10], s_pf[10]);
+
+// データ
+$LW
+       5 4  3  2  1
+ [1,]  2 3  9  7 10
+
+// 制約条件
+performance[1,1] < performance[1,2] < performance[1,3] < performance[1,4] < performance[1,5]
+馬2 < 馬3 < 馬9 < 馬7 < 馬10という順になっている
+```
+
+先にコンパイルしてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model <- stan_model('model-order.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r}
+fit <- sampling(object = model, data = data, seed = 1989, chain = 4, iter = 4000)
+```
+
+推定結果を確認する。データ生成過程で設定した通り、大きい番号の馬(ID=10)の強さ$\mu$から順に推定できている(多少、前後しているケースがあるが、これはサンプルサイズが増えれば解消されるはず)。
+
+```{r}
+# ms <- rstan::extract(fit)
+# qua <- apply(ms$mu, 2, quantile, prob = c(0.025, 0.5, 0.975))
+# d_est <- data.frame(nid = 1:N, t(qua), check.names = FALSE)
+# d_est[rev(order(d_est$`50%`)),]
+print(fit, prob = c(0.025, 0.5, 0.975), pars = c('mu'))
+```
+
+```{r}
+stan_plot(
+  fit,
+  point_est = 'mean',
+  show_density = TRUE,
+  ci_level = 0.9,
+  outer_level = 1,
+  pars = 'mu',
+  fill_color = 'tomato'
+) + labs(title = 'Mu')
+```
+
+
+勝負ムラ$\sigma_{pf}$は、小さい番号の馬(ID=1)のムラが大きく、設定した通りに推定できている(多少、前後しているケースがあるが、これはサンプルサイズが増えれば解消されるはず)。
+
+```{r}
+print(fit, prob = c(0.025, 0.5, 0.975), pars = c('s_pf'))
+```
+
+```{r}
+stan_plot(
+  fit,
+  point_est = 'mean',
+  show_density = TRUE,
+  ci_level = 0.9,
+  outer_level = 1,
+  pars = 's_pf',
+  fill_color = 'royalblue'
+) + labs(title = 'Sigma_pf')
+```
+
+## 拡張版
+
+先程は次元が固定されている例を扱った。つまり、毎試合、馬は5頭で試合も500試合で固定されていたが、同じ馬が毎試合、馬は3頭で300試合で固定されていた異なる次元のデータも利用して、馬10頭に対して、800試合の結果から強さ、勝負ムラを推定したい。このようなケースをここでは扱う。
+
+まずは馬は3頭で300試合分のサンプルデータを作成する。
+
+```{r}
+# N <- 10
+G2 <- 300
+
+res_sm <- data.frame()
+set.seed(9891)
+for (i in 1:G2) {
+  pick <- sample(1:N, 3, replace = FALSE)
+  pf <- rnorm(length(pick), mean = MU[pick], sd = S[pick])
+  or <- order(pf, decreasing = FALSE)
+  df <- data.frame(id = i, horceid = pick[or], pf = pf[or], rank = 3:1)
+  res_sm <- rbind(res_sm, df)
+}
+
+d_sm <- res_sm %>% 
+  pivot_wider(
+    id_cols = id,
+    names_from = rank,
+    values_from = horceid
+  ) %>% 
+  select(-id) %>% 
+  as.matrix()
+
+d_sm[1:5,]
+```
+
+これを先程のデータと結合する。`d`の列の値に対して`d_sm`の足りていない列の値は0埋めして結合する。他にもいろんな方法があるかもしれないが、ここではこの方法で試合データを作成する。
+
+```{r, class.output='scroll-1000'}
+# dの列サイズに対してd_smの足りていない列サイズを0埋めして結合
+d_c <- rbind(d, cbind(d_sm, matrix(0, nrow = 300, ncol = 2)))
+list(
+  head(d_c, 15),
+  tail(d_c, 15)
+)
+```
+
+あとは必要なデータを渡して推定する。
+
+```{r}
+data2 <- list(
+  N = N, 
+  G = c(G1,G2),
+  I = c(5, 3),
+  LW = d_c
+)
+
+map(.x = data2, .f = function(x){head(x, 10)})
+```
+
+モデルは下記の通り。もう少しデータの渡し方、指定の仕方などやりようはありそうだが、ここではこれで良しとする。`r`のインデックスを使って、5頭500試合なのか、3頭300試合なのかを切り替えて推定している。
+
+```
+data {
+  int N;
+  int G[2];
+  int I[2];
+  int LW[sum(G), 5];
+}
+
+parameters {
+  ordered[5] performance5[G[1]];
+  ordered[3] performance3[G[2]];
+  vector[N] mu;
+  real<lower=0> s_mu;
+  vector<lower=0>[N] s_pf;
+}
+
+model {
+  mu ~ normal(0, s_mu);
+  s_mu ~ gamma(10, 10);
+  s_pf ~ gamma(10, 10);
+
+  for (r in 1:2){
+    for (g in 1:G[r]){
+      for (i in 1:I[r]){
+        if (r==1){
+          performance5[g,i] ~ normal(mu[LW[g,i]], s_pf[LW[g,i]]);
+        } else {
+          performance3[g,i] ~ normal(mu[LW[g,i]], s_pf[LW[g,i]]);
+        }
+      }
+    }
+  }
+}
+```
+
+先にコンパイルしてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model <- stan_model('model-order2.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r}
+fit2 <- sampling(object = model, data = data2, seed = 1989, chain = 4, iter = 4000)
+```
+
+推定結果を確認する。
+
+```{r, class.output='scroll-1000'}
+print(fit2, prob = c(0.025, 0.5, 0.975))
+```
+
+問題なく推定できていそうである。
+
+```{r}
+a <- stan_plot(
+  fit2,
+  point_est = 'mean',
+  show_density = TRUE,
+  ci_level = 0.9,
+  outer_level = 1,
+  pars = 'mu',
+  fill_color = 'tomato'
+) + labs(title = 'Mu')
+
+b <- stan_plot(
+  fit2,
+  point_est = 'mean',
+  show_density = TRUE,
+  ci_level = 0.9,
+  outer_level = 1,
+  pars = 's_pf',
+  fill_color = 'royalblue'
+) + labs(title = 'Sigma_pf')
+
+a | b
+```
