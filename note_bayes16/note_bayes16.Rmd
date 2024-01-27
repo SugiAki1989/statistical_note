@@ -1,0 +1,215 @@
+---
+title: 'WAICのおさらい'
+pagetitle: 'WAICのおさらい'
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: 'show'
+highlight: 'kate'
+# theme: 'flatly'
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = 'center',
+  dev = 'ragg_png'
+)
+```
+
+<div class='update-right'>
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。k下記の資料を参考にさせていただき、今回は「WAIC」のおさらいをしておく。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [WAIC は何を近似しているか？](https://futaba-nt.com/archives/604)
+- [階層ベイズとWAIC](https://www.slideshare.net/simizu706/waic)
+- [Eight Schools](https://rpruim.github.io/s341/S21/from-class/notes/53-Rubins-8-Schools.html)
+
+## WAICの定義
+
+WAIC(Widely applicable information criterion)は広く使える情報量規準であり、モデル選択において活用できる。WAICの詳細に関しては、書籍やリンク先などを参照いただくとして、ここでは簡単におさらいしておく。
+
+WAICは汎化損失$G$を近似する量となっている。$q(x)$は真の分布、$\log p^{*}(x)$は対数尤度である。
+
+$$
+\begin{eqnarray}
+G = - \int q(x) \log p^{*}(x) dx
+\end{eqnarray}
+$$
+
+$p^{*}(x)$は事後予測分布である。事後予測分布は、事後分布でモデルを重みづけたもの。
+
+$$
+\begin{eqnarray}
+p^{*}(x) = p(x|X) = \int p(x|\theta) p(\theta|X) d\theta
+\end{eqnarray}
+$$
+汎化損失はと$q(x), p^{*}(x)$の違いを測定し、この汎化損失を近似しているものがWAIC。ただ、真の分布$q(x)$が含まれているので直接は計算できない。
+
+ここで、真の分布$q(x)$から新しく無限にサンプリングができるという状況を考える。つまり、無限のサンプリングができるのであれば、モンテカルロ近似で積分を近似できる。
+
+$$
+\begin{eqnarray}
+G = - \int q(x) \log p^{*}(x) dx \approx - \frac{1}{N} \sum_{i}^{N} \log p^{*}(x_i)
+\end{eqnarray}
+$$
+
+この結果、汎化損失は真の分布から無限にサンプリングしたとき、その対数尤度を平均したもので近似される。対数尤度は、事後予測分布への当てはまり具合を表している。
+
+ここでWAICの定義を見ておく。$T$は経験損失、$V$は汎関数分散を表す。なぜ、これが汎化損失の近似になっているのかは、渡辺先生が証明された論文を参考にしてもらうとして(証明を私は理解できない)、一般的な条件のもとであれば汎化損失が経験損失と汎関数分散で近似的に計算できる。
+
+$$
+\begin{eqnarray}
+WAIC &=& -\frac{1}{n} \sum_{i}^{N} \log p^{*}(X_i) + \frac{1}{n} \sum_{i}^{N} \left\{ E_{\theta} \left[ (\log p(X_i|\theta))^{2} \right] - E_{\theta} \left[ (\log p(X_i|\theta) \right]^{2} \right\} \\
+&=& T + \frac{V}{n} \\
+\end{eqnarray}
+$$
+WAICに関して調べると、下記の通り定義しているものもある。$lppd$は対数各点予測密度(log point-wise predictive density)で、$P_{waic}$は有効パラメタ数(effective number of parameters)である。対数各点予測密度=経験損失、有効パラメタ数=汎関数分散に対応ている。$\theta_1, \theta_2, …, \theta_S$はパラメタの事後分布からのサンプルで
+あり、見慣れない$V^S_{s}(\cdot)$はサンプル$\{\theta_s\}^S_{s}$による分散を表している。
+
+$$
+\begin{eqnarray}
+WAIC &=& -2 lppd + 2 P_{waic} \\
+&=& -2 \cdot \left[ \sum_{i}^{N} \log \left( \frac{1}{S} \sum_{i}^{S} p(x_i | \theta_s )\right) \right] + 2 \cdot \left[ \sum_{i}^{N} V^{S}_{s} (\log p (x_i|\theta_{s})) \right] 
+\end{eqnarray}
+$$
+
+## WAICの計算
+
+まずは必要なライブラリや設定を行っておく。
+
+```{r, class.output='scroll-500'}
+library(tidyverse)
+library(rstan)
+library(loo)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+```
+
+
+データを用意する。
+
+```{r}
+d <- data.frame(
+  school = c('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'),
+  y = c(28, 8, -3, 7, -1, 1, 18, 12),
+  s = c(15, 10, 16, 11, 9, 11, 10, 18)
+  )
+j <- nrow(d)
+data01 <- list(Y = d$y, S = d$s, J = j)
+
+map(.x = data01, .f = function(x){head(x, 50)})
+```
+
+モデルはこちら。WAICを計算するために`normal_lpdf()`関数からのサンプリングを行っておく。
+
+```
+data {
+  int<lower=1> J;
+  real Y[J];
+  real<lower=0> S[J];
+}
+parameters {
+  real theta[J];
+  real mu;
+  real<lower=0> sigma;
+}
+model {
+  for (j in 1:J) {
+    theta[j] ~ normal(mu, sigma);
+  }
+
+  for (j in 1:J) {
+    Y[j] ~ normal(theta[j], S[j]);
+  }
+}
+
+generated quantities{
+  vector[J] log_lik;
+  
+  for (j in 1:J) {
+    // The log of the normal density of y
+    log_lik[j] = normal_lpdf(Y[j]| theta[j], S[j]);
+  }
+} 
+
+```
+
+先にコンパイルしてから、`sampling()`関数でサンプリングする。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model01 <- stan_model('model01.stan')
+fit01 <- sampling(object = model01, data = data01, seed = 1989)
+```
+
+推定結果を確認する。`log_lik[]`が推定されている。これを使ってWAICを計算する。
+
+```{r, class.output='scroll-500'}
+print(fit01, prob = c(0.025, 0.5, 0.975), digits = 2)
+```
+
+
+いずれの定義にしても同じものを表しているので、Rで下記の通り実装できる。
+
+```{r}
+# loo package
+# https://github.com/stan-dev/loo/blob/master/R/waic.R
+get_waic <- function(loglik){
+  lppd <- sum(log(colMeans(exp(loglik)))) # loglikは対数なので指数変換してもとに戻す
+  p_waic <- sum(apply(loglik, 2, var))
+  elpd_waic <- lppd - p_waic
+  waic <- -2*lppd + 2*p_waic
+  
+  return(
+    list(
+      lppd = lppd,
+      elpd_waic = elpd_waic,
+      p_waic = p_waic,
+      waic = waic
+    )
+  )
+}
+
+ll <- rstan::extract(fit01, pars = 'log_lik')$log_lik
+dim(ll)
+```
+
+このような計算イメージ。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_bayes16/waic.png')
+```
+
+WAICを計算すると、61.9となった。WAICが小さいモデルを選択すると良いので、他のモデルがあれば同様にWAICを計算することで比較し、よりよいモデルを選択できる。つまり、「真の分布$q(x)$と予測分布$p^{*}(x)$の誤差が小さい」モデルを選択できる。
+
+```{r}
+map(.x = get_waic(loglik = ll), .f = function(x){round(x ,1)})
+```
+
+looパッケージの`waic()`関数を使用すれば、同様にWAICを計算できる。
+
+```{r}
+waic(ll)
+```
+
+
+looパッケージの`loo()`関数もあり、WAICと似たような値を得られる。この関数はEfficient approximate leave-one-out cross-validation(LOO)を行っている関数であり、要するに、1個抜きクロスバリデーションである。
+
+```{r}
+loo(ll)
+```

@@ -1,0 +1,530 @@
+---
+title: '漫才ショーレースの評価を分析する'
+pagetitle: '漫才ショーレースの評価を分析する'
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: 'show'
+highlight: 'kate'
+# theme: 'flatly'
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = 'center',
+  dev = 'ragg_png'
+)
+```
+
+<div class='update-right'>
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は「たのしいベイズモデリング」の第11章に記載されている徳岡先生のM1グランプリの評価を推定する内容を参考にさせていただき、写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [実験！たのしいベイズモデリング1](https://www.kitaohji.com/book/b580209.html)
+- [最強のM-1漫才師は誰だ](https://kosugitti.net/archives/6261)
+- [「最強のM-1漫才師は誰だ」へのチャレンジ](https://norimune.net/3093)
+
+## 準備
+
+まずは必要なライブラリや設定を行っておく。
+
+```{r, class.output='scroll-500'}
+library(tidyverse)
+library(rstan)
+library(ggplot2)
+library(patchwork)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+dat01 <- read.csv("~/Desktop/m1_score_long.csv", fileEncoding = "CP932", stringsAsFactors = TRUE)
+r_name <- unique(dat01$審査員)
+p_name <- unique(dat01$演者)
+y_name <- unique(dat01$年代)
+dat01
+```
+
+使用するデータは、13回分のM1グランプリの決勝に出場した62組の評価得点データである。コンビのおもしろさをベイズモデリングで推定することが目的。シンプルなモデルから複雑なモデルに拡張していく。下記、番号と漫才コンビの対応を表示しておく。
+
+```{r, class.output='scroll-500'}
+data.frame(
+  no = as.numeric(p_name),
+  name = p_name
+) %>% arrange(no)
+```
+
+## モデル1: コンビ平均モデル
+
+スコア$Y_i$は、コンビ$i$ごとの漫才力$\theta_i$と標準偏差$\sigma_i$をパラメタにもつ正規分布に従うとするモデル。
+
+<div class='tbox'>
+<th3>モデル1</th3>
+<div class='inner'>
+$$
+\begin{eqnarray}
+Y_{i}\sim Normal(\theta_i,\sigma_i)
+\end{eqnarray}
+$$
+</div>
+</div>
+
+データを用意する。
+
+```{r}
+data01 <- list(L = nrow(dat01), # サンプルサイズ
+                   N = max(as.numeric(dat01$演者)), # 演者に数をふり，最大値を持ってきて演者数を入れる
+                   idX = as.numeric(dat01$演者), # 演者に数をふり，グループ変数のように扱う
+                   Y = as.numeric(dat01$val_z) # 各漫才の得点を標準化した得点
+)
+map(.x = data01, .f = function(x){head(x, 50)})
+```
+
+モデルはこちら。
+
+```
+data{
+  int<lower=1> L; //data Length
+  int<lower=1> N; //number of players
+  int idX[L];     //player ID index
+  real Y[L];      // scores
+}
+
+parameters{
+  real theta[N];
+  real<lower=0> sig[N];
+}
+
+model{
+  for(l in 1:L){
+    Y[l] ~ normal(theta[idX[l]],sig[idX[l]]);
+  }
+}
+```
+
+モデルの挙動を深掘りしておく。
+
+```
+model{
+  for(l in 1:L){
+    Y[l] ~ normal(theta[idX[l]],sig[idX[l]]);
+  }
+}
+
+// l = 1
+// Y[l] ~ normal(theta[idX[l]],sig[idX[l]]);
+// Y[1] ~ normal(theta[idX[1]],sig[idX[1]]);
+// Y[1] ~ normal(theta[22],sig[22]);
+```
+
+先にコンパイルしてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model01 <- stan_model('model01.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r}
+fit01 <- sampling(object = model01, data = data01, seed = 1989)
+```
+
+推定結果を確認する。
+
+```{r, class.output='scroll-500'}
+print(fit01, prob = c(0.025, 0.5, 0.975), digits = 2)
+```
+
+
+
+```{r}
+get_posterior <- function(ms, id){
+  EAP <- apply(ms, 2, mean)
+  post_sd <- apply(ms, 2, sd)
+  lower <- apply(ms, 2, quantile, probs = 0.025)
+  upper <- apply(ms, 2, quantile, probs = 0.975)
+  
+  res <- tibble(
+    id = id, 
+    EAP, post_sd, lower, upper
+  ) %>% arrange(desc(EAP))
+  
+  return(res)
+}
+
+list(
+  theta = get_posterior(
+    ms = rstan::extract(fit01)$theta, 
+    id = factor(levels(p_name))
+    ) %>% head(10),
+  sigma = get_posterior(
+    ms = rstan::extract(fit01)$sig, 
+    id = factor(levels(p_name))
+    ) %>% tail(10)
+)
+```
+
+```{r}
+# stan_plot(
+#   fit01,
+#   point_est = 'mean',
+#   show_density = TRUE,
+#   ci_level = 0.9,
+#   outer_level = 1,
+#   pars = 'theta',
+#   fill_color = 'tomato'
+# ) + labs(title = 'Theta[i]')
+```
+
+
+## 審判員のくせ評価モデル
+
+「審判員の評価にくせがある」との仮定を追加したモデル。スコア$Y_{ij}$は、コンビ$i$ごとの漫才力$\theta_i$と審査員$j$ごとの標準偏差$\sigma_j$をパラメタにもつ正規分布に従うとするモデル。
+
+例えば、審査員$j$の値が大きいとすると、標準偏差$\sigma_j$が大きいことを意味するため、スコア$Y_{ij}$は、ばらつきやすくなる。つまり、審査員の好き嫌いが評価に影響すると考えている。反対に標準偏差$\sigma_j$が小さいと、スコア$Y_{ij}$は、ばらつきにくくなり、スコア$Y_{ij}$の変動は少なくなる。
+
+<div class='tbox'>
+<th3>モデル2</th3>
+<div class='inner'>
+$$
+\begin{eqnarray}
+Y_{ij} &\sim& Normal(\theta_i,\sigma_j) \\
+\theta_i &\sim& Normal(0,\sigma_\theta) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+
+データを用意する。
+
+```{r}
+data0203 <- list(L = nrow(dat01),
+                   N = max(as.numeric(dat01$演者)),
+                   M = max(as.numeric(dat01$審査員)),
+                   idX = as.numeric(dat01$演者),
+                   idY = as.numeric(dat01$審査員),
+                   Y = as.numeric(dat01$val_z)
+)
+map(.x = data0203, .f = function(x){head(x, 50)})
+```
+
+モデルはこちら。
+
+```
+data{
+  int<lower=1> L; //data Length
+  int<lower=1> N; //number of players
+  int<lower=1> M; //number of rators
+  int idX[L];     //player ID index
+  int idY[L];     //rator ID index
+  real Y[L];      // scores
+}
+
+parameters{
+  real theta[N];
+  real<lower=0> sig_theta[N];
+  real<lower=0> sig[M];
+}
+
+model{
+  for(l in 1:L){
+    Y[l] ~ normal(theta[idX[l]],sig[idY[l]]);
+  }
+  //prior
+  theta ~ normal(0, sig_theta);
+  sig_theta ~ cauchy(0,5);
+  sig ~ cauchy(0,5);
+}
+
+```
+
+モデルの挙動を深掘りしておく。
+
+```
+model{
+  for(l in 1:L){
+    Y[l] ~ normal(theta[idX[l]],sig[idY[l]]);
+  }
+}
+
+// l = 1
+// Y[1] ~ normal(theta[idX[1]],sig[idY[1]]);
+// Y[1] ~ normal(theta[22],sig[3]);
+```
+
+先にコンパイルしてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model02 <- stan_model('model02.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r}
+fit02 <- sampling(object = model02, data = data0203, seed = 1989)
+```
+
+推定結果を確認する。
+
+```{r, class.output='scroll-500'}
+print(fit02, prob = c(0.025, 0.5, 0.975), digits = 2)
+```
+
+
+## 審判員の基準効果モデル
+
+「審判員ごとに評価基準の違いがある」という仮定を追加したモデル。スコア$Y_{ij}$は、コンビ$i$ごとの漫才力$\theta_i$と審査員$j$ごとの評価の基準$\gamma_j$を平均、コンビ$i$ごとの標準偏差$\sigma_i$をパラメタにもつ正規分布に従うとするモデル。例えば、審査員$j$ごとの評価の基準$\gamma_j$の値が大きいとすると、スコア$Y_{ij}$は大きくなりやすい。
+
+<div class='tbox'>
+<th3>モデル3</th3>
+<div class='inner'>
+$$
+\begin{eqnarray}
+Y_{ij} &\sim& Normal(\theta_i + \gamma_j,\sigma_i) \\
+\theta_i &\sim& Normal(0,\sigma_\theta) \\
+\gamma_j &\sim& Normal(0,\sigma_\gamma) \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+データを用意する。
+
+```{r}
+map(.x = data0203, .f = function(x){head(x, 50)})
+```
+
+モデルはこちら。
+
+```
+data{
+  int<lower=1> L; //data Length
+  int<lower=1> N; //number of players
+  int<lower=1> M; //number of rators
+  int idX[L];     //player ID index
+  int idY[L];     //rator ID index
+  real Y[L];      // scores
+}
+ 
+parameters{
+  vector[N] theta;
+  vector[M] gamma;
+  real<lower=0> sig_theta;
+  real<lower=0> sig_gamma;
+  real<lower=0> sig[N];
+}
+ 
+model{
+  //likellihood
+  for(l in 1:L){
+    Y[l] ~ normal(theta[idX[l]] + gamma[idY[l]], sig[idX[l]]);
+  }
+  //prior
+  theta ~ normal(0, sig_theta);
+  gamma ~ normal(0, sig_gamma);
+  sig_theta ~ cauchy(0,5);
+  sig_gamma ~ cauchy(0,5);
+  sig ~ cauchy(0,5);
+}
+```
+
+モデルの挙動を深掘りしておく。
+
+```
+model{
+  for(l in 1:L){
+    Y[l] ~ normal(theta[idX[l]] + gamma[idY[l]], sig[idX[l]]);
+  }
+}
+
+// l = 1
+// Y[1] ~ normal(theta[idX[1]] + gamma[idY[1]], sig[idX[1]]);
+// Y[1] ~ normal(theta[22] + gamma[3], sig[22]);
+```
+
+先にコンパイルしてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model03 <- stan_model('model03.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r}
+fit03 <- sampling(object = model03, data = data0203, seed = 1989)
+```
+
+推定結果を確認する。
+
+```{r, class.output='scroll-500'}
+print(fit03, prob = c(0.025, 0.5, 0.975), digits = 2)
+```
+
+## 開催回数効果モデル
+
+「開催を重ねるごとに評価基準が変化する」という仮定を追加したモデル。スコア$Y_{ijo}$は、コンビ$i$ごとの漫才力$\theta_i$と審査員$j$ごとの評価基準$\gamma_j$、開催回数$o$ごとの特徴$\zeta_o$を総和した値を平均、標準偏差$\sigma_e$をパラメタにもつ正規分布に従うとするモデル。
+
+例えば、開催回数$o$ごとの特徴$\zeta_o$の値が大きいとすると、その年代のスコアは全体的に大きくなる傾向があると仮定している。つまり、開催時期によって評価の基準が異なっていいるだろうと考えているモデル。
+
+<div class='tbox'>
+<th3>モデル4</th3>
+<div class='inner'>
+$$
+\begin{eqnarray}
+Y_{ijo} &\sim& Normal(\theta_i + \gamma_j + \zeta_o, \  \sigma_e) \\
+\theta_i &\sim& Normal(0, \sigma_{\theta}) \\
+\gamma_j &\sim& Normal(0, \sigma_{\gamma}) \\
+\zeta_o &\sim& Normal(0, \sigma_{\zeta})   \\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+
+データを用意する。
+
+```{r}
+data04 <- list(L = nrow(dat01),
+                   N = max(as.numeric(dat01$演者)),
+                   M = max(as.numeric(dat01$審査員)),
+                   O = max(as.numeric(dat01$年代)),
+                   idX = as.numeric(dat01$演者),
+                   idY = as.numeric(dat01$審査員),
+                   idZ = as.numeric(dat01$年代),
+                   Y = as.numeric(dat01$val_z)
+)
+map(.x = data04, .f = function(x){head(x, 50)})
+```
+
+モデルはこちら。
+
+```
+data{
+  int<lower=1> L; //data Length
+  int<lower=1> N; //number of players
+  int<lower=1> M; //number of rators
+  int<lower=1> O; //number of year
+  int idX[L];     //player ID index
+  int idY[L];     //rator ID index
+  int idZ[L];     //year ID index
+  real Y[L];      // scores
+}
+ 
+parameters{
+  vector[N] theta; //manzai
+  vector[M] gamma; //rator
+  vector[O] zeta; //year
+  real<lower=0> sig_theta;
+  real<lower=0> sig_gamma;
+  real<lower=0> sig_zeta;
+  real<lower=0> sig_e;
+}
+ 
+model{
+  //likellihood
+  for(l in 1:L){
+    Y[l] ~ normal(theta[idX[l]] + gamma[idY[l]] + zeta[idZ[l]], sig_e);
+  }
+  //prior
+  theta ~ normal(0, sig_theta);
+  gamma ~ normal(0, sig_gamma);
+  zeta ~ normal(0, sig_zeta);
+  sig_theta ~ cauchy(0,5);
+  sig_gamma ~ cauchy(0,5);
+  sig_zeta ~ cauchy(0,5);
+  sig_e ~ cauchy(0,5);
+}
+
+generated quantities{
+  real rho_theta;
+  rho_theta = sig_theta^2 / (sig_theta^2 + sig_gamma^2 + sig_e^2);
+}
+
+```
+
+モデルの挙動を深掘りしておく。
+
+```
+model{
+  for(l in 1:L){
+    Y[l] ~ normal(theta[idX[l]] + gamma[idY[l]] + zeta[idZ[l]], sig_e);
+  }
+}
+
+// l = 1
+// Y[1] ~ normal(theta[idX[1]] + gamma[idY[1]] + zeta[idZ[1]], sig_e);
+// Y[1] ~ normal(theta[22 + gamma[3] + zeta[13], sig_e);
+```
+
+先にコンパイルしてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model04 <- stan_model('model04.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r}
+fit04 <- sampling(object = model04, data = data04, seed = 1989)
+```
+
+推定結果を確認する。
+
+```{r, class.output='scroll-500'}
+print(fit04, prob = c(0.025, 0.5, 0.975), digits = 2)
+```
+
+開催回数の効果$\zeta_o$を可視化する。開催初期はマイナスの効果があり、開催が続くに連れて、スコアにプラスの効果がある。
+
+```{r}
+ms <- rstan::extract(fit04)
+d_est <- data.frame(t(apply(ms$zeta, 2, quantile, probs = c(0.025, 0.5, 0.975))))
+colnames(d_est) <- c("lwr", "mid", "upr")
+d_est <- cbind(data.frame(time = 1:13, d_est))
+
+ggplot(data = d_est, aes(x = time)) + 
+  theme_bw(base_size = 15) +
+  geom_hline(yintercept = 0, linetype = 'dashed') + 
+  geom_line(aes(y = mid)) +
+  geom_ribbon(aes(x = time, y = mid, ymin = lwr, ymax = upr), alpha = 0.3) + 
+  labs(x = 'time', y = 'Zeta', title = 'Effects(Zeta[o]) by time of event') +
+  scale_y_continuous(breaks = seq(-2.5, 2.5, 0.5), limits = c(-2.5, 2.5)) + 
+  scale_x_continuous(breaks = seq(1, 13, 1)) + 
+  theme_bw()
+```
+
+このモデルが真のモデルであると仮定すると、漫才のおもしろさによって決定されるのは、20%前後である
+
+```{r}
+# 信頼性rho
+round(summary(fit04)$summary["rho_theta",], digits = 2)
+# stan_dens(
+#   fit04,
+#   point_est = 'mean',
+#   show_density = TRUE,
+#   ci_level = 0.9,
+#   outer_level = 1,
+#   pars = 'rho_theta',
+#   fill_color = 'tomato'
+# ) 
+```
+
+
+
+
+

@@ -1,0 +1,254 @@
+---
+title: '麻雀の強さを分析する'
+pagetitle: '麻雀の強さを分析する'
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: 'show'
+highlight: 'kate'
+# theme: 'flatly'
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = 'center',
+  dev = 'ragg_png'
+)
+```
+
+<div class='update-right'>
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は「たのしいベイズモデリング」の第18章に記載されている「本当に麻雀が強いのは誰か？」の内容を参考にさせていただき、写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [実験！たのしいベイズモデリング1](https://www.kitaohji.com/book/b580209.html)
+
+# 準備
+
+まずは必要なライブラリや設定を行う。使用するデータは4人の麻雀の143ゲーム分の結果データを利用する。
+
+```{r}
+library(tidyverse)
+library(rstan)
+library(patchwork)
+library(MCMCpack)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+pointData <- read_csv('~/Desktop/pointData.csv')
+head(pointData, 10)
+```
+
+各プレイヤーの点数は下記の通りである。プレイヤーCが少し弱くみえる。
+
+```{r}
+pointData %>% 
+  pivot_longer(cols = everything()) %>% 
+  ggplot(., aes(name, value, group = 1)) +
+  theme_bw(base_size = 18) +
+  geom_jitter(width = 0.1) +
+  stat_summary(fun.y = mean, geom = 'point', col = 'tomato') +
+  stat_summary(fun.y = mean, geom = 'line', col = 'tomato') 
+```
+
+## 分析
+
+タイトルの通り「本当に麻雀が強いのは誰か？」を推定すること。そのためにディリクレ分布を使ったモデルを考える。ディリクレ分布は下記の通り。$V$は次元数、$\boldsymbol{\beta} = (\beta_1, \beta_2, \cdots, \beta_V)$はパラメタ、確率変数の実現値$\boldsymbol{\phi} = (\phi_1, \phi_2, \cdots, \phi_V)$である。$\boldsymbol{\phi}$の総和は1となる。$C$は正規化係数で、$\Gamma(x)$はガンマ関数。
+
+$$
+\begin{aligned}
+C &= \frac{\Gamma(\sum_{v=1}^V \beta_v)}{\prod_{v=1}^V \Gamma(\beta_v)} \\
+\mathrm{Dirichlet}(\boldsymbol{\phi} | \boldsymbol{\beta}) &= C \prod_{v=1}^V \phi_v^{\beta_v-1}
+\end{aligned}
+$$
+
+Wikipediaによると、
+
+> ベータ分布を多変量に拡張して一般化した形をしており、そのため多変量ベータ分布とも呼ばれる。
+
+とある。パラメタが`c(2.5, 15, 7.5)`の3次元のディリクレ分布を可視化しておく。パラメタの総和は1になるので、$X3=X1+X2$である。また、パラメタの値が相対的に大きくなれば、その値が出やすくなる。
+
+```{r}
+data.frame(rdirichlet(500, c(2.5, 15, 7.5))) %>% 
+  ggplot(., aes(x = X1, y = X2, col = X3)) +
+  geom_point(alpha = 0.2) +
+  labs(title = 'Dirichlet Distribution') +
+  scale_x_continuous(limits = c(0, 1)) + 
+  scale_y_continuous(limits = c(0, 1)) + 
+  coord_fixed() +
+  theme_bw()
+```
+
+なぜディリクレ分布をここで利用するのかというと、麻雀の点数ルールが関わっている。25000点の30000点返しというルールであれば、30000点を基準として考える。例えば、下記の結果となった場合、
+
+- player1:  5000 - 30000 = -25000 => -25000/100 = -25
+- player2: 18000 - 30000 = -12000 => -12000/100 = -12
+- player3: 32000 - 30000 =   2000 =>   2000/100 =  +2
+- player4: (-25）+（-12）+ (+2）= -35 => +35
+
+であり、これらの総和は0になる。
+
+```{r}
+- 25 - 12 + 2 + 35
+```
+
+麻雀のポイント合計は常に0であるため、ポイントにソフトマックス関数を適用して、各ゲームごとの総和が1になるように調整する。そうすることでディリクレ分布のパラメタの総和が1になるという条件の元、推定が可能になる。
+
+$$
+\begin{eqnarray}
+point_{it} = \frac{exp[\alpha_{it}]}{\sum^{4}_{i} exp[\alpha_{it}]}
+\end{eqnarray}
+$$
+
+変換したデータはこちら。
+
+```{r}
+# 前処理
+playerNum <- ncol(pointData)  # num of player
+hantyanNum <- nrow(pointData) # num of game
+
+# 値が大きいので、小さくしてから変換
+point_mod <- as.matrix(pointData/100)
+point <- matrix(0, hantyanNum, playerNum)
+for(h in 1:hantyanNum){
+  point[h,] <- exp(point_mod[h,])/sum(exp(point_mod[h,]))
+}
+
+head(point)
+```
+
+総和が1になっていることがわかる。
+
+```{r}
+apply(point, 1, sum)
+```
+
+モデルはこちら。パラメタ$\theta$をもつディリクレ分布に従い、ポイント$\overrightarrow{ point_{t}}$が生成される。
+
+<div class='tbox'>
+<th3>モデル</th3>
+<div class='inner'>
+$$
+\begin{eqnarray}
+\overrightarrow{ point_{t}} &\sim& Dirichlet( \overrightarrow{ \theta } ) \\
+\overrightarrow{ point_{t}} &=& (point1_{t},point2_{t},point3_{t},point4_{t}) 
+\end{eqnarray}
+$$
+</div>
+</div>
+
+モデルはこちら。総和が1になるため`simplex`型を利用している。
+
+```
+data {
+  int N;
+  int G;
+  simplex [N] point[G];
+}
+
+parameters {
+  vector <lower=0> [N] theta;
+  }
+
+model {
+  for(t in 1:G){
+    point[t,] ~ dirichlet(theta);
+    }
+}
+
+```
+
+データを用意する。
+
+```{r}
+data <- list(
+  N = playerNum,
+  G = hantyanNum,
+  point = point
+  )
+
+map(.x = data, .f = function(x){head(x, 50)})
+```
+
+先にコンパイルしてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model <- stan_model('model01.stan')
+```
+
+`sampling()`関数でサンプリングする。
+
+```{r, class.output='scroll-500'}
+fit <- sampling(object = model, data = data, seed = 1989)
+```
+
+推定結果を確認する。プレイヤーC以外の雀力は拮抗している感じで、プレイヤーCだけ想定的に弱い。
+
+```{r}
+print(fit, prob = c(0.025, 0.5, 0.975), digits = 2)
+```
+
+事後分布を可視化しておく。
+
+```{r}
+stan_plot(
+  fit,
+  point_est = 'mean',
+  show_density = TRUE,
+  ci_level = 0.9,
+  outer_level = 1,
+  pars = 'theta',
+  fill_color = 'tomato'
+)
+```
+
+事後分布の値をもとに、各プレイヤーごとの強さに差がある確率を計算する。事後分布の値を引き算し、0より大きければ、そのプレイヤーの方が強いことになるため、MCMCサンプルの回数分、計算する。
+
+```{r}
+theta <- rstan::extract(fit)$theta
+
+computeProb <- function(parameter, i, j){
+  temp <- parameter[, i] - parameter[, j] > 0
+  return(sum(temp) / length(temp))
+}
+
+mat <- matrix(0, nrow = playerNum, ncol = playerNum)
+rownames(mat) <- colnames(mat) <- c('playerA', 'playerB', 'playerC', 'playerD')
+
+for (i in 1:playerNum) {
+  for (j in 1:playerNum) {
+    if (i != j) {
+      mat[i, j] <- computeProb(theta, i, j)
+    } else { 
+      mat[i, j] <- 1
+      }
+  }
+}
+
+round(mat,  2)
+```
+
+事後分布の可視化からプレイヤーBが強かったので、プレイヤーBを参考にすると、プレイヤーBは、プレイヤーAよりも88％強く、プレイヤーCよりも100％強く、プレイヤーDよりも92％強いことがわかる。まとめると、プレイヤーBは他のプレイヤーよりも93％強い。
+
+```{r}
+(
+  sum(theta[,2] - theta[,1] > 0) + 
+  sum(theta[,2] - theta[,3] > 0) + 
+  sum(theta[,2] - theta[,4] > 0)
+) / (nrow(theta)*3)
+```
