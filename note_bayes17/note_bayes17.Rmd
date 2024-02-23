@@ -1,0 +1,621 @@
+---
+title: "WAICのおさらい2"
+pagetitle: "WAICのおさらい2"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は「社会科学のためのベイズ統計モデリング」の第8章を写経していく。基本的には気になった部分を写経しながら、ところどころ自分用の補足をメモすることで、自分用の補足資料になることを目指す。私の解釈がおかしく、メモが誤っている場合があるので注意。
+
+- [社会科学のためのベイズ統計モデリング](https://www.asakura.co.jp/detail.php?book_code=12842)
+
+今回は情報量から初めて、WAICの導出までを行う。
+
+## 6.2 情報量
+
+確率の対数をとって符号変換した関数である。
+
+<div class='tbox'>
+<th3>情報量</th3>
+<div class='inner'>
+離散確率変数$X$の実現値$x$が生起した時の情報量を
+$$
+\begin{eqnarray}
+I(X=x) = -log P(X=x)
+\end{eqnarray}
+$$
+と定義する。
+</div>
+</div>
+
+確率が低いと情報量が多く、確率が高いと情報量が低い。
+
+```{r}
+q <- seq(0, 1, 0.01)
+plot(
+  q,
+  -log(q),
+  type = 'l',
+  xlab = 'q',
+  ylab = 'I(q)',
+  main = 'Self Information'
+)
+```
+
+## 6.3 エントロピー
+
+ベルヌイ分布に従う確率変数について考える。
+
+$$
+\begin{eqnarray}
+Y \sim Bernoulli(q)
+\end{eqnarray}
+$$
+1が出る確率$I(Y=1)=0.01$が低い場合、$I(Y=1)=-log0.01=4.61$となり、1が出た時の情報量が大きいが、確率が低いため、このような情報を得る期待は低い。一方で、0が出る確率$I(Y=0)=0.99$が高い場合、$I(Y=0)=-log0.99=0.01$となり、0が出た時の情報量が低いが、確率が高いため、このような情報を得る期待は高い。
+
+そのため、情報量の期待値を定義し、確率試行において期待される情報量を測る。これはエントロピー、平均情報量と呼ばれる。
+
+<div class='tbox'>
+<th3>エントロピー</th3>
+<div class='inner'>
+離散確率変数$X$のエントロピー$H(X)$を情報量の期待値として、
+$$
+\begin{eqnarray}
+H(X) &=& \mathbb{E}[I(X)] \\
+&=& - \sum_{i=1}^{n} P(X=x_i)log P(X=x_i)
+\end{eqnarray}
+$$
+と定義する。$P(X=x_i)=0$のとき0とする。下記で表現される場合もある。
+$$
+\begin{eqnarray}
+H(f) &=& - \sum_{i=1}^{n} f(x_i)log f(x_i)
+\end{eqnarray}
+$$
+
+連続確率変数$X$のエントロピー$H(X)$は、
+$$
+\begin{eqnarray}
+H(X) &=& \mathbb{E}[H(X)] \\
+&=& - \int_{A} f(x)logf(x)dx
+\end{eqnarray}
+$$
+と定義する。
+</div>
+</div>
+
+ベルヌイ確率変数のエントロピーは$q=0.5$のとき、最大となる。$q=0.5$のときのエントロピーが高いため、一番不確実性が高く、0か1のどちらがでやすいのか判断できない。つまり、情報量が大きいと予測できない。
+
+```{r}
+plot(
+  q,
+  -q*log(q)-(1-q)*log(1-q),
+  type = 'l',
+  xlab = 'q',
+  ylab = 'H(q)',
+  main = 'Entropy'
+)
+```
+
+正規分布に従う確率変数であれば、エントロピーは標準偏差$\sigma$の増加関数となる。つまり、標準偏差$\sigma$が大きくなると、エントロピーが大きくなり、平均$\mu$周りの値が出にくくなる。結果、不確実性が高まり、予測ができにくくなる。
+
+## 6.5 KL情報量
+
+KL情報量(カルバック・ライブラー情報量)を考える。KL情報量は2つの確率分布を比較し、近さを考えるために使われる。
+
+<div class='tbox'>
+<th3>KL情報量</th3>
+<div class='inner'>
+連続確率密度関数$q(x),p(x)>0$についてのKL情報量を
+$$
+\begin{eqnarray}
+D(q||p) &=& \int_{A} q(x) log \frac{q(x)}{p(x)} dx
+\end{eqnarray}
+$$
+と定義する。
+</div>
+</div>
+
+KL情報量は連続確率密度関数$q(x),p(x)$の比の対数を情報量とみて、その期待値を$q(x)$で取ったもので、相対エントロピーとも呼ばれる。下記の性質をもつ。
+
+- 任意の$q(x),p(x)$について$D(q||p) \ge 0$
+- $q(x)=p(x)$のとき$D(q||p) = 0$
+
+これらにより、2つの分布が等しいとき、KL情報量は0となる。下記は正規分布と標準正規分布のKL情報量を可視化したもの。正規分布の$\sigma=1$に固定して$\mu$を変数としたとき、$\mu=0$でKL情報量が0となる。
+
+```{r}
+mu <- seq(-2,2,0.01)
+sigma <- 1
+plot(
+  mu,
+  -1/2 + 1/(2*sigma^2)*(1+mu^2) + log(sigma),
+  type = 'l',
+  xlab = 'mu',
+  ylab = 'D(q||p)',
+  main = 'KL Divergence between N(0,1) and N(mu,sigma)'
+)
+```
+
+正規分布の$\mu=0$に固定して$\sigma$を変数としたとき、$\sigma=1$でKL情報量が0となる。
+
+```{r}
+mu <- 0
+sigma <- seq(0,10,0.01)
+plot(
+  sigma,
+  -1/2 + 1/(2*sigma^2)*(1+mu^2) + log(sigma),
+  type = 'l',
+  xlab = 'sigma',
+  ylab = 'D(q||p)',
+  main = 'KL Divergence between N(0,1) and N(mu,sigma)',
+  ylim = c(0,5)
+)
+```
+
+## 6.6 交差エントロピー
+
+KL情報量と関連する交差エントロピーを考える。
+
+<div class='tbox'>
+<th3>交差エントロピー</th3>
+<div class='inner'>
+連続確率密度関数$q(x),p(x)>0$についての交差エントロピーを
+$$
+\begin{eqnarray}
+H_q(p) &=& -\int_{A} q(x) log p(x) dx
+\end{eqnarray}
+$$
+と定義する。
+</div>
+</div>
+
+交差エントロピーは$q(x)$が真の分布であるとき、情報量として$log p(x)$を仮定することで得られる平均情報量である。また、KL情報量$D(q||p)$は、変形すると交差エントロピーと$H_q(p)$と真の分布のエントロピー$H(q)$に分解できる。
+
+$$
+\begin{eqnarray}
+D(q||p) &=& -\int_{A} q(x) \frac{q(x)}{p(x)} dx \\
+&=& -\int_{A} q(x) logp(x) dx + \int_{A} q(x) logq(x) dx \\
+&=& H_q(p) - H(q)
+\end{eqnarray}
+$$
+
+つまり、交差エントロピー$H(q)$は、未知の真の分布$q(x)$のエントロピーとKL情報量に分解できる。
+
+$$
+\begin{eqnarray}
+H_q(p) &=& H(q) + D(q||p)  
+\end{eqnarray}
+$$
+
+真の分布$q(x)$のエントロピーは未知ではあるものの定数である。つまり、真の分布からモデル$p(x)$の近さ$D(q||p)$は、未知の真の分布$q(x)$のエントロピーを除けば、交差エントロピー$H_q(p)$の大きさと一致する。これにより、交差エントロピーをデータから推定できれば、モデルの真の分布への相対的な近さを評価できる。
+
+## 6.7 汎化損失
+
+なんらかの確率モデルとデータから得た予測分布$p^{*}(x)$を考える。真の分布$q(x)$と予測分布$p^{*}(x)$の交差エントロピー$H_q(p^{*})$を汎化損失$G_n$と呼ぶ。
+
+<div class='tbox'>
+<th3>汎化損失</th3>
+<div class='inner'>
+$$
+\begin{eqnarray}
+G_n &=& - \mathbb{E}_{q(X)}[\log p^{*}(X)] \\ 
+&=& - \int \log p^{*}(x) q(x) dx \\
+&=& \underbrace{H(q)}_{真の分布のエントロピー} + \underbrace{D(q||p^{*})}_{真の分布と予測分布のKL情報量}
+\end{eqnarray}
+$$
+と定義する。
+</div>
+</div>
+
+汎化損失$G_n$は$q(x)$のエントロピーにおいて、$-logp^{*}(x)$を仮定した情報量といえる。また、予測分布$p^{*}(x)$の導出に用いた$x^{n}=(x_1,...,x_n)$を入れて、相加平均を計算したものを、経験損失$T_n$と呼ぶ。
+
+$$
+\begin{eqnarray}
+T_n &=& - \frac{1}{n} \sum_{i}^{n} logp^{*}(x_i)
+\end{eqnarray}
+$$
+
+経験損失$T_n$を使って、汎化損失$G_n$を推定する方法として、最尤推定予測分布についてのAIC、WAICを導入する。
+
+## 6.8 AIC
+
+最尤法を用い、下記を仮定する。
+
+- 真の分布$q(x)=p(x|\theta)$。つまり、想定される確率モデルの中に真の分布が含まれる。実現可能性が存在する。
+- サンプル$X^n \sim q(x^n) = \prod q(x)$は、独立かつ同一の真の分布に従う。
+- 確率モデル$p(x^n|\theta)$
+- $q(x)$は確率について正則と仮定する。最尤推定量が一致性と漸近正規性を持つための条件。
+
+サンプル$X^n$の実現値$x^n$が与えられたとき、最尤推定量$\hat{\theta}$は、確率モデルの$\theta$について最大化問題として、
+
+$$
+\begin{eqnarray}
+\hat{\theta} = arg  \ max p(x^n| \theta)
+\end{eqnarray}
+$$
+
+と解くことができる。最尤推定値を用いた予測分布は$p^{*}(x) = p(x| \hat{\theta})$である。最尤推定のとき、汎化損失は
+
+$$
+\begin{eqnarray}
+G_n &=& - \mathbb{E}_{q(X)}[\log p^{*}(X)] \\ 
+&=& - \mathbb{E}_{q(X)}[\log p(X| \hat{\theta})] \\ 
+&=& - \int \log p(x| \hat{\theta})q(x)dx
+\end{eqnarray}
+$$
+
+となる。これは平均対数尤度の符号を反転させたものに一致する。一般的には平均対数尤度が大きくなるほど、汎化損失は小さくなる。つまり、平均対数尤度は予測のよさを示す。一方、最尤推定において経験損失は、
+
+$$
+\begin{eqnarray}
+T_n &=& - \frac{1}{n} \log p(x^n|\theta) \\
+&=& - \frac{1}{n} \underbrace{\sum \log p(x_i|\hat{\theta})}_{最大対数尤度}
+\end{eqnarray}
+$$
+
+経験損失はデータから計算できるので、汎化損失を推定できる。ただし、予測分布の導出に使用したデータを再び使用する経験損失は何らかのバイアス$b(x^n)$が生じている可能性がある。
+
+$$
+\begin{eqnarray}
+b(x^n) &=& G_n - T_n \\
+&=& - \mathbb{E}_{q(X)}[\log p(X|\hat{\theta})] + \frac{1}{n} \log p(x^n|\hat{\theta}) \\
+\end{eqnarray}
+$$
+
+この偏りはデータの出方やそのデータから計算される最尤推定量$\hat{\Theta}$などの確率変数に影響される。そのため、偏りの期待値を考える。$Z$は予測する新たな確率変数。
+
+$$
+\begin{eqnarray}
+\mathbb{E}_{q(X^n)}[b(x^n)] &=& \mathbb{E}_{q(X^n)}[G_n - T_n] \\
+&=& \mathbb{E}_{q(X^n)}[- \mathbb{E}_{q(Z)}[\log p(Z|\hat{\theta})] + \frac{1}{n} \log p(x^n|\hat{\theta})]\\
+\end{eqnarray}
+$$
+
+最大対数尤度と平均対数尤度を$n$倍したものの間の偏りの期待値は、想定した確率モデルに真の分布が含まれるという過程の下で、漸近的に自由パラメタ数$d$に一致する。そして、汎化損失と経験損失のバイアスの期待値$\mathbb{E}_{q(X^n)}[b(x^n)]$は漸近的に$\frac{d}{n}$に一致する。以上より、AICは、
+
+<div class='tbox'>
+<th3>AIC</th3>
+<div class='inner'>
+$$
+\begin{eqnarray}
+AIC &=& T_n + \frac{d}{n}\\
+&=& -\frac{1}{n} \sum \log p(x_i|\hat{\theta}) + \frac{d}{n}\\
+\end{eqnarray}
+$$
+</div>
+</div>
+
+と定義される。AICは漸近的に平均的に汎化損失に一致する、つまり、AICは汎化損失の良い近似となる。
+
+## 6.9 WAIC
+
+ベイズモデルにおける汎化損失について考える。下記を仮定する。
+
+- 真の確率分布$q(x)$は想定される確率モデルの中に真の分布が含まれてなくてもよい。
+- サンプル$X^n \sim q(x^n) = \prod q(x)$は、独立同一の分布を仮定する。
+- 確率モデル$p(x^n|\theta)$
+- パラメタの事前分布$\varphi(\theta)$
+- $q(x)$は確率について正則でなくてもよい
+
+ベイズ推定をもとにした予測分布は、確率モデルを事後分布によって期待値を取ったものとして、
+
+$$
+\begin{eqnarray}
+p^{*}(x) &=& \mathbb{E}_{p(\theta|x^n)}[p(x|\theta)]  \\
+ &=& \int p(x|\theta) p(\theta|x^n) d\theta
+\end{eqnarray}
+$$
+
+定義される。ベイズ予測分布についての汎化損失$G_n$は、
+
+$$
+\begin{eqnarray}
+G_n &=& -\mathbb{E}_q(X)[ \log p^*(X)] \\
+&=& -\mathbb{E}_q(X)[ \log \mathbb{E}_{p(\theta|x^n)}[p(X|\theta)]] \\
+&=& -\int q(x) \log \left( \int p(x|\theta) p(\theta|x^n) d\theta\right)dx
+\end{eqnarray}
+$$
+
+で、ベイズ予測分布の経験損失$T_n$は、
+
+$$
+\begin{eqnarray}
+T_n &=& -\frac{1}{n} \sum \log p^*(x_i) \\
+&=& -\frac{1}{n} \sum \log \mathbb{E}_{p(\theta|x^n)}[p(x_i|\theta)]  \\
+\end{eqnarray}
+$$
+
+AIC同様、経験損失は何らかのバイアス$b(X^n)$が生じている可能性がある。このバイアスの期待値は、
+
+$$
+\begin{eqnarray}
+\mathbb{E}_{q(X^n)}[b(X^n)] &=& \mathbb{E}_{q(X^n)}[G_n - T_n] \\
+\end{eqnarray}
+$$
+
+であり、このバイアスの期待値は汎関数分散$V_n$を$n$で割った$\frac{V_n}{n}$と漸近的に一致する。
+
+$$
+\begin{eqnarray}
+V_n &=& 
+\sum_{i}^{N} \left\{ \mathbb{E}_{p(\theta|x^n)} \left[ (\log p(x_i|\theta))^{2} \right] - \mathbb{E}_{p(\theta|x^n)} \left[ (\log p(x_i|\theta) \right]^{2} \right\} \\
+\end{eqnarray}
+$$
+
+以上よりWAICは、経験損失と汎関数分散を$n$で割った値の和として定義される。
+
+$$
+\begin{eqnarray}
+WAIC &=& T_n + \frac{V_n}{n} \\
+&=& -\frac{1}{n} \sum \log \mathbb{E}_{p(\theta|x^n)}[p(x_i|\theta)] +
+\sum \left\{ \mathbb{E}_{p(\theta|x^n)} \left[ (\log p(x_i|\theta))^{2} \right] - \mathbb{E}_{p(\theta|x^n)} \left[ (\log p(x_i|\theta) \right]^{2} \right\} \\
+\end{eqnarray}
+$$
+
+## WAICを計算する
+
+ここでは、カウントデータに対して、ガンマ-ポアソン分布を用いてモデル化を行い、WAICを計算する。
+
+$$
+\begin{eqnarray}
+X &\sim& Poisson(\lambda) \\
+\lambda &\sim& Gamma(a,b) \\
+\end{eqnarray}
+$$
+
+これらの分布は共役関係から下記の通り事後分布が計算できる。これは$a_n = \sum x_i + a, b_n = n + b$のガンマ分布と一致する。
+
+$$
+\begin{eqnarray}
+p(\lambda|x^n) = \frac{b_{n}^{a_n}}{\Gamma(a_n)} \lambda^{a_{n} -1} e^{-b_{n} \lambda}
+\end{eqnarray}
+$$
+
+
+ここでは真の分布は$\lambda^*=3$のポアソン分布とする。確率モデルにポアソン分布、事前分布に$a=3,b=1$のガンマ分布を考える。事後分布を使った事後予測分布は、
+
+$$
+\begin{eqnarray}
+p^*(x) &=& \int_0^{\infty} P(x|\lambda) p(\lambda|x^n) d\lambda \\
+&=& \int_0^{\infty} \frac{1}{x!}\lambda^x e^{-\lambda} 
+\frac{b_{n}^{a_n}}{\Gamma(a_n)} \lambda^{a_{n} -1} e^{-b_{n} \lambda} d\lambda \\
+&=& \frac{\Gamma(x + a_n)}{\Gamma(a_n)x!}\frac{b_{n}^{a_n}}{(1+b_n)^{x+a_n}}
+\end{eqnarray}
+$$
+
+である。さらにここから、負の二項分布の確率分布を導出できる。つまり、事後予測分布は解析的に負の二項分布として導ける。また、予測分布の情報量は、下記となる。
+
+$$
+\begin{eqnarray}
+-\log p^*(x) &=& -log \left( \frac{\Gamma(x + a_n)}{\Gamma(a_n)x!}\frac{b_{n}^{a_n}}{(1+b_n)^{x+a_n}}\right) \\
+&=& -\log \Gamma(x+a_n) + \log\Gamma(a_n) + logx! - a_n \log b_n + (x+a_n) \log(1+b_n)
+\end{eqnarray}
+$$
+
+汎化損失$G_n$は真の分布として、$\lambda^*=3$のポアソン分布を仮定しているため、
+
+$$
+\begin{eqnarray}
+G_n &=& \int - \log p^*(x) q(x) dx \\
+&=& \sum - \log p^*(x_i) Poisson(x_i|\lambda) \\
+&=& \sum \frac{1}{x_i!} (\lambda^*)^{x_i} e^{-\lambda^*} [-\log \Gamma(x_i + a_n) + \log (a_n) + log x_i! - a_n \log b_n + (x_i+a_n) \log(1+b_n)] \\ 
+\end{eqnarray}
+$$
+
+となる。WAICを計算するためには経験損失と汎関数分散が必要。経験損失は予測分布の情報量を使えば計算できる。
+
+$$
+\begin{eqnarray}
+T_n &=& \frac{1}{n} \sum -\log p^*(x_i) \\
+&=& \frac{1}{n} \sum [-\log \Gamma(x_i + a_n) + \log (a_n) + log x_i! - a_n \log b_n + (x_i+a_n) \log(1+b_n)] \\
+
+V_n &=& \sum \left[ 
+\int \log (Poisson(x_i|\lambda))^2 p(\lambda|x^n) d\lambda - \left( \int \log Poisson(x_i|\lambda) p(\lambda|x^n) d\lambda \right)^{2}
+\right]
+\end{eqnarray}
+$$
+
+解析的には計算できないので、MCMCのサンプルを利用して計算する。データ点ごとにMCMCサンプルから計算した対数尤度を用いる。MCMCサンプルが数が$S$個あり、$s$番目のパラメタ$\theta$の事後分布のMCMCサンプルを$\theta_s$とする。経験損失は、
+
+$$
+\begin{eqnarray}
+T_n &\approx& \frac{1}{n} \sum_{i}^{N}\left[ -\log \left(\frac{1}{S} \sum^S p(x_i|\theta_s)\right) \right]
+\end{eqnarray}
+$$
+である。$()$内は、尤度関数を事後分布で平均した値、つまり予測分布を近似している。汎関数分散は、
+
+$$
+\begin{eqnarray}
+V_n &\approx& \sum_{i}^{N} \left[ 
+\ \frac{1}{S-1} \sum_{s}^{S} \log p(x_i|\theta_s)^2 - \left( \frac{1}{S-1} \sum_{s}^{S} \log p(x_i|\theta_s) \right)^{2}
+\right]
+\end{eqnarray}
+$$
+となる。$[]$内は、事後分布で平均した尤度尤度の分散を近似している。これをRで実装していく。
+
+```{r, class.output='scroll-500'}
+library(tidyverse)
+library(rstan)
+library(loo)
+
+options(max.print = 999999)
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+
+lambda_prime <- 3
+n <- 500
+a <- 3
+b <- 1
+set.seed(1989)
+x <- rpois(n, lambda_prime) #q(x)
+hist(x, main = 'Poisson(λ=3)')
+```
+
+各種、計算に必要な関数を定義する。
+
+```{r}
+WAIC <- function(x){
+  return(T_n(x) + V_n(x)/length(x))
+}
+
+T_n <- function(x){
+  temp <- c()
+  for(i in 1:length(x)){
+    temp[i] = i_pred_dist(x[i],x)
+  }
+  return(mean(temp))
+}
+
+V_n <- function(x){
+  a_n <- sum(x)+a
+  b_n <- length(x)+b
+  V_comp <- function(x){
+    poisgamma <- function(lambda){
+      dpois(x,lambda,log=T)*dgamma(lambda,a_n,b_n)
+    }
+    poisgamma2 <- function(lambda){
+      dpois(x,lambda,log=T)^2*dgamma(lambda,a_n,b_n)
+    }
+    temp1 <- integrate(poisgamma2,0,Inf)$value
+    temp2 <- integrate(poisgamma,0,Inf)$value
+    return(temp1-temp2^2)
+  }
+  temp <- c()
+  for(i in 1:length(x)){
+    temp[i] <- V_comp(x[i])
+  }
+  return(sum(temp))
+}
+
+waic_mcmc <- function(log_lik){
+  T_n <- mean(-log(colMeans(exp(log_lik))))
+  V_n_divide_n <- mean(apply(log_lik,2,var))
+  waic <- T_n + V_n_divide_n
+  return(waic)
+}
+
+G_n <- function(lambda_prime,x){
+  temp <- 0
+  for(j in 0:20){
+    temp = temp + dpois(j,lambda_prime)*i_pred_dist(j,x)
+  }
+  return(temp)
+}
+
+i_pred_dist <- function(x_d,x){
+  a_n <- sum(x)+a
+  b_n <- length(x)+b
+  return(-lgamma(x_d+a_n) + lgamma(a_n)+lgamma(x_d+1) - a_n*log(b_n) + (x_d+a_n)*log(1+b_n))
+}
+```
+
+モデルはこちら。WAICを計算するために`poisson_lpmf()`関数からのサンプリングを行っておく。
+
+```
+data{
+  int N;
+  int X[N];
+  real a;
+  real b;
+}
+
+parameters{
+  real<lower=0> lambda;
+}
+
+model{
+  for(i in 1:N){
+    X[i] ~ poisson(lambda);
+  }
+  lambda ~ gamma(a,b);
+}
+
+generated quantities{
+  real log_lik[N];
+  for(i in 1:N){
+    log_lik[i] = poisson_lpmf(X[i]|lambda);
+  }
+}
+```
+
+先にコンパイルしてから、
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+model.waic <- stan_model('poisson_WAIC.stan')
+```
+
+`sampling()`関数でサンプリングする。複数回のシュミレーションを行うことで、WAICが汎化損失のよい近似となるかを確認する。
+
+```{r, eval=TRUE, echo=TRUE, results='hide'}
+sim_n <- 50
+G_n_e <- WAIC_mcmc <- WAIC_e <- vector(mode = 'numeric', length = sim_n)
+set.seed(1989)
+
+for(i in 1:sim_n){
+  x <- rpois(n, lambda_prime)
+  WAIC_e[i] <- WAIC(x)
+  fit.waic <- sampling(model.waic, data = list(N = n, X = x, a = a, b = b))
+  log_lik <- rstan::extract(fit.waic)$log_lik
+  WAIC_mcmc[i] <- waic_mcmc(log_lik)
+  G_n_e[i] <- G_n(lambda_prime,x)
+}
+```
+
+シュミレーションされた値の平均はこちら。
+
+```{r}
+list(
+  WAIC_e = mean(WAIC_e),
+  WAIC_mcmc = mean(WAIC_mcmc),
+  G_n_e = mean(G_n_e)
+)
+```
+
+可視化しておく。今回のシュミレーションでは良い近似となっていることがわかる。
+
+```{r}
+tibble(
+  WAIC = WAIC_e,
+  WAIC_mcmc = WAIC_mcmc,
+  G_n = G_n_e
+  ) %>%
+  gather(key = "x", value = "y") %>%
+  mutate(x = forcats::fct_inorder(x)) %>%
+  ggplot() +
+  theme_bw(base_size = 18) +
+  geom_boxplot(aes(x, y, fill = x)) +
+  xlab('') + ylab('') + ylim(1.5, 2.5)
+```
+
+WAICが最小だからといいて、最良のモデル化はわからない点は注意が必要。あくまでも比較したモデルの中での相対的な良さである。
+
+## 参考文献および参考資料
+
+- [社会科学のためのベイズ統計モデリング](https://www.asakura.co.jp/detail.php?book_code=12842)
+- [AIC, WAIC, WBICを実感する](https://rpubs.com/aishida/AIC_WAIC_WBIC)

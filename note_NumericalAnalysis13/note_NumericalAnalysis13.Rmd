@@ -101,7 +101,7 @@ xxm <- rlnorm(n, meanlog = 0, sdlog = 1)
 sum(xxm >= -2 & xxm <= 2)/n
 ```
 
-## モンテカルロシュミレーションの応用
+## モンテカルロシュミレーションの応用1
 
 ここでは少しモデルを複雑にして、漁業調査などで利用されるリッカーモデルでシュミレーションしてみる。リッカーモデルについては下記を参考にしている。
 
@@ -226,6 +226,57 @@ ggplot() +
 ```
 
 このようにモンテカルロシュミレーションを使用ことで、関心のあるモデルから生成された値をランダム性を利用してシュミレーションできる。今回は、誤差項の部分を乱数を利用しているが、他のパラメタを同時に変化するほうが現実的なので、様々なパラメタが様々な値に変換する現実に即したモデルをシュミレーションすることで、実用的に活用できる。
+
+## モンテカルロシュミレーションの応用2
+
+次は別の問題をシュミレーションしてみる。1から500までが記入されたカードがあり、全てのカードを集めるのに、いくら費用がかかるだろうか。カードは等確率で出るものであり、1枚あたり10円の費用がかかる。購入枚数を確定して、カードを手にした際に、足りていない番号のカードは、1枚50円で買い足すことで全ての番号のカードを揃えるとする。
+
+シュミレーション用の関数はこちら。
+
+```{r}
+cards_sim <- function(n){
+  price <- c(10, 50)
+  
+  cards <- sample(1:500, size = n, replace = TRUE)
+  n_get_cards <- length(unique(cards))
+  n_not_get_cards <- 500 - n_get_cards
+  total_price <- n*price[1] + n_not_get_cards*price[2]
+  return(total_price)
+}
+```
+
+500枚しか購入せず、すべて揃わなかった場合は買い足すことにし、10000回のシュミレーションを起こった結果が下記である。14000円前後が平均の正規分布のようになった。
+
+```{r}
+set.seed(1989)
+ggplot(tibble(x = replicate(10000, cards_sim(n=500))), aes(x)) +
+  geom_histogram() + 
+  labs(title = "Cards Model Simulation", y = 'Total Cost') +
+  theme_bw() + 
+  theme(text = element_text(family = "Fira code", size = 13)) 
+```
+
+枚数ごとの平均金額を返す関数を作成し、その関数を使って「何枚くらい購入するのが良いか」をシュミレーションしてみる。シュミレーション結果を見る限り、800枚くらいを購入すれば、平均13000円くらいで全てのカードを揃えることができることがわかる。これ以上だと、不要なカードが多すぎて出費がかさんでいる様子が確認できる。
+
+```{r}
+expected_price <- function(n){
+  mean(
+    # map_dbl(.x = 1:100, .f = function(x){cards_sim(n)})
+    map_dbl(1:50, ~ cards_sim(n))
+  )
+}
+
+p <- map_dbl(.x = 500:1100, .f = function(x){expected_price(x)})
+tibble(j = 500:1100, p) %>% 
+  mutate(min_price = if_else(min(p) == p, j, NA)) %>% 
+  ggplot(., aes(j, p, col = as.character(min_price))) + 
+  geom_point() + 
+  labs(title = "Cards Model Simulation", 
+       y = 'Total Expected Cost', 
+       x = 'Num of Purchased Cards') +
+  theme_bw() + 
+  theme(legend.position = 'none', text = element_text(family = "Fira code", size = 13)) 
+```
 
 ## 財務モデリング
 

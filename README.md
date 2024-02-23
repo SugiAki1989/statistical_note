@@ -53,6 +53,12 @@
 - [ラ・リーガの各チームの強さを推定する](https://sugiaki1989.github.io/statistical_note/note_bayes11/note_bayes11.html)
 - [ラ・リーガの各チームの強さを推定する(モデル3を深ぼる)](https://sugiaki1989.github.io/statistical_note/note_bayes12/note_bayes12.html)
 - [レースなどの着順データの強さを推定する](https://sugiaki1989.github.io/statistical_note/note_bayes13/note_bayes13.html)
+- [麻雀の強さを分析する](https://sugiaki1989.github.io/statistical_note/note_bayes14/note_bayes14.html)
+- [漫才ショーレースの強さを分析する](https://sugiaki1989.github.io/statistical_note/note_bayes15/note_bayes15.html)
+- [WAICのおさらい(概要編)](https://sugiaki1989.github.io/statistical_note/note_bayes16/note_bayes16.html)
+- [WAICのおさらい(詳細編)](https://sugiaki1989.github.io/statistical_note/note_bayes17/note_bayes17.html)
+- [](https://sugiaki1989.github.io/statistical_note/note_bayes18/note_bayes18.html)
+
 
 ## 数値解析
 
@@ -70,7 +76,9 @@
 - [ニューラルネットワークの実装](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis11/note_NumericalAnalysis11.html)
 - [非線形最小二乗法のまとめ](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis12/note_NumericalAnalysis12.html)
 - [モンテカルロシュミレーションのまとめ](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis13/note_NumericalAnalysis13.html)
-- [ハミルトニアンモンテカルロ法(HMC)のまとめ](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis14/note_NumericalAnalysis14.html)
+- [ハミルトニアンモンテカルロ法(1次元)について](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis14/note_NumericalAnalysis14.html)
+- [ハミルトニアンモンテカルロ法(多次元)について](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis15/note_NumericalAnalysis15.html)
+
 
 ## 回帰分析
 

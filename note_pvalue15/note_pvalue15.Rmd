@@ -326,11 +326,13 @@ pwr.2p.test(
   )
 ```
 
-内部では、このような計算式のもとでサンプルサイズが計算されている。
+内部の計算式とは少し異なるが下記の計算式のもとでもサンプルサイズが計算できる。$\phi$は$1:\phi$の割り付け比を意味する。下記を参考にしている。
+
+- [医学のためのサンプルサイズ設計](https://www.kyoto-up.or.jp/9784814003822.html)
 
 $$
 \begin{aligned}
-N &= \frac{1+\phi}{\phi}\frac{[ z_{1-\alpha/2} \sqrt{(1+\phi)\bar{p}(1-\bar{p})} + z_{1-\beta} \sqrt{\phi p_C (1-p_C) + p_T (1-p_T)} ]^2}{\phi (p_T - p_C)^2} \\
+N &= \frac{1+\phi}{\phi}\frac{[ z_{1-\alpha/2} \sqrt{(1+\phi)\bar{p}(1-\bar{p})} + z_{1-\beta} \sqrt{\phi p_C (1-p_C) + p_T (1-p_T)} ]^2}{ (p_T - p_C)^2} \\
 \bar{p} &= \frac{p_C + \phi p_T}{1+\phi}
 \end{aligned}
 $$

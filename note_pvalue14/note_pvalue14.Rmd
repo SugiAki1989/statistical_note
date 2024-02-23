@@ -432,8 +432,8 @@ activity_all %>%
   geom_line() +
   scale_x_date(
     labels = date_format("%Y/%m/%d"),
-    breaks = "1 day",
-    minor_breaks = "1 day"
+    breaks = "2 day",
+    minor_breaks = "2 day"
   )  + labs(
     title = "Users",
     x = "date",
@@ -554,8 +554,8 @@ data_ctr %>%
   geom_line() +
   scale_x_date(
     labels = date_format("%Y/%m/%d"),
-    breaks = "1 day",
-    minor_breaks = "1 day"
+    breaks = "2 day",
+    minor_breaks = "2 day"
   )  + labs(
     title = "Users",
     x = "date",
