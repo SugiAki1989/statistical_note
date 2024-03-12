@@ -1,0 +1,411 @@
+---
+title: "UpliftModeling"
+pagetitle: "UpliftModeling"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+UpliftModelingについてまとめる。UpliftModelingは、実験をデザインすることで、当該施策の介入効果を事前に測定し、効率の良い介入戦略を立てるために役立てることができる。基本的には因果推論の根本問題を、予測モデルを用いることで解決しようと試みる。ここでは、UpliftModelingの実験デザインについてまとめ、下記のブログでまとめられているPythonでの方法をRで辿りながら、UpliftModelingについて理解を深める。
+
+- [Uplift modelingで施策が効く人を見極める](https://ohke.hateblo.jp/entry/2019/01/05/230000)
+- [Uplift Modelingで介入効果を最適化する](https://qiita.com/usaito/items/af3fa59d0ee153a70350)
+
+## UpliftModelingの実験デザイン
+
+そもそもUpliftModelingの効率の良い顧客戦略とはなにか。UpliftModelingでは顧客を4つのセグメントに分類して説明されることが多い。UpliftModelingが狙う効率の良い介入戦略とは、下記の「説得可能な顧客」を見つけ、アプローチすることである。
+
+- The Sure Things: 施策の有無に関わらず、反応する人(鉄板)
+- The Persuadables: **購入意思がなかったが、施策によって反応を行う人(説得可能)**
+- The Do Not Disturbs: 購入意思があかったが、施策によって反応を行わない人(あまのじゃく)
+- The Lost Causes: 施策の有無に関わらず、反応しない人(無関心)
+
+説得可能な顧客をみつける方法は下記の通りである。
+
+のうち、介入群データと統制群データをそれぞれ、訓練データとテストデータに分けます。
+
+- ステップ1: ABテストの介入実験によって得られたデータを訓練データとテストデータに分割。
+- ステップ2: 介入群と統制群のデータのそれぞれで、訓練データからモデルを学習する
+- ステップ3: ステップ1のテストデータに対し、ステップ2で学習した介入群・統制群両方のモデルを用いて予測
+- ステップ4: ステップ3の予測値の差、比から介入による効果の大きさuplift scoreを算出し、介入戦略を決定する
+
+2モデルアプローチ、1モデルアプローチなど、モデルの数によっては細かい部分で違いが出るが、基本的には同じである。アップリフトのスコアが大きいほど、施策によって反応しやすいターゲットということになる。[Uplift Modeling用のパッケージtools4upliftを使ってみた](https://kamonohashiperry.com/archives/2197)の図がわかりやすいので、画像をおかりする。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference07/design.png')
+```
+
+より実践に即すと下記のようなイメージかもしれない。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference07/flow.png')
+```
+
+基本的な流れがおさらいできたので、以降はPythonで紹介されているUplift modelingについてRで書き直して理解を深めさせていただく。
+
+
+## 学習その1
+
+まずは下記のブログの内容をRで書き直して見る。下記のブログでは、クーポン配布を行おうと企画しているECサイトを想定している。クーポンを配布することでより効果的な説得可能なユーザを特定したいと考えている。
+
+- [Uplift modelingで施策が効く人を見極める](https://ohke.hateblo.jp/entry/2019/01/05/230000)
+
+必要なライブラリなどを読み込んでおく。
+
+```{r}
+options(scipen = 20)
+library(tidyverse)
+```
+
+まずは10人のユーザを無作為に抽出してA/Bテストを実施。これは、アップリフトスコアを作成するための学習データ、テストデータに該当する。
+
+```{r}
+# データ準備
+train_df <- data.frame(
+  elapsed_days = c(7, 10, 22, 3, 4, 7, 15, 18, 11, 4),
+  bought_count = c(1, 8, 7, 1, 5, 4, 2, 3, 9, 1),
+  treatment = c(1, 1, 1, 1, 1, 0, 0, 0, 0, 0),
+  action = c(1, 1, 1, 0, 0, 1, 0, 0, 0, 0)
+)
+
+# テストデータ
+test_df <- data.frame(
+  elapsed_days = c(1, 7, 1, 7),
+  bought_count = c(1, 1, 7, 7)
+)
+
+train_df
+```
+
+購入有無(`action`)に関わりがありそうな最後の購入からの経過日数(`elapsed_days`)、購入回数(`bought_count`)を利用してモデルを学習する。2モデルアプローチでは、実験群(施策あり群)、対照群(施策なし群)でデータを分けて、モデルを学習する。
+
+```{r}
+# 施策有り
+df_treatment <- train_df %>% filter(treatment == 1)
+
+model_treatment <- glm(
+  action ~ elapsed_days + bought_count, 
+  data = df_treatment, 
+  family = binomial(link = 'logit')
+  )
+
+# 施策無し
+df_control <- train_df %>% filter(treatment == 0)
+
+model_control <- glm(
+  action ~ elapsed_days + bought_count, 
+  data = df_control, 
+  family = binomial(link = 'logit')
+  )
+```
+
+`model_treatment`と`model_control`でパラメタの係数の正負が逆転している。実験群(施策あり群)では、経過日数が正の効果があり、経過日数が長いほど反応しやすい。一方、対照群(施策なし群)では、購入回数のパラメタが正で、購入回数が大きいほど反応しやすい。
+
+```{r}
+list(
+  summary(model_treatment),
+  summary(model_control)
+)
+```
+
+このモデルを利用して、アップリフトスコアを計算し、テストデータの顧客にアプローチするべきかどうかを検討する。
+
+```{r}
+test_df
+```
+
+アップリフトスコアを計算するためには、実験群(施策あり群)、対照群(施策なし群)のおのおので学習したモデルで予測値を計算する。
+
+```{r}
+# 施策実施時に反応する確率
+prob_treatment <- predict(
+  model_treatment, 
+  newdata = test_df, 
+  type = 'response'
+  )
+
+# 施策非実施時に反応する確率
+prob_control <- predict(
+  model_control, 
+  newdata = test_df, 
+  type = 'response'
+  )
+
+# アップリフトの計算
+uplift <- prob_treatment / prob_control
+
+# 結果表示
+result <- data.frame(
+  test_df,
+  prob_treatment,
+  prob_control,
+  uplift
+)
+```
+
+計算されたアップリフトをみると、2行目の顧客(経過日数=`7`、購入回数=`1`のユーザ)のアップリフトスコアが高いため、この顧客に対して施策するべきと検討できる。比を取っているので、0に近い顧客は、あまのじゃくに分類されるので、施策の対象から外すべき。
+
+```{r}
+result
+```
+
+厳密ではないが、`prob_treatment`は介入群での反応傾向を学習したモデルが返す予測値で、`prob_control`は統制群での反応傾向を学習したモデルが返す予測値なので、新しい顧客が、もし介入されていたら、もし介入されていなかったら、という反事実な状態を作り、その値を比較している。2番目の顧客は、もし介入されていなかったら購入しないけど、もし介入されていたら購入しやすい、という関係にある。一方で、1番目の顧客は、もし介入されていなかったら購入し易いんだけれど、もし介入されていたら購入しない、という関係にある。つまり、施策を当
+てることで、態度を変える天邪鬼である。
+
+下記は1モデルアプローチ(Class Variable Transformation)の例である。詳細は後述する。
+
+```{r}
+# 学習データ
+z_val <- 1 - xor(train_df$action, train_df$treatment)  # z値の計算
+train_df_with_z <- train_df %>% 
+  select(elapsed_days, bought_count) %>% 
+  bind_cols(z_val = z_val)
+
+# z値を従属変数として学習
+model <- glm(
+  z_val ~ elapsed_days + bought_count, 
+  data = train_df_with_z,
+  family = binomial(link = 'logit')
+  )
+
+# z値の予測
+z_pred <- predict(
+  model, 
+  newdata = test_df, 
+  type = 'response'
+  )
+
+# アップリフトの計算
+uplift <- 2 * z_pred - 1
+
+# 結果表示
+result <- data.frame(
+  test_df,
+  z_pred,
+  uplift
+)
+
+print(result)
+```
+
+## 学習その2
+
+次はこちらの記事をRで書き直して理解を深める。基本的にはPythonのコードに沿っている。
+
+- [Uplift Modelingで介入効果を最適化する](https://qiita.com/usaito/items/af3fa59d0ee153a70350)
+
+[The MineThatData E-Mail Analytics And Data Mining Challengeのデータセット](http://blog.minethatdata.com/2008/03/minethatdata-e-mail-analytics-and-data.html)を使って、「男性向けメール」と「女性向けメール」を誰に送ることでサイト訪問確率を最大化できるかを分析している。
+
+このデータセットには、12か月以内に最後に購入した64,000人の顧客が含まれる。顧客はメールのABテストに参加し、メールキャンペーン後2週間にわたり、結果が追跡された。
+
+- 1/3は男性向け商品を特集した電子メールを受け取るためにランダムに選ばれ、
+- 1/3は女性向け商品を特集した電子メールを受け取るためにランダムに選ばれ、
+- 1/3はメールを受信しないようにランダムに選ばれた
+
+過去の顧客属性は下記の通り。
+
+- Recency(最新性): 前回の購入からの月数。
+- History_Segment(過去金額セグメント): 過去1年間に費やされた金額の分類。
+- History(履歴): 過去1年間に費やされた実際の金額。
+- Mens(男性向け商品購入の有無): 1は過去1年間に顧客が男性向け商品を購入した
+- Womens(女性向け商品購入の有無): 1は過去1年間に顧客が女性向け商品を購入した
+- Zip_Code(郵便番号): 都市部、郊外、地方に分類
+- Newbie(初心者): 1は過去12か月の新規顧客。
+- Channel(チャネル): 過去1年間に顧客が購入したチャネル
+
+別の変数は、顧客が受け取ったメールキャンペーンを表す。
+
+- セグメント
+  - 男性向けメール
+  - 女性向けメール 
+  - メールなし
+
+下記は、メール配信後、2週間のアクションを表す。
+
+- Visit(訪問): 1は、顧客はその後2週間以内にWebサイトを訪問した
+- Conversion(コンバージョン): 1は、顧客はその後2週間以内に商品を購入した。
+- Spend(支出): その後の2週間で実際に支出された金額。
+
+```{r}
+# データの読み込み
+df <- read.csv("http://www.minethatdata.com/Kevin_Hillstrom_MineThatData_E-MailAnalytics_DataMiningChallenge_2008.03.20.csv")
+# メールを送らなかった人たちのデータを削除
+df <- df %>% filter(segment != "No E-Mail")
+head(df)
+```
+
+得られたデータを分割する前に、モデル学習用の特徴量エンジニアリングを行っておく。とはいっても、ここではダミー変数化するだけである。
+
+```{r, class.output='scroll-1000'}
+# カテゴリカル変数をダミー化
+categorical_columns <- c('zip_code', 'channel')
+dummy_vars <- model.matrix(~ 0 + ., data = df[, c(categorical_columns)])[, -1]
+numeric_vars <- df[setdiff(names(df), categorical_columns)]
+df <- cbind(numeric_vars, dummy_vars)
+df
+```
+
+学習に必要なデータを選り分けておく。
+
+```{r, class.output='scroll-500'}
+# 説明変数を設定
+columns <- setdiff(names(df), c('segment', 'visit', 'conversion', 'spend', 'history_segment'))
+# X <- as.matrix(df[, columns])
+# 目的変数を設定
+# y <- as.integer(df$visit == 1)
+# 介入のフラグ
+# w <- as.integer(df$segment == 'Mens E-Mail')  # 1 for treatment, 0 for control
+df_fit <- df %>% 
+  select(all_of(columns)) %>% 
+  mutate(
+    y = as.integer(df$visit == 1),
+    w = as.integer(df$segment == 'Mens E-Mail')
+  )
+
+df_fit
+```
+
+ABテスト(介入実験)によって得られたデータのうち、介入群データと統制群データをそれぞれ、訓練データとテストデータに分ける。
+
+```{r}
+# train, testで半分ずつに分ける
+## X_train <- X[ train_idx,]
+## y_train <- y[ train_idx]
+## w_train <- w[ train_idx]
+## X_test  <- X[-train_idx,]
+## y_test  <- y[-train_idx]
+## w_test  <- w[-train_idx]
+set.seed(0)
+train_idx <- sample(1:nrow(df_fit), size = nrow(df_fit) * 0.5)
+
+train_df <- df_fit[train_idx,]
+test_df <- df_fit[-train_idx,]
+```
+
+介入群(treat)と統制群(control)のデータでモデルを学習する。
+
+```{r}
+# --- Two-Model Approach ---
+# 介入群(treat)のデータでモデルを学習
+lr_treat <- glm(
+  y ~ recency + history + mens + womens + newbie + zip_codeSurburban + zip_codeUrban + channelPhone + channelWeb,
+  data = train_df %>% filter(w == 1), 
+  binomial(link = 'logit')
+  )
+
+# 統制群(control)のデータでモデルを学習
+lr_control <- glm(
+  y ~ recency + history + mens + womens + newbie + zip_codeSurburban + zip_codeUrban + channelPhone + channelWeb, 
+  data = train_df %>% filter(w == 0), 
+  binomial(link = 'logit')
+  )
+```
+
+各モデルを使って、テストデータで予測値を計算する。
+
+```{r, class.output='scroll-500'}
+# (介入を受ける場合のサイト訪問確率) / (介入を受けない場合のサイト訪問確率)をuplift_scoreとして算出
+proba_treat   <- predict(lr_treat,   newdata = test_df %>% select(all_of(columns)), type = 'response')
+proba_control <- predict(lr_control, newdata = test_df %>% select(all_of(columns)), type = 'response')
+uplift_score <- proba_treat / proba_control
+
+# データフレームを作成
+res <- data.frame(
+  proba_treat, 
+  proba_control, 
+  uplift_score,
+  test_df %>% select(all_of(columns))
+  )
+
+res
+```
+
+アップリフトスコアを可視化すると下記のようになる。
+
+```{r}
+ggplot(res, aes(x = uplift_score)) + 
+  geom_histogram(binwidth = 0.05)
+```
+
+Class Variable Transformationについて触れておく。これは`z`という値を導入することで、1つのモデルでアップリフトを計算することを目指す。詳細はブログに詳しく解説されているので、そちらを参照のこと。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference07/Class Variable Transformation01.png')
+```
+
+Class Variable TransformationをRで実装する。まずは`z`の計算と`P(G=T)=P(G=C)=1/2`が成立しているかを確認しておく。
+
+```{r}
+#z <- w_train * y_train + (1 - w_train) * (1 - y_train)
+z <- train_df$w * train_df$y + (1 - train_df$w) * (1 - train_df$y)
+sum(df$segment == 'Mens E-Mail')/nrow(df)
+```
+
+あとは`z`に対して、モデルを学習させて、
+
+```{r}
+lr <- glm(
+  z ~ recency + history + mens + womens + newbie + zip_codeSurburban + zip_codeUrban + channelPhone + channelWeb, 
+  data = train_df %>% select(all_of(columns)), 
+  binomial(link = 'logit'))
+
+lr
+```
+
+z-scoreを算出する。
+
+```{r}
+# z値の予測
+z_score <- predict(
+  lr, 
+  newdata = test_df %>% select(all_of(columns)), 
+  type = 'response'
+  )
+
+# アップリフトの計算
+# 2 * P(Z=1|X) - 1
+uplift <- 2 * z_score - 1
+
+# 結果表示
+ggplot(data.frame(uplift_score = uplift), aes(x = uplift_score)) + 
+  geom_histogram(binwidth = 0.0025)
+```
+
+## Class Variable Transformationのメモ
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference07/Class Variable Transformation memo.png')
+```
+
+## 参考文献および参考資料
+
+- [Uplift modelingで施策が効く人を見極める](https://ohke.hateblo.jp/entry/2019/01/05/230000)
+- [Uplift Modelingで介入効果を最適化する](https://qiita.com/usaito/items/af3fa59d0ee153a70350)
+- [Upliftmodelingforclinical trialdata](https://people.cs.pitt.edu/~milos/icml_clinicaldata_2012/Papers/Oral_Jaroszewitz_ICML_Clinical_2012.pdf)
+

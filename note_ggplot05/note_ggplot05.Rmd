@@ -1,0 +1,171 @@
+---
+title: 'dnorm,rnorm,pnorm,qnormについて'
+pagetitle: 'dnorm,rnorm,pnorm,qnormについて'
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: 'show'
+    highlight: 'kate'
+    # theme: 'flatly'
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = 'center',
+                      dev        = 'ragg_png')
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートはでは、`dnorm,rnorm,pnorm,qnorm`についてまとめている。特に`pnorm,qnorm`は毎回どっちがどっちかわからなくなるので、可視化を交えながらまとめておく。
+
+## dnorm,rnorm,pnorm,qnormについて
+
+接頭辞の意味は下記の通り。
+
+-`d*`: パラメタと分布をもとに、確率密度を返す。
+-`r*`: パラメタと分布をもとに、乱数を返す。
+-`p*`: パラメタと分布をもとに、分位数に対する累積確率を返す。`p`なので確率を返す。
+-`q*`: パラメタと分布をもとに、累積確率に対する分位数を返す。`q`なので分位数を返す。
+
+これら4つの関数に関して、標準正規分布をもとに可視化を行う。下記を参考にしている。
+
+- [A BRIEF VISUALIZATION OF R'S DISTRIBUTION FUNCTIONS, FOCUSING ON THE NORMAL DISTRIBUTION](https://wetlandscapes.com/blog/a-brief-visualization-of-rs-distribution-functions/)
+
+```{r}
+library(tidyverse)
+library(patchwork)
+
+x <- seq(-5, 5, by = 0.01)
+mu <- 0
+sd <- 1
+
+normal_dists <- 
+  list(
+    `dnorm()` = ~ dnorm(., mu, sd),
+    `rnorm()` = ~ dnorm(., mu, sd),
+    `pnorm()` = ~ pnorm(., mu, sd),
+    `qnorm()` = ~ pnorm(., mu, sd)
+    )
+
+df <- tibble(x, mu, sd) %>%
+  mutate_at(.vars = vars(x), .funs = normal_dists) %>%
+  pivot_longer(cols = -c(x, mu, sd), names_to = 'func', values_to = 'prob') %>%
+  mutate(distribution = ifelse(
+    func == 'pnorm()' | func == 'qnorm()',
+    'Cumulative probability', 
+    'Probability density')
+    )
+
+df_pdf <- df %>%
+  filter(distribution == 'Probability density') %>%
+  rename(`Probabilitiy density` = prob)
+
+df_cdf <- df %>%
+  filter(distribution == 'Cumulative probability') %>%
+  rename(`Cumulative probability` = prob)
+
+df_dnorm <- tibble(
+  x_start.line_1 = c(-1.96, 0, 1),
+  pd_start.line_1 = 0) %>%
+  mutate(x_end.line_1 = x_start.line_1,
+    pd_end.line_1 = dnorm(x_end.line_1, mu, sd),
+    x_start.line_2 = x_end.line_1,
+    pd_start.line_2 = pd_end.line_1,
+    x_end.line_2 = min(x),
+    pd_end.line_2 = pd_start.line_2,
+    id = 1:n()) %>%
+  pivot_longer(-id) %>%
+  separate(name, into = c('source', 'line'), sep = '\\.') %>%
+  pivot_wider(id_cols = c(id, line), names_from = source) %>%
+  mutate(
+    func = 'dnorm()', 
+    size = ifelse(line == 'line_1', 0, 0.03)
+    )
+
+set.seed(1)
+df_rnorm <- tibble(x_start = rnorm(3, mu, sd)) %>%
+  mutate(
+    pd_start = dnorm(x_start, mu, sd),
+    x_end = x_start,
+    pd_end = 0,
+    func = 'rnorm()'
+    )
+
+df_pnorm <- tibble(x_start.line_1 = c(-1.96, 0, 1.96),
+  pd_start.line_1 = 0) %>%
+  mutate(x_end.line_1 = x_start.line_1,
+    pd_end.line_1 = pnorm(x_end.line_1, mu, sd),
+    x_start.line_2 = x_end.line_1,
+    pd_start.line_2 = pd_end.line_1,
+    x_end.line_2 = min(x),
+    pd_end.line_2 = pd_start.line_2,
+    id = 1:n()) %>%
+  pivot_longer(-id) %>%
+  separate(name, into = c('source', 'line'), sep = '\\.') %>%
+  pivot_wider(id_cols = c(id, line), names_from = source) %>%
+  mutate(
+    func = 'pnorm()', 
+    size = ifelse(line == 'line_1', 0, 0.03)
+    )
+
+df_qnorm <- tibble(x_start.line_1 = min(x),
+  pd_start.line_1 = c(0.025, 0.5, 0.975)) %>%
+  mutate(x_end.line_1 = qnorm(pd_start.line_1),
+    pd_end.line_1 = pd_start.line_1,
+    x_start.line_2 = x_end.line_1,
+    pd_start.line_2 = pd_end.line_1,
+    x_end.line_2 = x_end.line_1,
+    pd_end.line_2 = 0,
+    id = 1:n()) %>%
+  pivot_longer(-id) %>%
+  separate(name, into = c('source', 'line'), sep = '\\.') %>%
+  pivot_wider(id_cols = c(id, line), names_from = source) %>%
+  mutate(
+    func = 'qnorm()', 
+    size = ifelse(line == 'line_1', 0, 0.03)
+    )
+
+p_pdf <- df_pdf %>%
+  ggplot(aes(x, `Probabilitiy density`, color = func)) +
+  geom_segment(data = df_dnorm,
+    aes(x_start, pd_start, xend = x_end, yend = pd_end),
+    arrow = arrow(length = unit(df_dnorm$size, 'npc'), type = 'closed')) +
+  geom_segment(data = df_rnorm,
+    aes(x_start, pd_start, xend = x_end, yend = pd_end),
+    arrow = arrow(length = unit(0.03, 'npc'), type = 'closed')) +
+  geom_line(col = 'black') +
+  facet_wrap(~ func, nrow = 1) +
+  theme_bw()
+
+p_cdf <- df_cdf %>%
+  ggplot(aes(x, `Cumulative probability`, color = func)) +
+  geom_segment(data = df_pnorm,
+    aes(x_start, pd_start, xend = x_end, yend = pd_end),
+    arrow = arrow(length = unit(df_dnorm$size, 'npc'), type = 'closed')) +
+  geom_segment(data = df_qnorm,
+    aes(x_start, pd_start, xend = x_end, yend = pd_end),
+    arrow = arrow(length = unit(df_qnorm$size, 'npc'), type = 'closed')) +
+  geom_line(col = 'black') +
+  facet_wrap(~ func, nrow = 1) +
+  labs(x = 'x/quantiles') +
+  theme_bw()
+
+p_pdf + p_cdf + plot_layout(ncol = 1)
+```
+
+## 参考文献
+
+- [分位関数](https://en.wikipedia.org/wiki/Quantile_function)
+

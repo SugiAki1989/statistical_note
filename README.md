@@ -239,6 +239,8 @@
 - [Base R のグラフィック(作成途中)](https://sugiaki1989.github.io/statistical_note/note_baseR01/note_baseR01.html)
 - [回帰平面、3D グラフ、ベクトル場](https://sugiaki1989.github.io/statistical_note/note_ggplot02/note_ggplot02.html)
 - [ggplot2のtheme関数](https://sugiaki1989.github.io/statistical_note/note_ggplot03/note_ggplot03.html)
+- [箱ひげ図と分布の関係性](https://sugiaki1989.github.io/statistical_note/note_ggplot04/note_ggplot04.html)
+- [dnorm,rnorm,pnorm,qnormについて](https://sugiaki1989.github.io/statistical_note/note_ggplot05/note_ggplot05.html)
 
 ## 線形代数
 

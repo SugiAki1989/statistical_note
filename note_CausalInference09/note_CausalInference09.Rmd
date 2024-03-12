@@ -1,0 +1,100 @@
+---
+title: "Meta-Learners"
+pagetitle: "Meta-Learners"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+
+- `X`: 共変量(説明変数)
+- `t`: 介入の有無(0/1)
+- `y`: 目的変数
+- `MODEL`: 機械学習モデル
+
+CATE(Conditional Average Treatment Effects)
+
+## S-Learner(Single-Learner)
+
+
+
+1. 学習: 個人ごとのデータが記録された`X,t->y`の機械学習モデル`MODEL`を作成
+2. 予測: `X, t=0`を使って、`MODEL`から予測値`y0`を得る(`t=0`にデータを固定して予測)
+3. 予測: `X, t=1`を使って、`MODEL`から予測値`y1`を得る(`t=1`にデータを固定して予測)
+4. 評価: 予測値`y1-y0`がCATE
+
+図は[こちら](https://matheusfacure.github.io/python-causality-handbook/21-Meta-Learners.html#s-learner-aka-the-go-horse-learner)よりお借りした。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference09/s-learner.png')
+```
+
+
+## T-Learner(Two-Learner)
+
+1. 学習: 個人ごとの`t=0`のデータに対し、`X->y`の機械学習モデル`MODEL0`を作成(学習時に`t`は使わない)
+2. 学習: 個人ごとの`t=1`のデータに対し、`X->y`の機械学習モデル`MODEL1`を作成(学習時に`t`は使わない)
+3. 予測: `X`を使って、`MODEL0`から予測値`y0`を得る(`t`は予測には使わない)
+4. 予測: `X`を使って、`MODEL1`から予測値`y1`を得る(`t`は予測には使わない)
+5. 評価: 予測値`y1-y0`がCATE
+
+図は[こちら](https://matheusfacure.github.io/python-causality-handbook/21-Meta-Learners.html#s-learner-aka-the-go-horse-learner)よりお借りした。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference09/t-learner.png')
+```
+
+
+## X-Learner
+
+1. 学習: 個人ごとの`t=0`のデータに対し、`X->y`の機械学習モデル`MODEL0`を作成(学習時に`t`は使わない)
+2. 学習: 個人ごとの`t=1`のデータに対し、`X->y`の機械学習モデル`MODEL1`を作成(学習時に`t`は使わない)
+3. 学習: 個人ごとの`t=0`のデータに対し、`X`を使って、`MODEL1`から予測値`y1`を得る(`MODEL0`ではない)
+4. 学習: 個人ごとの`t=1`のデータに対し、`X`を使って、`MODEL0`から予測値`y0`を得る(`MODEL1`ではない)
+5. 学習: 個人ごとの`t=0`のデータに対し、`y1-y`を`d0`として計算
+  - `d0`は介入を受けなかった個人の「介入を受けていない`y`」と「もし介入を受けた時の`y1`」の差分。
+  - `d0`は介入を受けない個人の介入効果。
+6. 学習: 個人ごとの`t=1`のデータに対し、`y-y0`を`d1`として計算
+  - `d1`は介入を受けた個人の「介入を受けた`y`」と「もし介入を受けなかった時の`y0`」の差分。
+  - `d1`は介入を受けた個人の介入効果。
+7. 学習: 個人ごとの`t=0`のデータに対し、`X->d0`の機械学習モデル`MODEL00`を作成(学習時に`t`は使わない)
+8. 学習: 個人ごとの`t=1`のデータに対し、`X->d1`の機械学習モデル`MODEL11`を作成(学習時に`t`は使わない)
+9. 学習: 個人ごとのデータに対し、`X->t`の機械学習モデル`MODEL-ps`を作成(傾向スコア`p`を計算)
+10. 予測: 個人ごとのデータに対し、`X`を使って、`MODEL00`から予測値`y0m0`を得る
+11. 予測: 個人ごとのデータに対し、`X`を使って、`MODEL11`から予測値`y1m1`を得る
+12. 予測: 個人ごとのデータに対し、`X`を使って、`MODEL-ps`から予測値`p`を得る
+13. 評価: 予測値`(p)*(y0m0)+(1-p)*(y1m1)`がCATE
+
+図は[こちら](https://matheusfacure.github.io/python-causality-handbook/21-Meta-Learners.html#s-learner-aka-the-go-horse-learner)よりお借りした。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference09/x-learner.png')
+```
+
+

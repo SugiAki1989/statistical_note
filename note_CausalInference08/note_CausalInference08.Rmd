@@ -1,0 +1,319 @@
+---
+title: "UpliftModeling"
+pagetitle: "UpliftModeling"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+UpliftModelingについてまとめる。UpliftModelingは、実験をデザインすることで、当該施策の介入効果を事前に測定し、効率の良い介入戦略を立てるために役立てることができる。基本的には因果推論の根本問題を、予測モデルを用いることで解決しようと試みる。ここでは、UpliftModelingで得られた数値をもとに、意思決定に役立つプロットを作成することで理解を深める。
+
+## UpliftModelingと可視化
+
+アップリフトスコアを計算した後から始める。この点に関する詳細は前回のノートでまとめている。
+
+```{r}
+options(scipen = 20)
+library(tidyverse)
+
+# データの読み込み
+df <- read.csv('http://www.minethatdata.com/Kevin_Hillstrom_MineThatData_E-MailAnalytics_DataMiningChallenge_2008.03.20.csv')
+# メールを送らなかった人たちのデータを削除
+df <- df %>% filter(segment != 'No E-Mail')
+
+# カテゴリカル変数をダミー化
+categorical_columns <- c('zip_code', 'channel')
+dummy_vars <- model.matrix(~ 0 + ., data = df[, c(categorical_columns)])[, -1]
+numeric_vars <- df[setdiff(names(df), categorical_columns)]
+df <- cbind(numeric_vars, dummy_vars)
+
+# 説明変数を設定
+columns <- setdiff(names(df), c('segment', 'visit', 'conversion', 'spend', 'history_segment'))
+# X <- as.matrix(df[, columns])
+# 目的変数を設定
+# y <- as.integer(df$visit == 1)
+# 介入のフラグ
+# w <- as.integer(df$segment == 'Mens E-Mail')  # 1 for treatment, 0 for control
+df_fit <- df %>% 
+  select(all_of(columns)) %>% 
+  mutate(
+    y = as.integer(df$visit == 1),
+    w = as.integer(df$segment == 'Mens E-Mail')
+  )
+
+set.seed(0)
+train_idx <- sample(1:nrow(df_fit), size = nrow(df_fit) * 0.5)
+
+train_df <- df_fit[train_idx,]
+test_df <- df_fit[-train_idx,]
+
+# --- Two-Model Approach ---
+# 介入群(treat)のデータでモデルを学習
+lr_treat <- glm(
+  y ~ recency + history + mens + womens + newbie + zip_codeSurburban + zip_codeUrban + channelPhone + channelWeb,
+  data = train_df %>% filter(w == 1), 
+  binomial(link = 'logit')
+  )
+
+# 統制群(control)のデータでモデルを学習
+lr_control <- glm(
+  y ~ recency + history + mens + womens + newbie + zip_codeSurburban + zip_codeUrban + channelPhone + channelWeb, 
+  data = train_df %>% filter(w == 0), 
+  binomial(link = 'logit')
+  )
+
+# (介入を受ける場合のサイト訪問確率) / (介入を受けない場合のサイト訪問確率)をuplift_scoreとして算出
+proba_treat   <- predict(lr_treat,   newdata = test_df %>% select(all_of(columns)), type = 'response')
+proba_control <- predict(lr_control, newdata = test_df %>% select(all_of(columns)), type = 'response')
+uplift_score <- proba_treat / proba_control
+
+# データフレームを作成
+result <- data.frame(
+  proba_treat, 
+  proba_control, 
+  uplift_score,
+  test_df
+  ) %>% 
+  arrange(desc(uplift_score))
+
+head(result)
+```
+
+まずはx軸にパーセンタイル、y軸にCV率を取った棒グラフを作成する。アップリフトスコアの降順で並び替えたデータをもとにパーセンタイルでデータを区切って、介入群、統制群のCV率を計算していく。画像は下記のスライドよりお借りした。以降頻繁にスライドを引用させてもらっているが、私の解釈が誤っている可能性があるので注意。
+
+- [uplift modeling](https://speakerdeck.com/jeyjeyjeey/uplift-modeling?slide=22)
+
+スコアが大きい順に並び替え、パーセンタイルごとにCV率を算出した際に、UpliftModelingが上手く機能していれば、画像の通り、スコアが高いところは実験群のCV率が高く、スコアが低いところは統制群のCV率が高くなる。つまり、上位40％にだけ介入を行うことで、CV率を改善できる可能性がある。
+
+```{r, echo=FALSE, out.width='75%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference08/bar.png')
+```
+
+下記の通り、計算する。パーセンタイルのブロックごとにデータを抜き出して、介入群、統制群ごとに対象人数をカウントし、介入を受けた時のCV数を計算。最後に割合を計算する。グラフを見る限り、上位(`1-6`)に介入するとCV率が高くなる傾向が見える。
+
+```{r}
+# Calculate CVR (Conversion Rate) for each decile
+# arrange(desc(uplift_score)) is required
+qdf <- data.frame(treat_cvr = numeric(10), control_cvr = numeric(10))
+for (n in 1:10) {
+  start <- (n - 1) * nrow(result) / 10 + 1
+  end <- n * nrow(result) / 10
+  quantile_data <- result[start:end, ]
+  
+  treat_uu <- sum(quantile_data$w)
+  control_uu <- sum(!quantile_data$w)
+  treat_cv <- sum(quantile_data$y[quantile_data$w==1])
+  control_cv <- sum(quantile_data$y[!quantile_data$w==1])
+  
+  qdf[n, 'percentile'] <- n
+  qdf[n, 'treat_cvr'] <- treat_cv / treat_uu
+  qdf[n, 'control_cvr'] <- control_cv / control_uu
+}
+
+# Plot CVR by decile
+qdf %>% 
+  pivot_longer(
+    cols = -percentile,
+    names_to = 'flg'
+  ) %>% 
+  mutate(
+    flg = factor(flg, levels = c('treat_cvr', 'control_cvr'))) %>%
+  ggplot(., aes(x = percentile, y = value, fill = flg)) +
+  geom_bar(position = 'dodge', stat = 'identity') + 
+  scale_fill_manual(values = c('#1f77b4', '#ff7f0d')) +
+  scale_x_continuous(breaks = 1:10) +
+  scale_y_continuous(breaks = seq(0, 1, 0.05), limit = c(0, 0.3)) +
+  theme_bw()
+```
+
+次はこちらの図。これはx軸にアップリフトスコア、y軸にリフトという指標を可視化しているもの。アップリフトスコアは大きいほど、説得可能性が高いといえる。介入によって、反応率が何倍になったのかを見ているのがアップリフトスコア。このグラフの特徴としては、UpliftModelingの精度が高ければ高いほど、スコアの上位は実験群の顧客が集中し、統制群においてはCVしない顧客が集まる。結果として、リフトの曲線は最初のうちは実験群のCVする顧客が集まりやすいので正の傾きを持つ。UpliftModelingの精度によっては、急激な正の傾きを保つ場合がある。逆に、スコアが低いところでは、統制群のCVが集まるため、負の傾きになる。
+
+```{r, echo=FALSE, out.width='75%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference08/auuc.png')
+```
+
+最もリフトが高いアップリフトスコア以上の対象に介入すると反応数は最大になる。上の図だと1.2以上に介入すると、リフトが最大化でき、反応数が多くなると予測される。リフトは下記の式で定義され、この後の計算でもでてくる。
+
+```
+# コンバージョン率の差に実験群の人数をかけることでリフトを算出
+lift <- (treat_cvr - control_cvr) * treat_uu
+```
+
+参考にさせていただいたスライドがわかりよい。リフトは、そのデータのスコア以上の全てに介入すると増える「累積反応数」を表す。要するに、アップリフトスコアは、あるスコア以上のデータに介入した際に期待できる反応数の増加量であり、アップリフトスコアが高いデータほど、介入によって多くの反応数を期待できる、という認識で良いのかも。
+
+- スコアが0.1のデータ100人に介入すると、10人の反応数が増えると期待できる
+- スコアが0.2のデータ100人に介入すると、20人の反応数が増えると期待できる
+- スコアが0.5のデータ100人に介入すると、50人の反応数が増えると期待できる
+
+```{r, echo=FALSE, out.width='75%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference08/lift.png')
+```
+```{r, echo=FALSE, out.width='75%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference08/lift2.png')
+```
+
+実際に計算してみる。
+
+```{r}
+treat_uu <- 0
+control_uu <- 0
+treat_cv <- 0
+control_cv <- 0
+treat_cvr <- 0.0
+control_cvr <- 0.0
+lift <- 0.0
+
+stat_df <- data.frame()
+for (i in 1:nrow(result)) {
+  is_cv <- result[i, 'y']  # Assuming 'y' holds conversion (0/1)
+  is_treat <- result[i, 'w']  # Assuming 'w' holds treatment group (0/1)
+  score <- result[i, 'uplift_score']
+  
+  if (is_treat == 1) {
+    treat_uu <- treat_uu + 1
+    if (is_cv == 1) {
+      treat_cv <- treat_cv + 1
+    }
+    treat_cvr <- treat_cv / treat_uu
+  } else {
+    control_uu <- control_uu + 1
+    if (is_cv == 1) {
+      control_cv <- control_cv + 1
+    }
+    control_cvr <- control_cv / control_uu
+  }
+  
+  # Calculate lift
+  lift <- (treat_cvr - control_cvr) * treat_uu
+  
+  # Add new row to data frame
+  new_row <-
+    data.frame(
+      index = i,
+      is_cv = is_cv,
+      is_treat = is_treat,
+      score = score,
+      treat_uu = treat_uu,
+      control_uu = control_uu,
+      treat_cv = treat_cv,
+      control_cv = control_cv,
+      treat_cvr = treat_cvr,
+      control_cvr = control_cvr,
+      lift = lift,
+      stringsAsFactors = FALSE
+    )
+  stat_df <- rbind(stat_df, new_row)
+}
+
+# Calculate baseline
+stat_df$baseline <- stat_df$index * stat_df$lift[nrow(stat_df)] / nrow(stat_df)
+```
+
+チャンクの最後で計算しているベースラインは、ランダムにデータに介入した場合の想定リフト値のこと。ちょっと理解が追いついていないが、思考をメモしておく。
+
+- 全データ数を`N`
+- 介入対象データ数を`n`
+- 非介入対象データ数`N-n`
+- モデリングの結果得られた最終的な累積リフトを`L`
+
+このとき、ランダムに介入を行った場合の平均リフトを以下のように求める
+
+ランダム介入の場合、介入対象/非介入対象のデータの反応率は独立となる。したがい、累積リフト`L`は介入群`n`件と非介入群`N-n`件の構造を反映している。つまり、`L=(介入群のリフト×n/N) + (非介入群のリフト×(N-n)/N)`と表現できるが、非介入群のリフトは0なので、`L = (介入群のリフト×n/N)`となる。介入群をランダムに選んだので、介入群のリフト=ランダム介入時のリフトとみなせ、モデリングで得られた最終累積リフト`L`を全データ数`N`で割れば、ランダム介入時の平均リフトといえる。
+
+```{r, echo=FALSE, out.width='75%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference08/baseline.png')
+```
+
+
+最後にAUUCについてまとめておく。介入効果はAUUCに比例するため、アップリフトモデリングの評価指標やハイパラチューニングの際に活用できる。
+
+```{r, echo=FALSE, out.width='75%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference08/auucf.png')
+```
+
+```{r}
+# Calculate AUUC
+auuc <- sum(stat_df$lift - stat_df$baseline) / nrow(stat_df)
+
+# Print AUUC
+print(paste('AUUC:', auuc))
+```
+
+実際に計算したグラフがこちら。
+
+```{r}
+# Plot cumulative conversions
+ggplot(stat_df, aes(x = score)) +
+  geom_line(aes(y = lift), col = '#1f77b4') +
+  geom_line(aes(y = baseline), col = '#ff7f0d') +
+  labs(x = 'Uplift Score', y = 'Conversion Lift') + 
+  scale_x_reverse() + 
+  theme_bw()
+```
+
+x軸をランクにしたものがこっちで、ベースラインが直線になる。
+
+```{r}
+# Plot cumulative conversions
+ggplot(stat_df, aes(x = index)) +
+  geom_line(aes(y = lift), col = '#1f77b4') +
+  geom_line(aes(y = baseline), col = '#ff7f0d') +
+  labs(x = 'Uplift Score Rank', y = 'Conversion Lift') + 
+  theme_bw()
+```
+
+他にも様々な可視化が可能。
+
+```{r}
+# Plot cumulative conversions
+ggplot(stat_df, aes(x = index)) +
+  geom_line(aes(y = treat_cv), col = '#1f77b4') +
+  geom_line(aes(y = control_cv), col = '#ff7f0d') +
+  labs(x = 'Uplift Score Rank', y = 'Cumulative Conversions') + 
+  theme_bw()
+
+```
+
+```{r}
+# Plot cumulative conversions
+ggplot(stat_df, aes(x = index)) +
+  geom_line(aes(y = treat_cvr), col = '#1f77b4') +
+  geom_line(aes(y = control_cvr), col = '#ff7f0d') +
+  labs(x = 'Uplift Score Rank', y = 'Conversions Rate') + 
+  ylim(0, 0.3) + 
+  theme_bw()
+```
+
+
+## 参考文献および参考資料
+
+- [uplift modeling](https://speakerdeck.com/jeyjeyjeey/uplift-modeling?slide=22)
+- [uplift_modeling_sample.ipynb](https://github.com/takumiw/Machine_Learning_at_Work/blob/master/uplift_modeling_sample.ipynb)
+- [uplift_modeling_practical_problem.ipynb](https://github.com/takumiw/Machine_Learning_at_Work/blob/master/uplift_modeling_practical_problem.ipynb)
+
