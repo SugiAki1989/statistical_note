@@ -32,22 +32,61 @@ UPDATE: `r Sys.time()`
 
 # はじめに
 
+ここでは、Meta-LearnersのS-Learner、T-Learner、X-LearnerをRで実装してみる。PythonではEconMLパッケージが利用できるが、多分Rには今のところないはず。もしかしたらあるかも。
+
+Meta-Learnersは、介入の効果が複雑であったり、効果が変数$x$ごとに異なる場合など、非線形な因果効果を推定する際に使用される。
+
+## CATE(Conditional Average Treatment Effects)
+
+Meta-Learnersでは、CATEを推定する。CATEはある特徴量$x$で条件づけた時の介入に関する因果効果の期待値のことである。$Y^{(1)},Y^{(0)}$は潜在的結果(potential outcomes)である。
+
+$$
+\begin{aligned}
+\tau(X) = E \left[ Y^{(1)} - Y^{(0)} \, | \, X \right]
+\end{aligned}
+$$
+
+CATEを推定することのメリットとしては、[こちら](https://usaito.hatenablog.com/entry/2019/04/07/205756)のブログで書かれている通りである。個人的にはUplift Modelingみたいことをしたいのだけれど、データを簡単に取れないことがあった。
+
+> CATEを推定することができれば, 嬉しいことがたくさんあります. 例えば, 因果効果がプラスであるような特徴量を持つ人だけに広告を打つことで商品の購入確率を最大化したり, 投薬計画を最適化することで生存率を改善できるかもしれません.
+似たような目的を持つ分野にUplift Modelingと呼ばれるものがあります（参考1, 参考2）が, Uplift ModelingはA/Bテスト (RCT)によって収集された学習データがあることを前提とします. しかし多くの場合, A/Bテストを走らせて学習データを集めるようなことはコストの面から望ましくなく, 容易に実適用可能な技術とは言えないでしょう.
+
+以降、S-Learner、T-Learner、X-Learnerについて内容をまとめているが、変数の説明は下記の通りである。
 
 - `X`: 共変量(説明変数)
 - `t`: 介入の有無(0/1)
 - `y`: 目的変数
 - `MODEL`: 機械学習モデル
 
-CATE(Conditional Average Treatment Effects)
+ここで使用するデータを読み込んでおく。また、モデルとしてランダムフォレストを利用するが、ハイパーパラメタのチューニングやバリデーションは行わない。
+
+使用するデータは[こちら](https://matheusfacure.github.io/python-causality-handbook/21-Meta-Learners.html#s-learner-aka-the-go-horse-learner)よりお借りした。
+
+```{r}
+options(scipen = 100000)
+library(tidyverse)
+library(randomForest)
+
+df <- read_csv('~/Desktop/invest_email.csv') %>% 
+  select(y = converted, t = em1, x1 = age, x2 = income, x3 = insurance, x4 = invested)
+
+head(df)
+```
+
+投資を促すメールデータで、結果変数は`converted`(投資した vs 投資してない)。説明変数には年齢`age`、所得`income`、保険額`insurance`、投資額`invested`があり、介入はメール送信`em1`である。目的は、より良い反応をしている個人にのみメールを送りたい。つまり、`em1`の条件付き平均因果効果を推定したい。
+
+$$
+E[Converted(1)_i - Converted(0)_i|X_i=x] = \tau(x)_i
+$$
 
 ## S-Learner(Single-Learner)
 
-
+S-Learnerは下記の手順でCATEを推定する。
 
 1. 学習: 個人ごとのデータが記録された`X,t->y`の機械学習モデル`MODEL`を作成
 2. 予測: `X, t=0`を使って、`MODEL`から予測値`y0`を得る(`t=0`にデータを固定して予測)
 3. 予測: `X, t=1`を使って、`MODEL`から予測値`y1`を得る(`t=1`にデータを固定して予測)
-4. 評価: 予測値`y1-y0`がCATE
+4. 評価: 予測値`E[y1-y0]`がCATEとなる
 
 図は[こちら](https://matheusfacure.github.io/python-causality-handbook/21-Meta-Learners.html#s-learner-aka-the-go-horse-learner)よりお借りした。
 
@@ -55,14 +94,38 @@ CATE(Conditional Average Treatment Effects)
 knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference09/s-learner.png')
 ```
 
+手順および画像を参照しながらモデルを構築する。
+
+```{r}
+model_s <- randomForest(y ~ x1 + x2 + x3 + x4 + t, data = df)
+y1_s <- predict(model_s, df %>% mutate(t = 1), type = 'response') 
+y0_s <- predict(model_s, df %>% mutate(t = 0), type = 'response')
+
+bind_cols(df, y1_s = y1_s, y0_s = y0_s, ice = y1_s - y0_s)
+```
+
+推定されたCATEは下記の通り。
+
+```{r}
+# 可視化
+# bind_cols(df, y1_s = y1_s, y0_s = y0_s) %>% 
+#   ggplot(., aes(x4, y1_s - y0_s)) + 
+#   geom_point() + 
+#   theme_bw() + 
+#   labs(y = 'CATE', title = 'S-Learner')
+
+mean(y1_s - y0_s)
+```
 
 ## T-Learner(Two-Learner)
+
+T-Learnerは下記の手順でCATEを推定する。
 
 1. 学習: 個人ごとの`t=0`のデータに対し、`X->y`の機械学習モデル`MODEL0`を作成(学習時に`t`は使わない)
 2. 学習: 個人ごとの`t=1`のデータに対し、`X->y`の機械学習モデル`MODEL1`を作成(学習時に`t`は使わない)
 3. 予測: `X`を使って、`MODEL0`から予測値`y0`を得る(`t`は予測には使わない)
 4. 予測: `X`を使って、`MODEL1`から予測値`y1`を得る(`t`は予測には使わない)
-5. 評価: 予測値`y1-y0`がCATE
+5. 評価: 予測値`E[y1-y0]`がCATEとなる
 
 図は[こちら](https://matheusfacure.github.io/python-causality-handbook/21-Meta-Learners.html#s-learner-aka-the-go-horse-learner)よりお借りした。
 
@@ -70,26 +133,50 @@ knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInfere
 knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference09/t-learner.png')
 ```
 
+手順および画像を参照しながらモデルを構築する。
+
+```{r}
+model0_t <- randomForest(y ~ x1 + x2 + x3 + x4, data = df %>% filter(t == 0))
+model1_t <- randomForest(y ~ x1 + x2 + x3 + x4, data = df %>% filter(t == 1))
+
+y0_t <- predict(model0_t, df, type = 'response') 
+y1_t <- predict(model1_t, df, type = 'response')
+```
+
+推定されたCATEは下記の通り。
+
+```{r}
+# 可視化
+# bind_cols(df, y1_t = y1_t, y0_t = y0_t) %>% 
+#   ggplot(., aes(x, y1_t - y0_t)) + 
+#   geom_point() + 
+#   theme_bw() + 
+#   labs(y = 'CATE', title = 'T-Learner')
+mean(y1_t - y0_t)
+```
 
 ## X-Learner
+
+X-Learnerは下記の手順でCATEを推定する。傾向スコアの計算が必要だったり、構築されたモデルの推定値を利用するなど
+、少し複雑な手順を踏む。
 
 1. 学習: 個人ごとの`t=0`のデータに対し、`X->y`の機械学習モデル`MODEL0`を作成(学習時に`t`は使わない)
 2. 学習: 個人ごとの`t=1`のデータに対し、`X->y`の機械学習モデル`MODEL1`を作成(学習時に`t`は使わない)
 3. 学習: 個人ごとの`t=0`のデータに対し、`X`を使って、`MODEL1`から予測値`y1`を得る(`MODEL0`ではない)
-4. 学習: 個人ごとの`t=1`のデータに対し、`X`を使って、`MODEL0`から予測値`y0`を得る(`MODEL1`ではない)
-5. 学習: 個人ごとの`t=0`のデータに対し、`y1-y`を`d0`として計算
+4. 学習: 個人ごとの`t=0`のデータに対し、`y1-y`を`d0`として計算
   - `d0`は介入を受けなかった個人の「介入を受けていない`y`」と「もし介入を受けた時の`y1`」の差分。
-  - `d0`は介入を受けない個人の介入効果。
+  - `d0`は介入を受けない個人の介入効果(ATU)。
+5. 学習: 個人ごとの`t=1`のデータに対し、`X`を使って、`MODEL0`から予測値`y0`を得る(`MODEL1`ではない)
 6. 学習: 個人ごとの`t=1`のデータに対し、`y-y0`を`d1`として計算
   - `d1`は介入を受けた個人の「介入を受けた`y`」と「もし介入を受けなかった時の`y0`」の差分。
-  - `d1`は介入を受けた個人の介入効果。
+  - `d1`は介入を受けた個人の介入効果(ATT)。
 7. 学習: 個人ごとの`t=0`のデータに対し、`X->d0`の機械学習モデル`MODEL00`を作成(学習時に`t`は使わない)
 8. 学習: 個人ごとの`t=1`のデータに対し、`X->d1`の機械学習モデル`MODEL11`を作成(学習時に`t`は使わない)
-9. 学習: 個人ごとのデータに対し、`X->t`の機械学習モデル`MODEL-ps`を作成(傾向スコア`p`を計算)
+9. 学習: 個人ごとのデータに対し、`X->t`の機械学習モデル`MODEL_ps`を作成(傾向スコア`ps`を計算)
 10. 予測: 個人ごとのデータに対し、`X`を使って、`MODEL00`から予測値`y0m0`を得る
 11. 予測: 個人ごとのデータに対し、`X`を使って、`MODEL11`から予測値`y1m1`を得る
 12. 予測: 個人ごとのデータに対し、`X`を使って、`MODEL-ps`から予測値`p`を得る
-13. 評価: 予測値`(p)*(y0m0)+(1-p)*(y1m1)`がCATE
+13. 評価: 予測値`(ps)*(y0m0)+(1-ps)*(y1m1)`がCATEとなる
 
 図は[こちら](https://matheusfacure.github.io/python-causality-handbook/21-Meta-Learners.html#s-learner-aka-the-go-horse-learner)よりお借りした。
 
@@ -97,4 +184,82 @@ knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInfere
 knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference09/x-learner.png')
 ```
 
+手順および画像を参照しながらモデルを構築する。
 
+```{r}
+df0 <- df %>% filter(t == 0) # 介入を受けてない集団
+df1 <- df %>% filter(t == 1) # 介入を受けた集団
+
+# 介入を受けてないモデル
+model0_x <- randomForest(y ~ x1 + x2 + x3 + x4, data = df0)
+# 介入を受けたモデル
+model1_x <- randomForest(y ~ x1 + x2 + x3 + x4, data = df1)
+
+# 推定された介入効果を各個人ごとに計算
+d0 <- predict(model1_x, df0, type = 'response') - df0$y
+d1 <- df1$y - predict(model0_x, df1, type = 'response')
+
+# ATTを推定するモデル
+model00_x <- randomForest(d0 ~ x1 + x2 + x3 + x4, df0)
+# ATUを推定するモデル
+model11_x <- randomForest(d1 ~ x1 + x2 + x3 + x4, df1)
+# 傾向スコアを推定するモデル
+model_ps <- randomForest(t ~ x1 + x2 + x3 + x4, df)
+
+y0m0 <- predict(model00_x, df, type = 'response')
+y1m1 <- predict(model11_x, df, type = 'response')
+ps <- predict(model_ps, df, type = 'response')
+
+ice <- ps * y0m0 + (1 - ps) * y1m1
+```
+
+推定されたCATEは下記の通り。
+
+```{r}
+# 可視化
+# bind_cols(df, cate = cate) %>% 
+#   ggplot(., aes(x, cate)) + 
+#   geom_point() + 
+#   theme_bw() + 
+#   labs(y = 'CATE', title = 'X-Learner')
+mean(ice)
+```
+
+
+## おまけ
+
+X-Learnerを使って、よく見る図を再現しておく。
+
+```{r}
+df <- read_csv('~/Desktop/metalearner.csv')
+df0 <- df %>% filter(t == 0)
+df1 <- df %>% filter(t == 1)
+
+model0_x <- randomForest(y ~ x, data = df0)
+model1_x <- randomForest(y ~ x, data = df1)
+
+d0 <- predict(model1_x, df0, type = 'response') - df0$y
+d1 <- df1$y - predict(model0_x, df1, type = 'response')
+
+model00_x <- randomForest(d0 ~ x, df0)
+model11_x <- randomForest(d1 ~ x, df1)
+model_ps <- randomForest(t ~ x, df)
+
+y0m0 <- predict(model00_x, df, type = 'response')
+y1m1 <- predict(model11_x, df, type = 'response')
+ps <- predict(model_ps, df, type = 'response')
+
+cate <- ps * y0m0 + (1 - ps) * y1m1
+bind_cols(df, cate = cate) %>%
+  ggplot(., aes(x, cate)) +
+  geom_point() +
+  theme_bw() +
+  labs(y = 'CATE', title = 'X-Learner')
+```
+
+
+## 参考文献
+
+- [EconMLパッケージの紹介 (meta-learners編)](https://usaito.hatenablog.com/entry/2019/04/07/205756)
+- [Metalearnerを使った2値アウトカムHeterogeneous treatment effectsの簡易検証](https://analytics.livesense.co.jp/entry/2022/06/28/110000)
+- [【統計的因果推論#9】機械学習と因果推論](https://www.youtube.com/watch?v=1dugyKvUCWo)
