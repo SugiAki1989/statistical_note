@@ -21,6 +21,7 @@
 - [フィッシャー情報量の直感的な理解](https://sugiaki1989.github.io/statistical_note/note_pvalue13/note_pvalue13.html)
 - [条件付き独立について](https://sugiaki1989.github.io/statistical_note/note_pvalue16/note_pvalue16.html)
 - [分位点関数(逆累積分布関数)について](https://sugiaki1989.github.io/statistical_note/note_pvalue17/note_pvalue17.html)
+- [畳み込み積分について](https://sugiaki1989.github.io/statistical_note/note_pvalue18/note_pvalue18.html)
 
 ## ベイズ統計学
 
@@ -41,10 +42,10 @@
 - [アヒル本15-Chapter11-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes15/note_ahirubayes15.html)
 - [アヒル本16-Chapter12-](https://sugiaki1989.github.io/statistical_note/note_ahirubayes16/note_ahirubayes16.html)
 - [8 Schoolの階層モデル](https://sugiaki1989.github.io/statistical_note/note_bayes01/note_bayes01.html)
-- [二項分布とベータ分布](https://sugiaki1989.github.io/statistical_note/note_bayes01/note_bayes02.html)
-- [社会科学のためのベイズ統計モデリング-Chapter08-](https://sugiaki1989.github.io/statistical_note/note_bayes03/note_bayes03.html)
-- [社会科学のためのベイズ統計モデリング-Chapter08-](https://sugiaki1989.github.io/statistical_note/note_bayes04/note_bayes04.html)
-- [社会科学のためのベイズ統計モデリング-Chapter09-](https://sugiaki1989.github.io/statistical_note/note_bayes05/note_bayes05.html)
+- [社会科学のためのベイズ統計モデリング-Chapter08:二項分布とベータ分布-](https://sugiaki1989.github.io/statistical_note/note_bayes02/note_bayes02.html)
+- [社会科学のためのベイズ統計モデリング-Chapter08:対数正規分布-](https://sugiaki1989.github.io/statistical_note/note_bayes03/note_bayes03.html)
+- [社会科学のためのベイズ統計モデリング-Chapter08:普及モデル-](https://sugiaki1989.github.io/statistical_note/note_bayes04/note_bayes04.html)
+- [社会科学のためのベイズ統計モデリング-Chapter09:遅延価値割引モデル-](https://sugiaki1989.github.io/statistical_note/note_bayes05/note_bayes05.html)
 - [RとStanではじめるベイズ統計モデリングによるデータ分析入門-Part3:brmsパッケージ-](https://sugiaki1989.github.io/statistical_note/note_bayes06/note_bayes06.html)
 - [RとStanではじめるベイズ統計モデリングによるデータ分析入門-Part4:GLMM-](https://sugiaki1989.github.io/statistical_note/note_bayes07/note_bayes07.html)
 - [制約付きデータ型のordered型](https://sugiaki1989.github.io/statistical_note/note_bayes08/note_bayes08.html)
@@ -233,6 +234,10 @@
 - [Robyn が出力するグラフについて](https://sugiaki1989.github.io/statistical_note/note_MarketingMixModeling03/note_MarketingMixModeling03.html)
 - [Robyn R Demo を動かす](https://sugiaki1989.github.io/statistical_note/note_MarketingMixModeling04/note_MarketingMixModeling04.html)
 
+## DataBase系パッケージ
+
+- [SageMarkerからDatabricksに接続する](https://sugiaki1989.github.io/statistical_note/note_db01/note_db01.html)
+
 ## 可視化
 
 - [ggplot2 の位置スケール](https://sugiaki1989.github.io/statistical_note/note_ggplot01/note_ggplot01.html)
@@ -308,5 +313,5 @@
 - [formula 関数と surv_fit 関数の話](https://sugiaki1989.github.io/statistical_note/note_tips32/note_tips32.html)
 - [GoogleForm のマルチアンサーを処理する](https://sugiaki1989.github.io/statistical_note/note_tips33/note_tips33.html)
 - [クロス集計からモンテカルロシュミレーションまで](https://sugiaki1989.github.io/statistical_note/note_tips34/note_tips34.html)
-
+- [比率の差の検定とχ二乗検定](https://sugiaki1989.github.io/statistical_note/note_tips35/note_tips35.html)
 

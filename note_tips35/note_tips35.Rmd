@@ -1,0 +1,73 @@
+---
+title: '比率の差の検定とχ二乗検定'
+pagetitle: '比率の差の検定とχ二乗検定'
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: 'show'
+    highlight: 'kate'
+    # theme: 'flatly'
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = 'center',
+                      dev        = 'ragg_png')
+```
+
+<div class='update-right'>
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、比率の差の検定とχ二乗検定の書き換えについてのメモを残しておく。関数の使い方をすぐ忘れてしまうので。
+
+## メモ
+
+```{r}
+# Group A 
+# 7/100
+numerator_a <- 7
+denominator_a <- 100
+
+# Group B
+# 15/100
+numerator_b <- 15
+denominator_b <- 100
+
+x <- c(numerator_a, numerator_b)
+n <- c(denominator_a, denominator_b)
+mat <- cbind(x = x, y = n-x)
+
+list(
+  numerator = x,
+  denominator = n,
+  matrix = mat
+)
+
+# 母比率の差の検定
+prop.test(
+  x = x, 
+  n = n, 
+  alternative = 'two.sided', 
+  correct = FALSE
+  )
+
+# カイ二乗検定
+chisq.test(
+  x = mat,
+  correct = FALSE
+  )
+```
+
+

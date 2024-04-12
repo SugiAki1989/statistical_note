@@ -1,0 +1,230 @@
+---
+title: "畳み込み積分について"
+pagetitle: "畳み込み積分について"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートは、畳み込み積分についてについてについて簡単にまとめているもの。Rで畳み込み積分をしたことなかったので、学び直しをした際のメモ書き。きっかけは、3Blue1BrownJapanさんの下記の畳み込みに関する動画で、畳み込み積分を理解するためにはすばらしい動画教材だった。
+
+- [畳み込みの仕組み | Convolution](https://www.youtube.com/watch?v=CHx6uHnWErY)
+- [畳み込み | 確率の美しい演算](https://www.youtube.com/watch?v=x3iY5JYwnM4&t=957s)
+- [なぜ正規分布どうしの畳み込みは正規分布なのか](https://www.youtube.com/watch?v=ygBMnjJC65k)
+
+画像は[畳み込み | 確率の美しい演算](https://www.youtube.com/watch?v=x3iY5JYwnM4&t=957s)の1分26秒のスクリーンショットで、これらの関数をRで実装してみる。私の理解が甘く、説明を誤っている可能性はあるので注意。
+
+```{r, echo=FALSE, out.width='75%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_pvalue18/Convolution.png')
+```
+
+## 畳み込み積分(Convolution)
+
+連続型の確率分布$f_X,f_Y$に対する畳み込み積分は下記の通り。
+
+$$
+\begin{eqnarray}
+f_Z(z) &=& \int_{-\infty}^{\infty}  f_X(x) f_Y(z-x) dx \\
+\end{eqnarray}
+$$
+
+畳み込み積分の内容に関しては、動画を参照いただくとして、ここでは動画中に現れる下記の確率分布の畳み込み積分を行う。
+
+$$
+\begin{eqnarray}
+f_X(x) &=& e^{-x} \ (x > 0)\\
+f_Y(y) &=& \frac{1}{2}y^{2}e^{-y} \ (y > 0)\\
+\end{eqnarray}
+$$
+
+1つ目の確率密度関数は$\lambda=1$の指数分布である。
+
+$$
+\begin{eqnarray}
+f_X(x) &=& \lambda e^{-\lambda x} \\
+&=& 1 e^{-1 x}\\
+&=& e^{-x} \\
+\end{eqnarray}
+$$
+
+2つ目の確率密度関数は、$shape=k=3, \ rate=\theta=1$のガンマ分布である。
+
+$$
+\begin{eqnarray}
+f_Y(y) &=& \frac{1}{\Gamma(k)\theta^k} y^{k-1} e^{-\frac{y}{\theta}}  \\
+&=& \frac{1}{\Gamma(3) 1^3} y^{3-1} e^{-\frac{y}{1}} \\
+&=& \frac{1}{2} y^{2} e^{-y}  \\
+\end{eqnarray}
+$$
+
+下記のような分布の和の分布$f_{X+Y}(z)$を計算する。
+
+```{r}
+# Define the functions
+# f_X <- function(x) exp(-1*x)
+f_X <- function(x) dexp(x = x, rate = 1)
+
+# f_Y <- function(x) (1/2)*x^2*exp(-1*x)
+f_Y <- function(y) dgamma(x = y, shape = 3, rate = 1) # scale=1/rateなので、1/1で表現できる
+
+y <- x <- seq(0, 10, 0.01)
+par(mfrow = c(1, 2))
+plot(x, f_X(x), type = 'l', ylim = c(0, 1), lwd = 2, main = 'Exponential Dist(λ = 1)')
+plot(y, f_Y(y), type = 'l', ylim = c(0, 1), lwd = 2, main = 'Gamma Dist(k = 3, θ = 1)')
+```
+
+同時確率密度関数は下記のとおりである。
+
+```{r}
+par(mfrow = c(1, 3))
+par(mar = c(0, 0, 0, 0))
+joint_density <- outer(X = f_X(x), Y = f_Y(y), '*')
+persp(x, y, joint_density, theta =  0, phi =  2, xlab = 'x', ylab = 'y', zlab = 'z')
+persp(x, y, joint_density, theta = 90, phi =  2, xlab = 'x', ylab = 'y', zlab = 'z')
+persp(x, y, joint_density, theta = 45, phi = 30, xlab = 'x', ylab = 'y', zlab = 'z')
+```
+
+$f_{X+Y}(z)$は下記のような分布になるはずである。
+
+```{r}
+# Generate random variables
+set.seed(1)
+n <- 10000
+Z <- 
+  rexp(n = n, rate = 1) + # f_X
+  rgamma(n = n, shape = 3, rate = 1) # f_Y
+
+# Compare the methods
+hist(
+  Z,
+  freq = FALSE,
+  breaks = 100,
+  ylim = c(0, 0.3),
+  xlim = c(0, 10),
+  main = 'Convolution f_{X+Y}'
+)
+```
+
+畳み込みの部分は下記の数式に従い、
+
+$$
+\begin{eqnarray}
+f_Z(z) &=& \int_{-\infty}^{\infty}  f_X(x) f_Y(z-x) dx \\
+\end{eqnarray}
+$$
+
+畳み込みの関数を作成する。
+
+```{r}
+# Vectorize version
+# # Convolution integral
+# f_Z <- function(z) {
+#   integrate(function(x) f_X(x)*f_Y(z-x), 0, 10)$value
+# }
+# f_Z <- Vectorize(f_Z)
+
+# sapply version
+# f_Z <- function(z) {
+#   sapply(z, function(z_val) integrate(function(x) f_X(x) * f_Y(z_val - x), 0, 10)$value)
+# }
+
+# map version
+# f_Z <- function(z) {
+#   purrr::map_dbl(z, ~integrate(function(x) f_X(x) * f_Y(.x - x), 0, 10)$value)
+# }
+
+f_Z <- function(z) {
+  purrr::map_dbl(
+    .x = z, 
+    .f = function(z) {
+      integrate(function(x) f_X(x) * f_Y(z - x), 0, 10)$value
+      })
+}
+```
+
+
+例えば$z=5$だと下記の斜めの線の断面を積分することになる。そして、視点を線が真っ直ぐ見れる位置に移動させ、面積を積み上げたのが$f_Z(z=5)$となる。
+
+```{r}
+contour(x, y, joint_density, at = seq(0, 10, 1)) 
+lines(x, rep(0, length(x)))
+lines(rep(0, length(x)), y)
+lines(x, 5-x, col = 'cornflowerblue', lwd = 2)
+```
+
+$z=5$だと、下記の$x-y$平面の座標で積分を行うことになる。
+
+```{r}
+head(data.frame(x, y = 5-x), 10)
+```
+
+実際に積分した値はこちら。
+
+```{r}
+# integrate(function(x) f_X(x) * f_Y(5 - x), 0,  1)$value +
+# integrate(function(x) f_X(x) * f_Y(5 - x), 1,  2)$value +
+# integrate(function(x) f_X(x) * f_Y(5 - x), 2,  3)$value +
+# integrate(function(x) f_X(x) * f_Y(5 - x), 3,  4)$value +
+# integrate(function(x) f_X(x) * f_Y(5 - x), 4,  5)$value +
+# integrate(function(x) f_X(x) * f_Y(5 - x), 5,  6)$value +
+# integrate(function(x) f_X(x) * f_Y(5 - x), 6,  7)$value +
+# integrate(function(x) f_X(x) * f_Y(5 - x), 7,  8)$value +
+# integrate(function(x) f_X(x) * f_Y(5 - x), 8,  9)$value +
+# integrate(function(x) f_X(x) * f_Y(5 - x), 9, 10)$value
+# 上記と同じ
+integrate(function(x) f_X(x) * f_Y(5 - x), 0,  10)$value
+```
+
+下記とも一致する。
+
+```{r}
+f_Z(z = 5)
+```
+
+$x,z-x$の和は常に$z=5$となる。
+
+```{r}
+head(x + (5-x), 100)
+```
+
+畳み込み積分で計算した値と天下り的に知っている答えの関数の値が一致していることがわかる。
+
+```{r}
+hist(Z, freq = FALSE, breaks = 100, ylim = c(0, 0.3), xlim = c(0, 10), main = 'Convolution f_{X+Y}')
+z <- seq(0, 10, 0.01)
+lines(z, f_Z(z), lty = 2, col = 'tomato', lwd = 2)
+
+f_ZZ <- function(x) (1/6)*x^3*exp(-1*x)
+normalized_v <- integrate(f_ZZ, 0, Inf)$value
+lines(z, f_ZZ(z)/normalized_v, lty = 3, col = 'blue', lwd = 2)
+```
+
+## 参考文献
+
+- [Adding two random variables via convolution in R](https://stackoverflow.com/questions/23569133/adding-two-random-variables-via-convolution-in-r)
+- [畳み込みの仕組み | Convolution](https://www.youtube.com/watch?v=CHx6uHnWErY)
+- [畳み込み | 確率の美しい演算](https://www.youtube.com/watch?v=x3iY5JYwnM4&t=957s)
+- [なぜ正規分布どうしの畳み込みは正規分布なのか](https://www.youtube.com/watch?v=ygBMnjJC65k)
+

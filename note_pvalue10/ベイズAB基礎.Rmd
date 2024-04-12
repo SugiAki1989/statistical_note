@@ -1,0 +1,537 @@
+---
+title: "ベイジアンABテストの基礎知識"
+pagetitle: "ベイジアンABテストの基礎知識"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+CreatedAt: `r format(Sys.time(), "%Y-%m-%d %H:%M:%S")`
+</div>
+
+# はじめに
+
+このノートはベイジアンABテストの内容を理解するための必要最低限の基礎知識をまとめたものです。そのため、**厳密さはありません。また、細かい部分で誤りが含まれる可能性があります…すいません。**
+
+ベイズ統計学について、詳細を正しく理解したい場合は、朝倉書店から出版されているPeter D. Hoff著の[標準ベイズ統計学(日本語版)](https://www.asakura.co.jp/detail.php?book_code=12267)などを参照してください。
+
+
+## ベイズの定理
+
+まずはベイズの定理のおさらいから。ベイズ統計学は名前の通りベイズの定理と関係がある。ベイズの定理は下記の通り表現される。
+
+$$
+p(\theta|y) = \frac{p(y|\theta)p(\theta)}{p(y)} = \frac{p(y|\theta)p(\theta)}{\int p(y|\theta)p(\theta)d\theta} 
+$$
+
+$y$をデータ、$\theta$をパラメタとする。パラメタ$\theta$は、コインの投げの表が出る確率やメルマガのコンバージョン率などをイメージしていればここではOK。積分記号が出てきて難しく見えるが、本質的な部分は下記の部分。$\propto$は比例を意味する。
+
+$$
+p(\theta|y) \propto p(y|\theta)p(\theta)
+$$
+各部分には名前がついており、$p(\theta|y)$を事後分布(posterior)、$p(y|\theta)$を尤度(likelihood)、$p(\theta)$を事前分布(prior)と呼ぶ。つまり、「事後分布は尤度と事前分布の積に比例する」ということ。$p(\theta)$は、$\theta$のいろんな値についての確からしさ度合いを意味する。$\theta$のように確率的に値が変化するものを確率変数と呼ぶ。
+
+## 確率分布
+
+確率分布とは、確率変数がある値となる確率を与える関数のこと。例えば有名な確率分布として、正規分布がある。
+
+$$
+f(x)=\dfrac{1}{\sqrt{2\pi\sigma^2}}\exp \left(-\dfrac{(x-\mu)^ 2}{2\sigma^ 2} \right)
+$$
+
+身長や体重、製品の重量のばらつきなどは正規分布に従うと言われる。「正規分布に従う」とは、値がその正規分布を基に確率的に生成されるということ。日本人男性の身長を例に考える。平均は170、標準偏差5の正規分布に、日本人男性の身長は従う。確率分布は下記のように表現できる。
+
+```{r}
+plot(
+  seq(150,190,0.01),
+  dnorm(seq(150,190,0.01), 170, 5),
+  lwd = 2,
+  type = "l",
+  xlab = "Height",
+  ylab = "Density",
+  main = "Height of Japanese",
+  col = "cornflowerblue"
+)
+
+```
+
+つまり、170cm前後が1番確率的にでやすい。連続型確率分布は区間を積分した値が確率となるので、高さがそのまま確率とはならないので注意。
+
+ベイジアンABテストでは、特定の確率分布に従って、乱数を生成することでテストの評価を行う。乱数を生成するとはどういうことか。さきほどの正規分布から値を乱数を生成する例で考えると、170前後がもっとも出やすく、低い確率で150、190もでる可能性がある。下記は、日本人男性を5人生成する作業を5回繰り返している。
+
+```{r}
+n_japanese <- 5
+mu <- 170
+sigma <- 5
+
+set.seed(1)
+r1 <- rnorm(n_japanese, mu, sigma)
+
+set.seed(2)
+r2 <- rnorm(n_japanese, mu, sigma)
+
+set.seed(3)
+r3 <- rnorm(n_japanese, mu, sigma)
+
+set.seed(4)
+r4 <- rnorm(n_japanese, mu, sigma)
+
+set.seed(5)
+r5 <- rnorm(n_japanese, mu, sigma)
+
+list(
+  seed1 = r1,
+  seed2 = r2,
+  seed3 = r3,
+  seed4 = r4,
+  seed5 = r5
+)
+```
+
+乱数種(シード)にも注意してほしい。「乱数種」とは、乱数列を生成するときに、その計算の元となる数字で、これが同じであれば、生成される乱数の列は同じになる。つまり、乱数種が異なると結果が異なる。
+
+### 尤度(Likelihood)
+
+ベイズの話に戻る。5人にメールを配信し、4人がコンバージョンしたとする。このデータが得られたとして、ベイズの枠組みで事後分布$p(\theta|y)$がどのように得られるかを考える。まずは、尤度$p(y|\theta)$から考える。尤度$p(y|\theta)$は、$\theta$の関数で、$\theta$が与えられたときに、5人のうち4人(データ$y$)がコンバージョンする尤もらしさを表す関数。
+
+ここでは、尤度を表現するために2項分布(Binomial distribution)を利用する。2項分布は離散型の確率分布で、確率質量関数は以下のように表される。
+
+- $n$は試行回数
+- $y$は成功回数
+- $\theta$は成功確率を表すパラメタ
+
+成功確率$\theta$で起こる独立な事象が$n$回のうち$y$回起こる確率を表す。
+
+$$
+f(y) = {}_n C_{y} \theta^y (1-\theta)^{n-y}
+$$
+
+5人のうち4人(データ$y$)がコンバージョンする尤もらしさを表す関数(尤度関数)を可視化すると、下記の通り可視化できる。$\theta=0.8$が他の$\theta$よりも尤もらしい(=最尤法)ことがわかる。
+
+```{r}
+theta <- seq(0, 1, by = 0.0001)
+#likelihood <- theta^4 * (1-theta)^1
+y <- 4
+n <- 5
+likelihood <- dbinom(y, size = n, prob = theta)
+
+# 最尤推定値の計算
+mle_p <- theta[which.max(likelihood)]
+
+# グラフの描画
+plot(
+  theta,
+  likelihood,
+  type = "l",
+  lwd = 2,
+  col = "cornflowerblue",
+  xlab = "θ",
+  ylab = "Likelihood",
+  main = "Likelihood: Binom Dist(Probability Model)"
+)
+abline(v = mle_p, col = "black", lty = 2)
+```
+尤度関数は確率分布ではないので、全域を積分しても1にはならない。
+
+```{r}
+integrate(function(theta){dbinom(y, size = n, prob = theta)}, 0, 1)
+```
+
+### 事前分布(Prior)
+
+事後分布$p(\theta|y)$を得るためには、事前分布$p(\theta)$も必要になる。事前分布はデータ$y$が与えられる前の確率分布のこと。ここでは、コンバージョン率の確率分布のこと。
+
+ただ、これを知りたいので、メルマガを送っているので、送る前にはわからない。このようなケースで利用されるのが無情報事前分布(non-informative prior)。何の情報も持っていない確率分布のこと。つまり、何も情報がない状態では、どの場合の確率も同じ$p(\theta)=const$と仮定する「理由不十分の原則」に従うことを意味する。
+
+ここでは、無情報事前分布には、ベータ分布（Beta distribution）を利用する。$0,1$の区間で定義される連続型の確率分布で、確率密度関数は以下のように表される。
+
+- $\alpha, \beta$: 分布の形状を表すパラメタ 
+- $B$: ベータ関数
+
+$$
+f(\theta) = \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta - 1}}{B(\alpha, \beta)} \propto \theta^{\alpha - 1} (1 - \theta)^{\beta - 1}
+$$
+
+$\alpha=1, \beta=1$のとき、ベータ分布は以下のように可視化される。離散型と異なり、区間を積分した値が確率となるので注意。つまり、高さがそのまま確率を意味しない。
+
+```{r}
+# パラメータの設定
+alpha <- 1
+beta <- 1
+
+# 0から1までの範囲で確率密度関数を計算
+pdf <- dbeta(theta, alpha, beta)
+
+# プロット
+plot(
+  theta,
+  pdf,
+  type = "l",
+  lwd = 2,
+  xlab = "θ",
+  ylab = "Density",
+  main = "Prior: Beta Dist (α=1, β=1)",
+  col = "red"
+)
+```
+
+### 事後分布(Posterior)
+
+尤度、事前分布が明らかとなったので、事後分布を算出できる。
+
+$$
+\begin{eqnarray}
+p(\theta|y) &=& \frac{p(y|\theta)p(\theta)} {p(y)} \\
+&=& \frac{{}_n C_{y} \theta^y (1-\theta)^{n-y} \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta - 1}}{B(\alpha, \beta)}}{\int_0^1 {}_n C_{y} \theta^y (1-\theta)^{n-y} \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta - 1}}{B(\alpha, \beta)} d \theta}\\
+&=& \frac{5 \theta^4 (1-\theta)^{5-4} \frac{\theta^{1 - 1} (1 - \theta)^{1 - 1}}{1}} {0.1666667}\\
+&=& 30 \theta^4 (1-\theta)^{1} 1 \\
+&=& 30 \theta^4 (1-\theta)^{1} \\ 
+\end{eqnarray}
+$$
+
+上記の通り、事後分布が得られた。これは$\theta$の確率分布であり、コンバージョン率が従う確率分布である。この分布を利用することで、どれくらいのコンバージョン率の確率が最も高いのかなど評価できる。80%くらいの確率が最も高く、20%あたりはほとんど得られないことがわかる。
+
+```{r}
+norm_const <- function(theta) {
+  dbinom(y, n, theta) * dbeta(theta, 1, 1)
+}
+inte <- integrate(norm_const, 0, 1)[[1]]
+post_no_normalied <- function(theta) (5 * theta^4 * (1-theta)^1)
+plot(
+  theta,
+  post_no_normalied(theta) / inte,
+  type = "l",
+  lwd = 2,
+  xlab = "θ",
+  ylab = "Density",
+  main = "Posterior Dist(Normalized)",
+  col = "cornflowerblue"
+)
+```
+
+正規化済みなので、積分すると事後分布はちゃんと1になる。
+
+```{r}
+integrate(function(theta) post_no_normalied(theta) / inte, 0, 1)
+```
+
+### 余談
+
+さきほどの式は分母、分子にある定数を比例定数とすれば、スッキリする。
+
+$$
+\begin{eqnarray}
+p(\theta|y) &=& \frac{p(y|\theta)p(\theta)} {p(y)} \\
+&\propto& \theta^y (1-\theta)^{n-y} \theta^{\alpha - 1} (1 - \theta)^{\beta - 1} \\
+&\propto& \theta^4 (1-\theta)^{5-4} \theta^{1 - 1} (1 - \theta)^{1 - 1}\\
+&\propto& \theta^4 (1-\theta)^{1} 1 \\
+&\propto& \theta^4 (1-\theta)^{1} \\ 
+\end{eqnarray}
+$$
+
+得られたのは正規化されていない事後分布。正規化されていないので、全域で積分しても1にならない。
+
+```{r}
+plot(
+  theta,
+  theta^4 * (1-theta)^1,
+  type = "l",
+  col = "gray",
+  lwd = 2,
+  xlab = "θ",
+  ylab = "Density",
+  main = "Posterior Dist(Not Normalized)",
+)
+```
+
+また、正規化された事後分布はベータ分布でも等価に表現できる。
+
+```{r}
+par(mfrow = c(1, 2))
+
+plot(
+  theta,
+  post_no_normalied(theta) / inte,
+  type = "l",
+  lwd = 2,
+  xlab = "θ",
+  ylab = "Density",
+  main = "Posterior Dist(Normalized)",
+  col = "cornflowerblue"
+)
+# Ex: Binom×Beta
+# Beta(y+α, n-y+β)
+# Beta(4+1, 5-4+1)→Beta(5, 2)
+
+plot(
+  theta,
+  dbeta(theta, 5, 2),
+  type = "l",
+  col = "tomato",
+  lwd = 2,
+  xlab = "θ",
+  ylab = "Density",
+  main = "Posterior Dist(Beta)",
+)
+```
+
+## 事前情報を利用する
+
+仮に、事前情報を持っているのであれば、その情報を反映させることができる。下記はコインを3回投げて、3回とも表が出たデータに対して、事前情報として、コインの表が出る確率は0.5が出やすいという考えを反映させたもの。事後分布のピークが0.5に引きずられていることがわかる。これが事前の情報を反映するという直感的なイメージである。
+
+```{r}
+plot(
+  theta,
+  theta^3,
+  type = "l",
+  ylim = c(0, 3),
+  lwd = 2,
+  xlab = "θ",
+  ylab = "Density",
+  col = "grey"
+)
+
+curve(
+  dbeta(x, 2, 2),
+  type = "l",
+  col = "tomato",
+  add = TRUE,
+  lwd = 2
+)
+## Binomo×Beta
+## θ^(3) (1-θ)^(0) θ^(2-1) (1-θ)^(2-1)
+## θ^(5-1) (1-θ)^(2-1)
+curve(
+  dbeta(x, 5, 2),
+  type = "l" ,
+  col = "cornflowerblue",
+  lwd = 2,
+  add = TRUE
+)
+legend(
+  0.05,
+  3,
+  c("Likelihood", "Prior", "Posterior"),
+  col = c("grey", "tomato", "cornflowerblue"),
+  lwd = c(2, 2, 2)
+)
+```
+
+## ベイジアンABテスト
+
+ベイジアンABテストは、ABテストのデータから事後分布を計算し、2つ事後分布からモンテカルロシュミレーションを行うことで、テストの有効性を確率的に判断するABテストの方法。大まかな手順は下記の通り。
+
+- A,Bのテストデータを手に入れる
+- Aのテストデータから事前分布、尤度をもとにAの事後分布を得る
+- Bのテストデータから事前分布、尤度をもとにBの事後分布を得る
+- Aの事後分布とBの事後分布から乱数を生成し、大きさを比較する(モンテカルロシュミレーション)
+- 大きさを比較した結果をもとに、評価を下す
+
+GoogleのGeminiによると、ベイジアンABテストのメリットは下記の通り。
+
+- メリット: テスト結果が、知識がなくても直感的に理解しやすい
+- メリット: テスト開始前に必要なサンプルサイズを計算する必要がない
+- メリット: テスト結果をリアルタイムで確認できる
+- メリット: テスト結果が確率分布として可視化される
+- メリット: テストAとBのどちらが優れているかを確率的に判断できる
+
+ベイジアンABテストのデメリット
+
+- デメリット: 従来のABテストよりも複雑な計算が必要
+- デメリット: 適切な事前分布を選択する必要がある
+
+以下、GoogleのGeminiに対する著者のコメント。著者コメントが必ずしも正しいわけではない。
+
+ベイズが知識がなくても理解できるのは、ここで扱うようケースが解析的に解けるため。ベイズの理解には代数幾何が必要だったり、MCMCで事後分布を推定する場合、HMC法は物理要素強めなので、従来の頻度論と同じで、理解するとなるとどっちもどっちな気がする。
+  
+サンプルサイズ設計に関しては、ベイズファクターデザイン分析BFDAによるサンプルサイズ設計とかの話もあるので、どうなんでしょうか。
+
+テスト結果に関しては、p値関数を利用すれば、p値、点推定値、信頼区間、パラメタを可視化できるので、頻度論でも情報は豊富に得られる。
+
+### ベイジアンABテストの実践
+
+メール配信数が10000人ずつしか確保できず、ABテストを実施したとする。計測したCV数やCV率に、AとBで違いがあるのかを知りたい。
+
+|パターン|配信数|CV数|CV率|
+|:---:|:---:|:---:|:---:|
+|A_Original|10000|30|0.0030|
+|B_Testing |10000|45|0.0045|
+
+ここでは、どちらのケースも、事前分布はベータ分布の無情報事前分布を利用すると、事後分布は$Beta(y+\alpha, n-y+\beta)$となるため、パターンAの場合、
+
+$$
+\begin{eqnarray}
+p(\theta|y) &=& p(y|\theta)p(\theta)/p(y) \\
+&\propto& {}_n C_{y} \theta^y (1-\theta)^{n-y} \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta - 1}}{B(\alpha, \beta)}\\
+&\propto& \theta^{30} (1-\theta)^{10000-30} 1\\
+&\propto& \theta^{30} (1-\theta)^{9970}\\
+&\propto& \theta^{31−1} (1-\theta)^{9971-1}\\
+\end{eqnarray}
+$$
+
+となる。パターンBも同様である。
+
+$$
+\begin{eqnarray}
+p(\theta|y) &\propto& \theta^{45} (1-\theta)^{9955}\\
+&\propto& \theta^{46-1} (1-\theta)^{9956-1}
+\end{eqnarray}
+$$
+
+オリジナル、テストパターンを可視化してみると、事後分布は下記のように可視化できる。
+
+```{r}
+# B_Testing
+plot(
+  theta,
+  dbeta(theta, 46, 9956),
+  type = "l",
+  lwd = 2,
+  xlab = "θ",
+  ylab = "Density",
+  col = "tomato",
+  xlim = c(0, 0.008),
+  ylim = c(0, 800),
+  main = 'Posterior: Pattern A(Gray) & B(Red)'
+)
+# A_Original
+curve(
+  dbeta(x, 31, 9971),
+  type = "l" ,
+  col = "gray",
+  lwd = 2,
+  add = TRUE
+)
+```
+
+各パターンのCV率の事後分布が得られたので、各分布から乱数を生成し、大小を比較するモンテカルロシュミレーションを行う。大小比較はリフト値を用いる。
+
+リフトは「テストグループ(B)の値がコントロールグループ(A)の値に比べてどれだけ上昇(または低下)したか」を表す指標。
+
+$$
+Lift = \frac{(B - A)}{A} 
+$$
+
+1つの乱数を生成し、Aが0.0030(=0.30%)、Bが0.0045(=0.45%)のとき、リフト値は50%上昇したことを示す。
+
+$$
+Lift = \frac{(0.0045 - 0.0030)}{0.0030} = 0.5 = 50\%
+$$
+
+ここでは、乱数種は1000番で、シュミレーションサイズ(=乱数の数)は10000個とする。モンテカルロシュミレーションした結果が下記の通りである。
+
+```{r}
+sim_n <- 10000
+set.seed(1000)
+a <- rbeta(sim_n, 31, 9971)
+b <- rbeta(sim_n, 46, 9956)
+lift <- (b-a)/a
+
+hist(
+  lift,
+  lwd = 2,
+  ylab = "Density",
+  breaks = 50,
+  main = "Lift: (B-A)/A"
+)
+abline(v = 0, col = "black", lty = 2)
+```
+
+0より大きいということは、BのテストグループのCV率が大きいことを意味する。また0.5の部分にリフト値のピークが来ているので、テストグループ(B)のCV率は、コントロールグループ(A)のCV率に比べて、50%くらい上昇する可能性が最も高い。150%くらい上昇する可能性はないことはないが、確率は小さい。
+
+ただ、0より小さいということは、コントロールグループ(A)のCV率が高いケースもあるということになるが、BのテストグループのCV率がAのコントロールグループのCV率よりも高い確率を計算すると、96%の確率で高くなることがわかる。
+
+```{r}
+sum((b - a)/a > 0) / length(a)
+```
+
+同様にリフトが0.5より大きくなる確率も計算できる。48%の確率で0.5より大きくなることがわかる。
+
+```{r}
+sum((b - a)/a > 0.5) / length(a)
+```
+
+リフトが扱いづらければ、差分を利用する方法もある。差分なので単純に差を計算しているだけで、0.2%くらいの差が出やすく、
+
+```{r}
+diff <- (b-a)
+
+hist(
+  diff,
+  lwd = 2,
+  ylab = "Density",
+  breaks = 50,
+  main = "Diff: B-A"
+)
+abline(v = 0, col = "black", lty = 2)
+```
+
+テストグループBはオリジナルグループAのCV率に比べて、96%の確率で大きくなる。
+
+```{r}
+sum((b - a) > 0) / length(a)
+```
+
+ベイジアンABテストでは、計算された事後分布からモンテカルロシュミレーションによってコンバージョン率をランダムに生成し、大小を判断することで、テスト結果の有効性を確率的に評価する。この流れに沿うと、96%の確率でリフトは0より大きくなるので、テストグループのBのほうがCV率は高いと判断できる。
+
+ベイジアンアプローチであれば、「BのCVR」が「AのCVR」よりも大きい確率はどれくらいか？このような疑問に対して、ここまでに説明したような枠組みのもとで回答できる。一方で、頻度論アプローチの統計的仮説検定では回答できない。仮説検定は常に「帰無仮説が棄却されるか否か(CVRの差が0であるか否か)」なので、何パーセントの確率で棄却されるとは言えない。仮説検定でよく見聞きするp値はこのような役割を果たさない。
+
+## 備考
+### ランダムシードの問題
+
+乱数種によって結果が変わってしまう場合があるので、注意が必要。そもそも乱数種によって結果が変わるのは、Aグループ、Bグループで明確な差がない場合に起こりやすい。例えば、日本人(平均170、標準偏差10)とオランダ人(平均185、標準偏差10)のデータでモンテカルロシュミレーションをしてみると、ほぼ間違いなく、85％の確率でオランダ人のほうが身長が高いことがわかる。
+
+```{r}
+res <- vector(mode = "numeric", 100)
+for (i in 1:100) {
+  a <- rnorm(sim_n, 170, 10)
+  b <- rnorm(sim_n, 185, 10)
+  res[i] <- sum((b - a) > 0) / length(a)
+}
+res
+```
+
+一方で、日本人(平均170、標準偏差10)とタイ人(平均170.1、標準偏差10)のデータでモンテカルロシュミレーションをしてみると、日本人の方が確率的に高い場合もあったり、なかったりする(そもそも50%なので判断できないが)。これはモンテカルロシュミレーションのせいではなく、乱数を生成するもとの分布に差がないために起こり得る。
+
+```{r}
+res <- vector(mode = "numeric", 100)
+for (i in 1:100) {
+  a <- rnorm(sim_n, 170.0, 10)
+  b <- rnorm(sim_n, 170.1, 10)
+  res[i] <- sum((b - a) > 0) / length(a)
+}
+res
+```
+
+### P値の補足
+
+P値とは、「特定の統計モデルのもとで(帰無仮説が真であると仮定することも含む)、観察されたデータの統計的要約が観察された値と同じか、それよりも極端である場合の確率」のことで、P値が小さいということは、観察されたデータが帰無仮説のもとでは極端なものである、つまり観察されたデータが発生する確率が低いことを示す。
+
+- [統計的有意性とP値に関するアメリカ統計協会の声明](https://www.biometrics.gr.jp/news/all/ASA.pdf)
+
+上記の声明にもある通り、p値は下記の通り解釈されるもの。
+
+- P値はデータと特定の統計モデルが矛盾する程度をしめす指標のひとつである。 
+- P値は、調べている仮説が正しい確率や、データが偶然のみでえられた確率を測るものではない。 
+- 科学的な結論や、ビジネス、政策における決定は、P値がある値を超えたかどうかにのみ基づくべきではない。 
+- 適正な推測のためには、すべてを報告する透明性が必要である。
+- P値や統計的有意性は、効果の大きさや結果の重要性を意味しない。 
+- P値は、それだけでは統計モデルや仮説に関するエビデンスの、よい指標とはならない。
+

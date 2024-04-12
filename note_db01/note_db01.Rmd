@@ -1,0 +1,358 @@
+---
+title: 'SageMarkerからDatabricksに接続する'
+pagetitle: 'SageMarkerからDatabricksに接続する'
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: 'show'
+    highlight: 'kate'
+    # theme: 'flatly'
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = 'center',
+                      dev        = 'ragg_png')
+```
+
+<div class='update-right'>
+UPDATE: `r Sys.time()`
+</div>
+
+
+Databricksをはじめてさわる機会があったので、自己学習用にAzureでDatabricks環境を構築して、Databricks で遊んでみた。
+
+今回は手元のLocalMacBookのRstudio/Python、それとAWS SageMarkerからAzureDatabricksに接続する方法をまとめている。下記のPOXIT社にドキュメントがあったので、それに沿って進めているだけ。
+
+- [Databricks](https://solutions.posit.co/connections/db/databases/databricks/#databricks-http-path)
+
+## Local R Studio
+
+MacBookProのバーションは下記の通り。
+
+```
+% sw_vers
+ProductName:	Mac OS X
+ProductVersion:	10.15.7
+BuildVersion:	19H2026
+```
+
+### Driver Options
+
+まずはドライバーをインストールする。Posit Professional Driversが用意されているが、RstudioProでもないので、Databricksが用意しているドライバーをインストールする。
+
+[こちら](https://www.databricks.com/spark/odbc-drivers-download)のURL先に移動して、OSに合わせてドライバーをインストールする。今回は[Mac](https://databricks-bi-artifacts.s3.us-east-2.amazonaws.com/simbaspark-drivers/odbc/2.8.0/SimbaSparkODBC-2.8.0.1002-OSX.zip)用のドライバーをダウンロードする。
+
+```
+% ls ~/Downloads 
+SimbaSparkODBC-2.8.0.1002-OSX.zip
+```
+
+解凍してインストールしておく。
+
+### Package Options
+
+使用するパッケージは`odbc`パッケージと`DBI`パッケージの2つ。これらを組み合わせてコネクションを確立する。`odbc`の関数については、`odbc::databricks()`関数が推奨とのこと。
+
+- Using `odbc::databricks()` (Recommended)
+- Using `odbc::odbc()`
+
+今回は両方試すことにした。
+
+`databricks()`関数には、必要な接続設定のほとんどを設定するように機能するので便利。`databricks()`関数を実行するために必要な引数は`httpPath`だけで。この引数の値は、Databricks Web UI で取得できる。
+
+![Connection](/Users/aki/Documents/statistical_note/note_db01/db-connection.png)
+
+![token](/Users/aki/Documents/statistical_note/note_db01/db-token.png)
+
+そして、Databricks内の組織のホストURLを`DATABRICKS_HOST`として、環境変数に保存しておく。`usethis::edit_r_environ()`を使用すれば、環境変数ファイルを開くことができる。`databricks()`は、特定の順序で資格情報を検索するため、あわせて環境変数に`DATABRICKS_TOKEN`の情報を登録しておく。最終的な`.Renviron`ファイルは下記の通り。
+
+```
+DATABRICKS_DRIVER="/Library/simba/spark/lib/libsparkodbc_sb64-universal.dylib"
+DATABRICKS_HOST="adb-<WORKSPACE-ID>.<RANDOM-NUMBER>.azuredatabricks.net"
+DATABRICKS_HTTPPATH="/sql/1.0/warehouses/<RANDOMNUMBER-ALPPHABET>"
+DATABRICKS_TOKEN="dapid111111111111111111111111"
+```
+
+この状態で関数を実行すればOK。ただMacの場合、接続できないケースがあるので、その場合は末尾の方法で修正する。
+
+```
+# namespaceを指定しない場合、下記パッケージの読み込み必要
+# library(DBI)
+# library(odbc)
+# library(usethis) 
+
+con <- DBI::dbConnect(
+  odbc::databricks(),
+  httpPath = Sys.getenv("DATABRICKS_HTTPPATH")
+)
+
+con
+<OdbcConnection> token@Spark SQL
+  Database: DatabaseName
+  Spark SQL Version: 3.1.1
+```
+
+もう1つの方法として、`odbc::odbc()`関数を使用する方法がある。こちらの場合は、下記の通り引数を設定して行う。
+
+- Driver - ドライバーのパスを指定する
+- Host - DatabricksのHost URLを指定する
+- Port - デフォルトは443
+- AuthMech - 認証情報にPATトークンを使用する場合は3を指定する
+- HTTPPath - SQL サーバとなるマシンへのパス。Databricks HTTP Pathのこと
+- Protocol - デフォルトはhttpsを指定する
+- ThriftTransport - デフォルトは2を指定する
+- SSL - デフォルトは1を指定する
+- UID - AuthMech として 3 を使用する場合、"token" を指定する
+- PWD - `DATABRICKS_TOKEN`という環境変数名で取得するのが推奨
+- catalog - 必須ではない
+
+この状態で接続すればOK。
+
+```
+# namespaceを指定しない場合、下記パッケージの読み込み必要
+# library(DBI)
+# library(odbc)
+# library(usethis) 
+
+con <- DBI::dbConnect(
+  odbc::odbc(),
+  driver = Sys.getenv("DATABRICKS_DRIVER"),
+  host = Sys.getenv("DATABRICKS_HOST"),
+  port = 443,
+  authMech= 3,
+  httpPath= Sys.getenv("DATABRICKS_HTTPPATH"),
+  protocol= "https",
+  thriftTransport = 2,
+  ssL  = 1,
+  uid = "token",
+  pwd  = Sys.getenv("DATABRICKS_TOKEN"),
+  catalog = "samples"
+)
+
+con
+<OdbcConnection> token@Spark SQL
+  Database: samples
+  Spark SQL Version: 3.1.1
+```
+
+あとはSQLを書いて、Rにデータを持ってくれば良い。
+
+```
+df <- DBI::dbGetQuery(con, "SELECT c_custkey, c_name, c_nationkey FROM samples.tpch.customer WHERE c_nationkey = 1 LIMIT 10;")
+df
+   c_custkey             c_name c_nationkey
+1     412465 Customer#000412465           1
+2     412487 Customer#000412487           1
+3     412510 Customer#000412510           1
+4     412513 Customer#000412513           1
+5     412525 Customer#000412525           1
+6     412554 Customer#000412554           1
+7     412582 Customer#000412582           1
+8     412602 Customer#000412602           1
+9     412636 Customer#000412636           1
+10    412664 Customer#000412664           1
+```
+
+Databricksの管理画面からも接続できていることが確認できる。
+
+![hist](/Users/aki/Documents/statistical_note/note_db01/db-hist.png)
+
+### Troubleshooting: Apple macOS users
+
+このようなエラーが出た場合、修正が必要になる。
+
+```
+Unable to locate SQLGetPrivateProfileString function: [Simba][Support] (50483) 
+Could not load shared library, all attempted paths ("") failed
+```
+
+ODBCアプリケーション(R)と ODBCドライバー(新しいDatabricksドライバー)の間のインターフェイスとして機能するODBCドライバーマネージャーをドライバーが見つけられないために発生するとのこと。
+
+この問題を解決するにはステップ踏んで修正していく。まずは、ドライバー マネージャー ライブラリを見つけます。`/usr/local/lib/`フォルダーで`libodbcinst.dylib`というファイルを検索する。
+
+```
+% ls /usr/local/lib/libodbcinst.dylib      
+/usr/local/lib/libodbcinst.dylib@
+```
+
+このファイルがそこにない場合は、Homebrewでインストールする。
+
+```
+% brew install unixodbc
+```
+
+インストール後、次を使用して`brew --prefix unixodbcHomebrew` がインストールされた場所を確認。
+
+```
+% brew --prefix unixodbc        
+/usr/local/opt/unixodbc
+```
+
+`libodbcinst.dylib`ファイルは、`lib`サブフォルダー内にある必要がある。ドライバー構成ファイルを開いて編集する。
+
+```
+% open /Library/simba/spark/lib/simba.sparkodbc.ini
+```
+
+次の2行を最後に追記する。
+
+```
+ODBCInstLib=/usr/local/Cellar/unixodbc/2.3.9_1/lib/libodbcinst.dylib
+DriverManagerEncoding=UTF-16
+```
+
+ちなみにAppleM1シリコンのMacbookは同じ設定でも接続エラーがでて解消できなかった...Ozw
+
+## AWS SageMarker
+
+AWS SageMarker NotebookからDatabricksに接続する方法をまとめておく。まずはNotebookインスタンスを作成し、Notebookを作成する。Notebookの一覧画面、右上のカーネルを選ぶ部分で、terminalを選択する。
+
+```
+$ cat /etc/os-release
+NAME="Amazon Linux"
+VERSION="2"
+ID="amzn"
+ID_LIKE="centos rhel fedora"
+VERSION_ID="2"
+PRETTY_NAME="Amazon Linux 2"
+ANSI_COLOR="0;33"
+CPE_NAME="cpe:2.3:o:amazon:amazon_linux:2"
+HOME_URL="https://amazonlinux.com/"
+SUPPORT_END="2025-06-30"
+```
+
+terminalから下記の操作を行う。やっていることは、先程と同じで、DatabricksのLinux用のドライバー(64bit)をダウンロードして、インストールしている。
+
+```
+$ curl -O https://databricks-bi-artifacts.s3.us-east-2.amazonaws.com/simbaspark-drivers/odbc/2.8.0/SimbaSparkODBC-2.8.0.1002-LinuxRPM-64bit.zip
+$ unzip SimbaSparkODBC-2.8.0.1002-LinuxRPM-64bit.zip -d /opt
+$ sudo rpm -ivh /opt/simbaspark-2.8.0.1002-1.x86_64.rpm
+```
+
+`DATABRICKS_DRIVER`は`/opt/`ディレクトリの`.so`ファイルなので注意。
+
+```
+$ ls /opt/simba/spark/lib/64/libsparkodbc_sb64.so
+```
+
+これらの情報を`.Renviron`に書き込んでおく。
+
+```
+$ vim /home/ec2-user/.Renviron
+
+DATABRICKS_DRIVER="/opt/simba/spark/lib/64/libsparkodbc_sb64.so"
+DATABRICKS_HOST="adb-<WORKSPACE-ID>.<RANDOM-NUMBER>.azuredatabricks.net"
+DATABRICKS_HTTPPATH="/sql/1.0/warehouses/<RANDOMNUMBER-ALPPHABET>"
+DATABRICKS_TOKEN="dapid111111111111111111111111"
+```
+
+NotebookからDatabricksに接続する際に、`odbc`パッケージが必要になるが、Linuxの場合、下記をインストールしておかないと、`odbc`パッケージのインストールでコケてしまうので注意。
+
+```
+$ sudo yum update
+$ sudo yum install unixODBC unixODBC-devel -y
+```
+
+準備ができたら、Notebookにアクセスする。そして、コネクションを確立してSQLでデータを引き込む。
+
+```
+# install.packages("odbc")
+# install.packages("DBI")
+
+library(odbc)
+library(DBI)
+
+con <- DBI::dbConnect(
+  odbc::databricks(),
+  httpPath = Sys.getenv('DATABRICKS_HTTPPATH')
+)
+con
+<OdbcConnection> token@Spark SQL
+  Database: dbw_sql_dev_ja
+  Spark SQL Version: 3.1.1
+  
+sql <- '
+SELECT 
+    c_custkey
+    , c_name
+    , c_nationkey 
+FROM 
+    samples.tpch.customer 
+WHERE 
+    c_nationkey = 1 
+LIMIT 10
+;'
+
+df <- DBI::dbGetQuery(con, sql)
+df
+
+c_custkey	              c_name	c_nationkey
+   412465	  Customer#000412465	          1
+   412487	  Customer#000412487	          1
+   412510	  Customer#000412510	          1
+   412513	  Customer#000412513	          1
+   412525	  Customer#000412525	          1
+   412554	  Customer#000412554	          1
+   412582	  Customer#000412582	          1
+   412602	  Customer#000412602	          1
+   412636	  Customer#000412636	          1
+   412664	  Customer#000412664	          1
+   
+dbDisconnect(con)
+```
+
+![SageMarker](/Users/aki/Documents/statistical_note/note_db01/db-sage.png)
+
+## おまけ
+
+Pythonで接続する方法。
+
+```
+from databricks import sql
+import os
+import pandas as pd
+
+connection = sql.connect(
+  server_hostname = "adb-<WORKSPACE-ID>.<RANDOM-NUMBER>.azuredatabricks.net",
+  http_path = "/sql/1.0/warehouses/<RANDOMNUMBER-ALPPHABET>",
+  access_token = "dapid111111111111111111111111"
+  )
+
+cursor = connection.cursor()
+
+cursor.execute("select o_custkey, o_orderdate, row_number() over(partition by o_custkey order by o_orderdate desc) as ind from samples.tpch.orders qualify ind in (1,2,3) limit 10")
+rows = cursor.fetchall()
+df = pd.DataFrame(rows)
+column_names = [description[0] for description in cursor.description]
+df.columns = column_names
+
+df
+   o_custkey o_orderdate  ind
+0         28  1998-02-18    1
+1         28  1997-05-31    2
+2         28  1997-04-21    3
+3         29  1998-03-21    1
+4         29  1997-01-18    2
+5         29  1995-07-30    3
+6        151  1998-06-06    1
+7        151  1998-05-30    2
+8        151  1996-12-10    3
+9        200  1997-10-06    1
+
+cursor.close()
+connection.close()
+```
+
+## :closed_book: Reference
+
+- [Databricks](https://solutions.posit.co/connections/db/databases/databricks/#databricks-http-path)
