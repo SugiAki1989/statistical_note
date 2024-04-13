@@ -1,0 +1,313 @@
+---
+title: 'SageMarkerからDatabricksに接続する(ライフサイクル機能)'
+pagetitle: 'SageMarkerからDatabricksに接続する(ライフサイクル機能)'
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: 'show'
+    highlight: 'kate'
+    # theme: 'flatly'
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = 'center',
+                      dev        = 'ragg_png')
+```
+
+<div class='update-right'>
+UPDATE: `r Sys.time()`
+</div>
+
+## はじめに
+
+前回下記で接続方法はまとめているが、再度、AWS SageMarker ノートブックからDatabricksに接続する方法をまとめておく。
+
+- [SageMarkerからDatabricksに接続する](https://sugiaki1989.github.io/statistical_note/note_db01/note_db01.html)
+
+理由は、SageMarker ノートブックは再起動すると、[特定のディレクトリ以外はすべて削除される仕様](https://docs.aws.amazon.com/ja_jp/sagemaker/latest/dg/howitworks-create-ws.html)なので、前回の方法で接続できても、インスタンスを再起動したあとは、同じ手順をもう一度実行する必要がある。つまり、めんどくさい。
+
+> ノートブックインスタンスセッション間では、/home/ec2-user/SageMaker フォルダ内に保存されたファイルとデータのみが保持されます。このディレクトリ外に保存されたファイルとデータは、ノートブックインスタンスが停止して再起動すると上書きされます。各ノートブックインスタンスの /tmp ディレクトリは、インスタンスストアに最低 10 GB のストレージを提供します。インスタンスストアは、永続的ではない一時的なブロックレベルのストレージです。インスタンスが停止または再起動されると、 SageMaker ディレクトリの内容が削除されます。この一時的なストレージは、ノートブックインスタンスのルートボリュームの一部です。
+
+そのため、ここでは永続化される`/home/ec2-user/SageMaker/`とライフサイクル機能を使って、毎回、楽に接続できるようにする。
+
+## AWS SageMarker
+
+まずはノートブックインスタンスを作成し、ノートブックを作成する。ノートブックの一覧画面、右上のカーネルを選ぶ部分で、terminalを選択する。
+
+```
+$ cat /etc/os-release
+NAME="Amazon Linux"
+VERSION="2"
+ID="amzn"
+ID_LIKE="centos rhel fedora"
+VERSION_ID="2"
+PRETTY_NAME="Amazon Linux 2"
+ANSI_COLOR="0;33"
+CPE_NAME="cpe:2.3:o:amazon:amazon_linux:2"
+HOME_URL="https://amazonlinux.com/"
+SUPPORT_END="2025-06-30"
+```
+
+次にライフサイクル機能を利用する。画面左の「管理者設定」の中に「ライフサイクル設定」があるので、そこから設定する。「ノートブックインスタンス」を選択し、名前をつけて、実行するスクリプトを記載する。ここでは、`installUnixODBC`という名前のライフサイクルを設定する。内容は、`unixODBC`関連をインストールしている。ノートブックからDatabricksに接続する際に、`odbc`パッケージが必要になるが、Linuxの場合、下記をインストールしておかないと、`odbc`パッケージのインストールでコケてしまうので注意。ライフサイクルのサンプルスクリプトについては下記が参考になる。　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　
+
+- [SageMaker Notebook Instance Lifecycle Config Samples](https://github.com/aws-samples/amazon-sagemaker-notebook-instance-lifecycle-config-samples)
+
+```
+#!/bin/bash
+
+set -e
+
+sudo yum install unixODBC unixODBC-devel -y
+```
+
+保存したあとは、ノートブックインスタンスに先程のライフサイクルをアタッチする。停止中でないとアタッチできないので注意。Databricksのドライバー、Rのライブラリもあわせて読み込めばいいようにも思えるが、そもそもライフサイクルは5分で処理が完了しないと、インスタンスがエラーで起動できなくなる。そのため、ここでは`unixODBC`関連のみをインストールしている。
+
+ここまでの設定が終わったらインスタンスを起動して、terminalから下記の操作を行う。内容は、DatabricksのLinux用のドライバー(64bit)をダウンロードして、インストールしている。永続化される`/home/ec2-user/SageMaker/opt`で基本的には環境を整える。色々忘れやすいので、絶対パスでメモしておく。作業するときはお好みで。
+
+```
+$ cd /home/ec2-user/SageMaker
+$ curl -O https://databricks-bi-artifacts.s3.us-east-2.amazonaws.com/simbaspark-drivers/odbc/2.8.0/SimbaSparkODBC-2.8.0.1002-LinuxRPM-64bit.zip
+$ unzip SimbaSparkODBC-2.8.0.1002-LinuxRPM-64bit.zip -d /home/ec2-user/SageMaker/opt
+$ sudo rpm -ivh /home/ec2-user/SageMaker/opt/simbaspark-2.8.0.1002-1.x86_64.rpm
+```
+
+フォルダ構成に関しては、`/opt`の構成を`/home/ec2-user/SageMaker/opt`でも再現しておいた。`/home/ec2-user/SageMaker/opt`に各ファイルを置くと、コネクション確立時にエラーがでたので。
+
+```
+$ mkdir -p /home/ec2-user/SageMaker/opt/simba/spark/lib/64
+
+$ sudo mv /opt/simba/spark/lib/64/libsparkodbc_sb64.so /home/ec2-user/SageMaker/opt/simba/spark/lib/64/
+$ sudo mv /opt/simba/spark/lib/64/cacerts.pem /home/ec2-user/SageMaker/opt/simba/spark/lib/64/
+$ sudo mv /opt/simba/spark/lib/64/simba.sparkodbc.ini /home/ec2-user/SageMaker/opt/simba/spark/lib/64/
+$ sudo mv /opt/simba/spark/lib/64/SparkODBC.did /home/ec2-user/SageMaker/opt/simba/spark/lib/64/
+```
+
+権限が`root`だけになっているので、`ec2-user`も利用できるように変更しておく。変更してないと、こちらもコネクション確立時にエラーがでる。
+
+```
+$ sudo chown ec2-user:ec2-user /home/ec2-user/SageMaker/opt/simba/spark/lib/64/SparkODBC.did
+$ sudo chown ec2-user:ec2-user /home/ec2-user/SageMaker/opt/simba/spark/lib/64/libsparkodbc_sb64.so
+$ sudo chown ec2-user:ec2-user /home/ec2-user/SageMaker/opt/simba/spark/lib/64/simba.sparkodbc.ini
+```
+
+`DATABRICKS_DRIVER`は`.so`ファイルなので注意。
+
+```
+$ ls /home/ec2-user/SageMaker/opt/simba/spark/lib/64/libsparkodbc_sb64.so
+```
+
+次に下記の接続情報を`/home/ec2-user/SageMaker/opt/.Renviron`に書き込んでおき、環境変数を設定しておく。
+
+```
+$ vim /home/ec2-user/SageMaker/opt/.Renviron
+
+DATABRICKS_DRIVER="/home/ec2-user/SageMaker/opt/simba/spark/lib/64/libsparkodbc_sb64.so"
+DATABRICKS_HOST="adb-<WORKSPACE-ID>.<RANDOM-NUMBER>.azuredatabricks.net"
+DATABRICKS_HTTPPATH="/sql/1.0/warehouses/<RANDOMNUMBER-ALPPHABET>"
+DATABRICKS_TOKEN="dapid111111111111111111111111"
+```
+
+準備ができたら、ノートブックにアクセスする。まずは、パッケージをインストールしておく。デフォルトだと、`/home/ec2-user/anaconda3/envs/R/lib/R/library`にインストールされてしまう。この領域は、インスタンスを再起動すると、初期設定に戻されるので、`/home/ec2-user/SageMaker/opt`にインストールしておく。
+
+```
+# 初期のみ
+install.packages("odbc", lib = "/home/ec2-user/SageMaker/opt")
+# DBIはデフォルトでインストールされているので不要かも
+install.packages("DBI", lib = "/home/ec2-user/SageMaker/opt")
+```
+
+環境変数とパッケージの読み込み先を変更してから読み込む。
+
+```
+readRenviron('/home/ec2-user/SageMaker/opt/.Renviron')
+library(odbc, lib.loc = '/home/ec2-user/SageMaker/opt')
+library(DBI, lib.loc = '/home/ec2-user/SageMaker/opt')
+```
+
+あとは、コネクションを確立してSQLでデータを引き込む。推奨されている方法だと、エラーがでてしまう。よしなにやってくれる分、設定があってないのかもしれない。
+
+```
+con <- DBI::dbConnect(
+  odbc::databricks(),
+  httpPath = Sys.getenv("DATABRICKS_HTTPPATH")
+)
+```
+
+そのため、もう一つの方法を利用する。
+
+```
+con <- DBI::dbConnect(
+  odbc::odbc(),
+  driver = Sys.getenv("DATABRICKS_DRIVER"),
+  host = Sys.getenv("DATABRICKS_HOST"),
+  port = 443,
+  authMech= 3,
+  httpPath= Sys.getenv("DATABRICKS_HTTPPATH"),
+  protocol= "https",
+  thriftTransport = 2,
+  ssL  = 1,
+  uid = "token",
+  pwd  = Sys.getenv("DATABRICKS_TOKEN"),
+  catalog = "samples"
+)
+con
+<OdbcConnection> token@Spark SQL
+  Database: samples
+  Spark SQL Version: 3.1.1
+  
+sql <- '
+SELECT 
+    c_custkey
+    , c_name
+    , c_nationkey 
+FROM 
+    samples.tpch.customer 
+WHERE 
+    c_nationkey = 5
+LIMIT 10
+;'
+
+df <- DBI::dbGetQuery(con, sql)
+df
+
+c_custkey	              c_name	c_nationkey
+   412476	  Customer#000412476	          5
+   412528	  Customer#000412528	          5
+   412533	  Customer#000412533	          5
+   412553	  Customer#000412553	          5
+   412577	  Customer#000412577	          5
+   412603	  Customer#000412603	          5
+   412606	  Customer#000412606	          5
+   412659	  Customer#000412659	          5
+   412696	  Customer#000412696	          5
+   412708	  Customer#000412708	          5
+
+dbDisconnect(con)
+```
+
+![notebook](/Users/aki/Documents/statistical_note/note_db02/res.png)
+
+今回の内容をまとめると、最終的には下記のような構成になっている。
+
+```
+$ tree -a /home/ec2-user/SageMaker/
+
+/home/ec2-user/SageMaker/
+├── opt
+│   ├── DBI  --下層のRファイルは省略
+│   ├── odbc --下層のRファイルは省略
+│   ├── .Renviron -- 環境変数ファイル
+│   ├── simba
+│   │   └── spark
+│   │       └── lib
+│   │           └── 64
+│   │               ├── cacerts.pem
+│   │               ├── libsparkodbc_sb64.so
+│   │               ├── simba.sparkodbc.ini
+│   │               └── SparkODBC.did
+│   └── simbaspark-2.8.0.1002-1.x86_64.rpm
+├── SimbaSparkODBC-2.8.0.1002-LinuxRPM-64bit.zip
+└── R_AnanlysisNotbook.ipynb
+
+
+$ ls -la  home/ec2-user/SageMaker/opt/simba/spark/lib/64/
+-rwxr-xr-x 1 root     root       203430 Mar 12 23:15 cacerts.pem
+-rwxr-xr-x 1 ec2-user ec2-user 87128000 Mar 12 23:15 libsparkodbc_sb64.so
+-rwxr-xr-x 1 ec2-user ec2-user       97 Mar 12 23:15 simba.sparkodbc.ini
+-rwxr-xr-x 1 ec2-user ec2-user      448 Mar 12 23:15 SparkODBC.did
+```
+
+本当のところは、ライフサイクル機能で、通常通りのインストール先を使って、必要な環境やパッケージを整えて、ノートブック起動したら、すぐに分析できるが一番良いが、そのあたりの検証はまた今度。
+
+## 追記: ライフサイクルで全部やる
+
+ライフサイクル機能で、通常通りのインストール先を使って、必要な環境やパッケージを整えて、ノートブック起動したら、すぐに分析できる環境を整えることができたので、そのメモを残しておく。Rパッケージの読み込みは下記を参考にした。
+
+- [LifeCycle Configurations for R kernel: install R packages #1197](https://github.com/aws/amazon-sagemaker-examples/issues/1197)
+
+下記で記載されている書き方だと、エラーがでてしまい環境が作られず、インスタンスが起動しない。
+
+- [This script installs a single conda R package (bigmemory) in SageMaker R environment.](https://github.com/aws-samples/amazon-sagemaker-notebook-instance-lifecycle-config-samples/blob/master/scripts/install-r-package/on-start.sh)
+
+ライフサイクル機能で利用するスクリプトは下記の通り。
+
+```
+#!/bin/bash
+
+set -e
+
+sudo yum install unixODBC unixODBC-devel -y
+
+curl -O https://databricks-bi-artifacts.s3.us-east-2.amazonaws.com/simbaspark-drivers/odbc/2.8.0/SimbaSparkODBC-2.8.0.1002-LinuxRPM-64bit.zip
+unzip SimbaSparkODBC-2.8.0.1002-LinuxRPM-64bit.zip -d /opt
+sudo rpm -ivh /opt/simbaspark-2.8.0.1002-1.x86_64.rpm
+
+sudo -u ec2-user -i <<'EOF'
+conda install "r-odbc" --name "R" --yes
+EOF
+```
+
+実行内容は下記の通り。
+
+- `set -e`: シェルスクリプトでエラーが発生した場合にスクリプトの実行を停止するためのオプション
+- `sudo yum install unixODBC unixODBC-devel -y`:UnixODBCおよびその開発用パッケージをインストール。
+- `curl -O https://databricks-(snip)`: Simba Spark ODBCドライバーのRPMパッケージをダウンロード。
+- `unzip SimbaSparkODBC-2.8.0.1002-LinuxRPM-64bit.zip -d /opt`: ダウンロードしたZIPファイルを解凍して、`/opt`ディレクトリに展開。
+- `sudo rpm -ivh /opt/simbaspark-2.8.0.1002-1.x86_64.rpm`: 解凍されたRPMパッケージをインストール。
+- `sudo -u ec2-user -i <<'EOF'`: `ec2-user`ユーザーとして新しいシェルセッションを開始。
+- `conda install "r-odbc" --name "R" --yes`: Condaパッケージマネージャーを使用し、`r-odbc`パッケージをインストール。
+  - `--name` `R`オプションは、R環境にパッケージをインストールすることを指定。
+  - `--yes`オプションは、パッケージのインストールを確認せずに自動的に進行させる。
+
+これらの手順を実行することで、Simba Spark ODBCドライバーをインストールし、R言語でODBC接続を可能にする準備が整う。あとは、このスクリプトをノートブックインスタンスにアタッチして起動する。起動したあとは下記の通り、環境変数ファイルをターミナルから作成する。
+
+```
+$ vim /home/ec2-user/.Renviron
+
+DATABRICKS_HOST="adb-111111111111111111.11.azuredatabricks.net"
+DATABRICKS_DRIVER="/opt/simba/spark/lib/64/libsparkodbc_sb64.so"
+DATABRICKS_HTTPPATH="/sql/1.0/warehouses/111111111111111111"
+DATABRICKS_TOKEN="dapi111111111111111111111111111111"
+```
+
+ノートブックではいつも通り実行すれば、データ分析を開始できる。
+
+```
+library(odbc)
+library(DBI)
+
+con <- DBI::dbConnect(
+  odbc::odbc(),
+  driver = Sys.getenv("DATABRICKS_DRIVER"),
+  host = Sys.getenv("DATABRICKS_HOST"),
+  port = 443,
+  authMech= 3,
+  httpPath= Sys.getenv("DATABRICKS_HTTPPATH"),
+  protocol= "https",
+  thriftTransport = 2,
+  ssL  = 1,
+  uid = "token",
+  pwd  = Sys.getenv("DATABRICKS_TOKEN"),
+  catalog = "samples"
+)
+df <- DBI::dbGetQuery(con, "SELECT c_custkey, c_name, c_nationkey FROM samples.tpch.customer WHERE c_nationkey = 1 LIMIT 10;")
+df
+```
+
+![notebook](/Users/aki/Documents/statistical_note/note_db02/lifecycle.png)
+
+
+この方法であれば、インスタンスが起動するたびに環境が作られることになる。
+
+
+

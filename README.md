@@ -237,6 +237,7 @@
 ## DataBase系パッケージ
 
 - [SageMarkerからDatabricksに接続する](https://sugiaki1989.github.io/statistical_note/note_db01/note_db01.html)
+- [SageMarkerからDatabricksに接続する(ライフサイクル機能)](https://sugiaki1989.github.io/statistical_note/note_db02/note_db02.html)
 
 ## 可視化
 
