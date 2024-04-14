@@ -40,6 +40,10 @@ UPDATE: `r Sys.time()`
 
 そのため、ここでは永続化される`/home/ec2-user/SageMaker/`とライフサイクル機能を使って、毎回、楽に接続できるようにする。
 
+### 追記
+
+ライフサイクルですべての環境を整える方法を追記した。
+
 ## AWS SageMarker
 
 まずはノートブックインスタンスを作成し、ノートブックを作成する。ノートブックの一覧画面、右上のカーネルを選ぶ部分で、terminalを選択する。
@@ -306,8 +310,84 @@ df
 
 ![notebook](/Users/aki/Documents/statistical_note/note_db02/lifecycle.png)
 
+この方法であれば、インスタンスが起動するたびに環境が作られることになる。複数のパッケージを一度で入れたいのであれば、下記の通り実行すればよい。また、もし5分以上、インストールに時間がかかるのであれば、下記の通り、`nohup`コマンドを組み合わせ、バックグラウンドで強制的にライフサイクル設定スクリプトの実行を継続させることができる。
 
-この方法であれば、インスタンスが起動するたびに環境が作られることになる。
+- [Resolve Amazon SageMaker ライフサイクル設定におけるタイムアウトの解決 | AWS re:Post](https://repost.aws/ja/knowledge-center/sagemaker-lifecycle-script-timeout)
+
+```
+#!/bin/bash
+
+set -e
+
+nohup sudo -b -u ec2-user -i <<'EOF'
+conda install "r-rjson" --name "R" --yes
+conda install "r-rstan" --name "R" --yes
+conda install "r-survival" --name "R" --yes
+conda install "r-tidyverse" --name "R" --yes
+EOF
+```
+
+## おまけ
+
+SageMarkerでパッケージをインストールする際の理解を深めるため、下記のissueを参考に、Anacondaを利用して、インストールまでの流れを理解する。
+
+- [LifeCycle Configurations for R kernel: install R packages · Issue #1197 · aws/amazon-sagemaker-examples · GitHub](https://github.com/aws/amazon-sagemaker-examples/issues/1197)
+
+Anacondaのインストールが完了したら、ターミナルからtestRという仮想環境を作成する。SageMarkerではtestRではなくRという仮想環境だと思われる。
+
+```
+$ conda create --name testR
+```
+
+このtestR環境に関するファイルは下記のディレクトリに保存されていく。SageMarkerでは、正確なパスを調べてないので分からないが、インスタンス起動中のパッケージインストールなどは下記にインストールされていくことになる。そのため、インスタンス再起動時に初期化されてなくなるため、ライフサイクル機能などを利用する必要がある。
+
+```
+environment location: /opt/anaconda3/envs/testR
+```
+
+testR環境をアクティベートすることで、仮想環境に入れる。`*`がついているのが現在の環境。
+
+```
+$ conda activate testR
+
+(testR) MacBookPro:~ aki$ conda info --envs
+
+# conda environments:
+#
+base                     /opt/anaconda3
+R                        /opt/anaconda3/envs/R
+testR                 *  /opt/anaconda3/envs/testR
+```
+
+ここでは試しに、`rjson`パッケージがインストール済みかを調べておく。Rを起動して、下記のスクリプトで調べる。
+
+```
+$ R
+> ("rjson" %in% installed.packages())
+[1] FALSE
+> q()
+```
+
+まだインストールされていないので、Rを一度閉じてから、下記のコマンドでインストールする。
+
+```
+$ conda install "r-rjson" --name "testR" --yes
+```
+
+再度、Rを起動して、`rjson`パッケージがインストールされているかを調べておく。
+
+```
+> ("rjson" %in% installed.packages())
+[1] TRUE
+> q()
+```
+
+問題なくインストールされていることがわかる。作業を終了するために、環境をディアクティベートしておく。
+
+```
+# testR環境からdeactivateする
+$ conda deactivate
+```
 
 
 
