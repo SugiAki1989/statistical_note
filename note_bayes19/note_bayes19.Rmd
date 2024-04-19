@@ -1,0 +1,205 @@
+---
+title: "事後分布と累積分布関数"
+pagetitle: "事後分布と累積分布関数"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は「事後分布と累積分布関数」の関係についてまとめておく。累積分布関数を使うことで事後分布のパラメタがとる範囲を解釈しやすくなる。内容をまとめるにあたり、下記を参考にしている。
+
+- [楽しいベイズ統計 - パラメータ推定の 13 ツール: PDF、CDF、分位関数](https://bookdown.org/pbaumgartner/bayesian-fun/13-pdf-cdf-quantile.html)
+
+## 事後分布と累積分布関数
+
+ここで使用する確率分布は$Beta(300,39700)$分布である。これは、Webサイトのコンバージョンで例えると、40000人のユーザーの中で、300人がコンバージョンしたというイベントを表現している。平均コンバージョン率は0.0075である。
+
+$$
+\begin{eqnarray}
+f(x) &=& \frac{Γ(\alpha)Γ(\beta)}{Γ(\alpha+\beta)}
+x^{\alpha−1}(1−x)^{\beta−1} \\
+&=& \frac{Γ(300)Γ(39700)}{Γ(300+39700)}
+x^{300−1}(1−x)^{39700−1}
+\end{eqnarray}
+$$
+
+可視化するとこのようになる。
+
+```{r}
+library(tidyverse)
+library(patchwork)
+
+n <- 40000
+alpha <- 300
+beta <- n - alpha
+x <- seq(0.005, 0.010, by = 0.00001)
+y1 <- dbeta(x, alpha, beta)
+
+ggplot(data.frame(x, y1), aes(x, y1)) + 
+  geom_line() + 
+  labs(title = 'PDF: Beta(300, 39700)', y = 'Density', x = 'cv%') + 
+  scale_x_continuous(breaks = seq(0.005, 0.010, by = 0.0005)) + 
+  theme_bw()
+```
+
+このような事後分布が仮に得られたとして、この事後分布の累積分布関数を考える。そもそも、累積分布関数は、確率変数$X$がある値以下になる確率を表した関数のことで、横軸は確率変数$X$を、縦軸は確率$p$を表している。つまり、確率密度関数の下限から、確率変数$X=x$までの値を積分した値が、累積分布関数の確率変数$X=x$のときの確率と同じになる。可視化するとこのようになる。
+
+```{r}
+y2 <- pbeta(x, alpha, beta)
+
+p <- ggplot(data.frame(x, y2), aes(x, y2)) + 
+  geom_line() + 
+  labs(title = 'CDF: Beta(300, 39700)', y = 'Cumulative Probability', x = 'cv%') + 
+  scale_x_continuous(breaks = seq(0.005, 0.010, 0.00025)) + 
+  scale_y_continuous(breaks = seq(0, 1, 0.05)) + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+p
+```
+
+累積分布関数を使うと簡単に中央値を計算できる。累積分布関数の確率が0.5である点から線を引き、累積分布関数とぶつかるところから、下に線を伸ばせば、それが中央値となる。こでは、値の50パーセントがこの点を下回り、50パーセントがこの点を上回ることを利用している。
+
+```{r}
+point <- qbeta(0.5, alpha, beta)
+p + 
+  geom_segment(
+    aes(min(x), 0.5, xend = point, yend = 0.5),
+    arrow = arrow(length = unit(0.25, 'cm'), type = 'closed'),
+    col = 'tomato') + 
+  geom_segment(
+    aes(point, 0.5, xend = point, yend = 0),
+    arrow = arrow(length = unit(0.25, 'cm'), type = 'closed'),
+    col = 'tomato')
+
+```
+
+また、積分を視覚的に近似することもできる。例えば、コンバージョン率が、0.0075~0.0085の間にある確率を見積もりたいのであれば、累積分布関数を用いて、0.0075と0.0085から曲線に線を伸ばして、ぶつかったところから横に線を伸ばせばよい。
+
+```{r}
+low1_x <- 0.0075
+upr1_x <- 0.0085
+
+low1_y <- pbeta(low1_x, alpha, beta)
+upr1_y <- pbeta(upr1_x, alpha, beta)
+
+p + 
+  geom_segment(
+    aes(low1_x, 0, xend = low1_x, yend = 0.5),
+    arrow = arrow(length = unit(0.25, 'cm'), type = 'closed'),
+    col = 'tomato') +
+  geom_segment(
+    aes(low1_x, low1_y, xend = min(x), yend = low1_y),
+    arrow = arrow(length = unit(0.25, 'cm'), type = 'closed'),
+    col = 'tomato') + 
+  geom_segment(
+    aes(upr1_x, 0, xend = upr1_x, yend = upr1_y),
+    arrow = arrow(length = unit(0.25, 'cm'), type = 'closed'),
+    col = 'tomato') +
+  geom_segment(
+    aes(upr1_x, upr1_y, xend = min(x), yend = upr1_y),
+    arrow = arrow(length = unit(0.25, 'cm'), type = 'closed'),
+    col = 'tomato') + 
+    geom_segment(aes(0.006, low1_y, xend = 0.006, yend = upr1_y), color = 'black') +
+    annotate("text", x = 0.0065, y = 0.75, 
+             label = round(integrate(function(x) dbeta(x, alpha, beta), 0.0075, 0.0085)[[1]], 5),
+             color = 'black', size = 5) 
+```
+
+直感的に理解するための説明として、これは0.0085以下の確率から、0.0075以下の確率を引くと、0.0075から0.0085の区間の確率を計算できる。これは0.0075から0.0085まで積分しているのと同じである。
+
+反対にパラメタが80%で収まる信用区間を計算したければy軸から横に線を伸ばし、曲線とぶつかったところで、下に線を伸ばせば、パラメタの80%信用区間が計算できる。
+
+```{r}
+low2_y <- 0.10
+upr2_y <- 0.90
+
+low2_x <- qbeta(low2_y, alpha, beta)
+upr2_x <- qbeta(upr2_y, alpha, beta)
+
+p + 
+  geom_segment(
+    aes(min(x), upr2_y, xend = upr2_x, yend = upr2_y),
+    arrow = arrow(length = unit(0.25, 'cm'), type = 'closed'),
+    col = 'royalblue') + 
+  geom_segment(
+    aes(upr2_x, upr2_y, xend = upr2_x, yend = 0),
+    arrow = arrow(length = unit(0.25, 'cm'), type = 'closed'),
+    col = 'royalblue') +
+  geom_segment(
+    aes(min(x), low2_y, xend = low2_x, yend = low2_y),
+    arrow = arrow(length = unit(0.25, 'cm'), type = 'closed'),
+    col = 'royalblue') + 
+  geom_segment(
+    aes(low2_x, low2_y, xend = low2_x, yend = 0),
+    arrow = arrow(length = unit(0.25, 'cm'), type = 'closed'),
+    col = 'royalblue')
+```
+
+正確にパラメタの80%信用区間を計算したければ、`qbeta()`で計算できる。
+
+```{r}
+c(
+  qbeta(0.1, alpha, beta),
+  qbeta(0.9, alpha, beta)
+)
+```
+
+また、累積分布関数は事後分布の生成量の分布に対しても利用できる。実際には、生成量の分布の正確な関数系はわからないので、経験累積分布関数を利用する。
+
+下記はパラメタの差分の経験累積分布関数である。先ほどと同じように差が0.10から0.15にある確率は、y軸の距離であるため、30%くらいであることがわかる。
+
+```{r}
+n.trials = 1e5
+prior.alpha = 3
+prior.beta = 7
+
+a.samples <- rbeta(n.trials, 36 + prior.alpha, 114 + prior.beta)
+b.samples <- rbeta(n.trials, 50 + prior.alpha, 100 + prior.beta)
+diff <- b.samples - a.samples
+
+ggplot(tibble::tibble(x = seq(1, 1e5, 1),y = diff), aes(y)) +
+    stat_ecdf(geom = 'step') +
+    theme_bw() +
+    scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) +
+    scale_y_continuous(breaks = scales::pretty_breaks(n = 20)) +
+    geom_hline(yintercept = 0.60, color = 'royalblue', linetype = 'dashed') +
+    geom_hline(yintercept = 0.90, color = 'royalblue', linetype = 'dashed') + 
+    geom_vline(xintercept = 0.10, color = 'tomato', linetype = 'dashed') +
+    geom_vline(xintercept = 0.15, color = 'tomato', linetype = 'dashed') 
+```
+
+実際に計算してみると、およそ30%であることがわかる。
+
+```{r}
+sum(diff >= 0.10 & 0.15 >= diff)/n.trials
+```
+
+## 参考文献および参考資料
+
+- [楽しいベイズ統計 - パラメータ推定の 13 ツール: PDF、CDF、分位関数](https://bookdown.org/pbaumgartner/bayesian-fun/13-pdf-cdf-quantile.html)

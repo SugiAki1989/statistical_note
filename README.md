@@ -12,11 +12,6 @@
 - [ブートストラップ信頼区間(パーセンタイル法)](https://sugiaki1989.github.io/statistical_note/note_pvalue06/note_pvalue06.html)
 - [生存時間アウトカムとサンプルサイズ設計](https://sugiaki1989.github.io/statistical_note/note_pvalue07/note_pvalue07.html)
 - [累積分布関数と確率密度関数の台のはなし](https://sugiaki1989.github.io/statistical_note/note_pvalue08/note_pvalue08.html)
-- [ベイジアンABテストのはなし](https://sugiaki1989.github.io/statistical_note/note_pvalue09/note_pvalue09.html)
-- [ベイジアンABテストのはなし(理論編)](https://sugiaki1989.github.io/statistical_note/note_pvalue10/note_pvalue10.html)
-- [ベイジアンABテストのはなし(rstan編)](https://sugiaki1989.github.io/statistical_note/note_pvalue11/note_pvalue11.html)
-- [ダミーWebサービスのデータでABテストを実践する1(非公開)](https://sugiaki1989.github.io/statistical_note/note_pvalue14/note_pvalue14.html)
-- [ダミーWebサービスのデータでABテストを実践する2(非公開)](https://sugiaki1989.github.io/statistical_note/note_pvalue15/note_pvalue15.html)
 - [母数の不偏性、一致性、有効性について](https://sugiaki1989.github.io/statistical_note/note_pvalue12/note_pvalue12.html)
 - [フィッシャー情報量の直感的な理解](https://sugiaki1989.github.io/statistical_note/note_pvalue13/note_pvalue13.html)
 - [条件付き独立について](https://sugiaki1989.github.io/statistical_note/note_pvalue16/note_pvalue16.html)
@@ -58,8 +53,14 @@
 - [漫才ショーレースの強さを分析する](https://sugiaki1989.github.io/statistical_note/note_bayes15/note_bayes15.html)
 - [WAICのおさらい(概要編)](https://sugiaki1989.github.io/statistical_note/note_bayes16/note_bayes16.html)
 - [WAICのおさらい(詳細編)](https://sugiaki1989.github.io/statistical_note/note_bayes17/note_bayes17.html)
-- [](https://sugiaki1989.github.io/statistical_note/note_bayes18/note_bayes18.html)
-
+- [WAICのおさらい(実践編)](https://sugiaki1989.github.io/statistical_note/note_bayes18/note_bayes18.html)
+- [ベイジアンABテストのはなし](https://sugiaki1989.github.io/statistical_note/note_pvalue09/note_pvalue09.html)
+- [ベイジアンABテストのはなし1(理論編)](https://sugiaki1989.github.io/statistical_note/note_pvalue10/note_pvalue10.html)
+- [ベイジアンABテストのはなし2(理論編)](https://sugiaki1989.github.io/statistical_note/note_pvalue19/note_pvalue19.html)
+- [ベイジアンABテストのはなし(rstan編)](https://sugiaki1989.github.io/statistical_note/note_pvalue11/note_pvalue11.html)
+- [ダミーWebサービスのデータでABテストを実践する1(非公開)](https://sugiaki1989.github.io/statistical_note/note_pvalue14/note_pvalue14.html)
+- [ダミーWebサービスのデータでABテストを実践する2(非公開)](https://sugiaki1989.github.io/statistical_note/note_pvalue15/note_pvalue15.html)
+- [事後分布と累積分布関数](https://sugiaki1989.github.io/statistical_note/note_bayes19/note_bayes19.html)
 
 ## 数値解析
 
