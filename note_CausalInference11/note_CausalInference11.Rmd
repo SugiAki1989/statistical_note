@@ -1,0 +1,200 @@
+---
+title: "条件つき独立性(交換可能性)のおさらい"
+pagetitle: "条件つき独立性(交換可能性)のおさらい"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+今回は、条件つき独立性(交換可能性)のおさらいをしておく。まずは、独立性からはじめ、その次に条件つき独立性についてまとめる。独立性は因果推論において、因果効果を推定するためには必要不可欠な考え方なので、改めておさらいする。下記を参考にしている。
+
+- [統計解析スタンダード　統計的因果推論｜朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)
+- [方法論特殊講義IIIサポートページ](https://www.jaysong.net/kobe-ci/material/matching.html)
+
+## 独立性
+
+平均処置効果が計算可能になるためには、下記の通りいくつかの条件が必要になる。まずは、正値性という考え方。
+
+<div class="tbox">
+<th3>正値性</th3>
+<div class="inner">
+処置を受ける確率が
+$$
+0 \lt P(T=1) \lt 1
+$$
+となることを正値性(positivity)という
+</div>
+</div>
+
+正値性は個体が処置を受ける確率が0でも1でもない、つまり、処理と対照に割り付けられると仮定する。0や1となってしまうと、個体すべてが処理群と割り付けられることが発生する。つまり比較のしようがなくなる。正値性のもとでの条件つき期待値は
+
+$$
+\begin{eqnarray}
+E[Y|T=1] = E[Y(1)|T=1] \\
+E[Y|T=0] = E[Y(0)|T=0]
+\end{eqnarray}
+$$
+
+と定義でき、これらは観測可能な値である。ただし、これらの差である
+
+$$
+E[Y(1)|T=1] - E[Y(0)|T=0]
+$$
+
+は、期待している平均処置効果ではない。これらの観察された平均値の単純比較を行ってみるとわかる。
+
+下記の式を少し変形するとATTとセレクションバイアスに分解される。これはATEでないことに加え、$E[Y(0)|T=1] = E[Y(0)|T=0]$が成立しなければ、バイアスを含むことになる。つまり、処置群と対照群ごとのアウトカムの期待値の差を計算しても平均処置効果ではない。
+
+$$
+\begin{eqnarray}
+E[Y(1)|T=1] - E[Y(0)|T=0] &=& E[Y(1)|T=1] - E[Y(0)|T=0] - E[Y(0)|T=1] + E[Y(0)|T=1] \\
+&=& E[Y(1)|T=1] - E[Y(0)|T=1] + E[Y(0)|T=1] - E[Y(0)|T=0] \\
+&=& E[Y(1) - Y(0)|T=1] + E[Y(0)|T=1] - E[Y(0)|T=0] \\ 
+&=& ATT + bias
+\end{eqnarray}
+$$
+
+期待している平均処置効果を計算するためには、「独立(independent)」という条件を考える必要がある。
+
+<div class="tbox">
+<th3>独立性</th3>
+<div class="inner">
+割付$T$が潜在的な結果$\{Y_{i}(1),Y_{i}(0)\}$に依存しないことを、$\{Y_{i}(1),Y_{i}(0)\}$と$T$は独立という。
+$$
+\{Y_{i}(1),Y_{i}(0)\} \amalg T
+$$
+</div>
+</div>
+
+処置が各個体に対してランダムに割り付けられる場合、$T$はすベての個体の共変量や属性とは無関係になる。一般に、$A \amalg B$であれば、$P(A|B)=P(A)$となるので、同様に
+
+$$
+\begin{eqnarray}
+E[Y|T=1] = E[Y(1)|T=1] = E[Y(1)] \\
+E[Y|T=0] = E[Y(0)|T=0] = E[Y(0)]
+\end{eqnarray}
+$$
+
+これらの条件が仮定できるのであれば、結果として、下記の通り、右辺は観測不可能ではあるが、左辺から計算可能となる。つまり、平均処置効果が計算できる。
+
+$$
+E[Y(1)|T=1] - E[Y(0)|T=0] = E[Y(1)] - E[Y(0)]
+$$
+また、独立を仮定することで、平均独立(mean exchangeability=交換可能性)も成り立つ。
+
+<div class="tbox">
+<th3>平均独立</th3>
+<div class="inner">
+$$
+\begin{eqnarray}
+E[Y(1)|T=1] = E[Y(1)|T=0] \\
+E[Y(0)|T=1] = E[Y(0)|T=0]
+\end{eqnarray}
+$$
+</div>
+</div>
+
+平均独立が表していることは、処置群$T=1$に割り付けた個体すべてを$T=0$としても、統制群$T=0$に割付けた個体すべて$T=1$としても、結果が同じになることを意味する。割り付けが無作為であれば、誰に介入されようとも、効果は変わらない、つまり、集団の交換が可能であることを意味する。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference11/independent.png')
+```
+
+平均独立が成り立つのであれば、
+
+$$
+\begin{eqnarray}
+E[Y(1)|T=1] = E[Y(1)|T=0] \\
+E[Y(0)|T=1] = E[Y(0)|T=0]
+\end{eqnarray}
+$$
+
+セレクションバイアスを含む式からもATEが計算できることがわかる。
+
+$$
+\begin{eqnarray}
+E[Y(1)|T=1] - E[Y(0)|T=0] &=& E[Y(1)|T=1] - E[Y(0)|T=0] - E[Y(0)|T=1] + E[Y(0)|T=1] \\
+&=& E[Y(1)|T=1] - E[Y(0)|T=1] + E[Y(0)|T=1] - E[Y(0)|T=0] \\
+&=& E[Y(1) - Y(0)|T=1] + E[Y(0)|T=1] - E[Y(0)|T=0] \\ 
+&=& E[Y(1) - Y(0)|T=1] + E[Y(0)|T=0] - E[Y(0)|T=0] \\ 
+&=& ATT + 0 \\
+&=& ATT
+\end{eqnarray}
+$$
+
+ただ、独立も独立から導かれる平均独立も、反事実のアウトカムが含まれるため、観測はできない。独立性を担保するためにランダム化無作為試験(RCT)などを通じて、独立性を担保する必要がある。
+
+## 共変量と条件付き独立性
+
+共変量$Z$が与えられたとき、潜在的な結果$\{Y_{i}(1),Y_{i}(0)\}$に割付$T$が依存しないことを、$Z$が与えられた条件のもとで$\{Y_{i}(1),Y_{i}(0)\}$と$T$は条件付き独立(conditionally independent)という。
+
+$$
+\{Y_{i}(1),Y_{i}(0)\} \amalg T | Z
+$$
+共変量$Z$のみが割付に影響する交絡因子であり、他の交絡要因がないことを意味する。
+
+```{r, echo=FALSE, out.width='100%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference11/independent2.png')
+```
+
+条件付き独立が表していることは、条件をつけた下では、処置群$T=1$に割り付けた個体すべてを$T=0$としても、統制群$T=0$に割付けた個体すべて$T=1$としても、結果が同じになることを意味する。割り付けが無作為であれば、誰に介入されようとも、効果は変わらない、つまり、条件をつけた下では、集団の交換が可能であることを意味する。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference11/independent3.png')
+```
+
+条件付き独立があるのであれば、同様には条件付き正値性(conditional positivity)も存在する。
+
+$$
+0 \lt P(T=1|Z) \lt 1
+$$
+
+つまり、共変量$Z$が与えられているもとで、処置か対照に割り付けられる確率は0ではないということになる。条件付き独立、条件付き正値性をあわせて「強い意味での無視可能な割付け(Strongly Ignorable Treatment Assignment)」と呼ぶ。すべての$Z$について成り立つ必要があるので、強い条件である。条件付き独立、条件付き正値性が成り立つのであれば、
+
+$$
+\begin{eqnarray}
+E[Y|T=1,Z] = E[Y(1)|T=1,Z] = E[Y(1)|Z] \\
+E[Y|T=0,Z] = E[Y(0)|T=0,Z] = E[Y(0)|Z]
+\end{eqnarray}
+$$
+が成り立つ。これらを$Z$で期待値(繰り返し期待値の法則)を取ることで、平均処置効果が計算できる。
+
+$$
+\begin{eqnarray}
+E_{Z}[E[Y|T=1,Z]] = E_{Z}[E[Y(1)|Z]] = E[Y(1)] \\
+E_{Z}[E[Y|T=0,Z]] = E_{Z}[E[Y(0)|Z]] = E[Y(0)] 
+\end{eqnarray}
+$$
+
+したがって、観察研究であっても、条件付き独立、条件付き正値性が成り立つのであれば、共変量$Z$を使えば実験研究と同じような枠組みにもってこれる。
+
+## 参考文献および参考資料
+
+- [統計解析スタンダード　統計的因果推論｜朝倉書店](https://www.asakura.co.jp/detail.php?book_code=12857)
+- [方法論特殊講義IIIサポートページ](https://www.jaysong.net/kobe-ci/material/matching.html)

@@ -134,7 +134,11 @@
 - [差分の差分法(DID)](https://sugiaki1989.github.io/statistical_note/note_CausalInference04/note_CausalInference04.html)
 - [回帰不連続デザイン](https://sugiaki1989.github.io/statistical_note/note_CausalInference05/note_CausalInference05.html)
 - [固定効果モデル](https://sugiaki1989.github.io/statistical_note/note_CausalInference06/note_CausalInference06.html)
-
+- [UpliftModelingについて1](https://sugiaki1989.github.io/statistical_note/note_CausalInference07/note_CausalInference07.html)
+- [UpliftModelingについて2](https://sugiaki1989.github.io/statistical_note/note_CausalInference08/note_CausalInference08.html)
+- [Meta-Learnersについて](https://sugiaki1989.github.io/statistical_note/note_CausalInference09/note_CausalInference09.html)
+- [条件付き確率のおさらい](https://sugiaki1989.github.io/statistical_note/note_CausalInference10/note_CausalInference10.html)
+- [条件付き独立性と交換可能性のおさらい](https://sugiaki1989.github.io/statistical_note/note_CausalInference11/note_CausalInference11.html)
 
 ## 生存時間解析(非公開)
 
