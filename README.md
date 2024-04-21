@@ -320,4 +320,5 @@
 - [GoogleForm のマルチアンサーを処理する](https://sugiaki1989.github.io/statistical_note/note_tips33/note_tips33.html)
 - [クロス集計からモンテカルロシュミレーションまで](https://sugiaki1989.github.io/statistical_note/note_tips34/note_tips34.html)
 - [比率の差の検定とχ二乗検定](https://sugiaki1989.github.io/statistical_note/note_tips35/note_tips35.html)
+- [Python Miniforge3環境の作り方](https://sugiaki1989.github.io/statistical_note/note_tips36/note_tips36.html)
 

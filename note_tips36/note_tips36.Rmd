@@ -1,0 +1,154 @@
+---
+title: 'Python Miniforge3環境を作る'
+pagetitle: 'Python Miniforge3環境を作る'
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: 'show'
+    highlight: 'kate'
+    # theme: 'flatly'
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      out.width  = 800,
+                      out.height = 600,
+                      fig.align  = 'center',
+                      dev        = 'ragg_png')
+```
+
+<div class='update-right'>
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは、Python Miniforge3環境を作り、簡単な仮想環境の使い方をまとめておく。環境構築に使用するPCはApple M1なので注意。
+
+## miniforge3をインストール
+
+下記よりMiniforge3をダウンロードする。
+
+- [conda-forge/miniforge: A conda-forge distribution.](https://github.com/conda-forge/miniforge)
+
+ダウンロードした後は、シェルを実行する。いくつか質問されるが、基本的には`yes`でOK。
+
+```
+$ cd ~/Downloads
+$ bash Miniforge3-MacOSX-arm64.sh
+```
+
+これでインストール自体はできているが、シェルの設定ファイルへの変更やCondaが現在のシェルで利用できるようにする設定などが行われていないので、対応する。
+
+ここでは`bash`で対応する。通常、`conda`はシェルの設定ファイル（例えば、.bashrcや.zshrcなど）に環境を自動的に追加して、Conda環境が自動的にアクティブにするが、そのような変更はしないとのことで`conda init`しておく。
+
+```
+$ eval "$(/Users/{Your User Name}/miniforge3/bin/conda shell.bash hook)"
+$ conda init
+```
+
+これで利用可能な状態となる。
+
+## 仮想環境の作成
+
+仮想環境を作る際のテンプレートは下記の通り。
+
+```
+conda create -n {Env Name} python={3.x}
+```
+
+`test_env1`という名前でpython3.9が利用できるようにする。いくつか質問されるが、基本的には`y`でOK。
+
+```
+$ conda create -n test_env1 python=3.9
+```
+
+構築が完了したら、アクティベイトする。コマンドの表示が変わり、どの仮想環境にいるかがわかる。
+
+```
+$ conda activate test_env1
+(test_env1) {name}@{name}:~$
+```
+
+仮想環境の構築先は下記で確認できる。
+
+```
+$ conda info --envs
+
+# conda environments:
+#
+base                     /Users/{name}/miniforge3
+test_env1             *  /Users/{name}/miniforge3/envs/test_env1
+```
+
+仮想環境でPythonが利用できる環境が整っている。
+
+```
+$ which python3
+/Users/aki/miniforge3/envs/test_env1/bin/python3
+
+$ python3
+Python 3.9.19 | packaged by conda-forge | (main, Mar 20 2024, 12:55:20)
+[Clang 16.0.6 ] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import sys
+>>> print(sys.version)
+3.9.19 | packaged by conda-forge | (main, Mar 20 2024, 12:55:20)
+[Clang 16.0.6 ]
+```
+
+必要なライブラリは`conda install`で行う。ここでは`jupyter`をインストールする。
+
+```
+$ conda install jupyter
+
+Channels:
+ - conda-forge
+Platform: osx-arm64
+Collecting package metadata (repodata.json): done
+Solving environment: done
+
+## Package Plan ##
+
+  environment location: /Users/{name}/miniforge3/envs/test_env1
+
+  added / updated specs:
+    - jupyter
+```
+
+これで`jupyter notebook`が利用できるようになる。
+
+```
+$ jupyter notebook
+```
+
+ターミナルからjupyter notebookを起動しても良いが、ここではVsCodeから利用する。`/opt/`にNotebookと`.py`ファイルを作成している。
+
+```
+$ cd ~/miniforge3/envs/test_env1/opt
+
+$ ls -l
+avg.py
+test1.ipynb
+```
+
+あとはVsCodeで`/opt/`を開けば利用可能になる。
+
+```{r, echo=FALSE, out.width='75%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_tips36/jupyternotebook.png')
+```
+
+仮想環境から出る際はデアクティベイトする。環境から抜け出すと下記の通り表記も変更される。
+
+```
+(test_env1) {name}@{name}:~$ conda deactivate
+↓
+{name}@{name}:~$
+```
