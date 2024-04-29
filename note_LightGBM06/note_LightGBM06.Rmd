@@ -1,0 +1,657 @@
+---
+title: "LightGBMと勾配ブースティング"
+pagetitle: "LightGBMと勾配ブースティング"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではLightGBMを理解するために、LightGBMの基礎となっている勾配ブースティングのアルゴリズムについて理解する。LightGBMの特徴については別のノートで取り上げる予定ではあるが、ベースは勾配ブースティングのアルゴリズムなので、まずは勾配ブースティングを理解する。下記のStatQuestを参考にしている。
+
+- [Gradient Boost Part 2 (of 4): Regression Details](https://www.youtube.com/watch?v=2xudPOBz-vs&t=1169s)
+- [Gradient Boost Part 3 (of 4): Classification](https://www.youtube.com/watch?v=jxuNLH5dXCs&t=1s)
+- [Gradient Boost Part 4 (of 4): Classification Details](https://www.youtube.com/watch?v=StWY5QWMXCw&t=2s)
+
+
+## 勾配ブースティング(回帰)
+
+下記の簡単なデータを例に勾配ブースティングのアルゴリズムの理解を深める。
+
+|No|Height|color|gender|weight(Y)|
+|:---|:---|:---|:---|:---|
+|1|1.6|blue|male|88|
+|2|1.6|green|female|76|
+|3|1.5|blue|female|56|
+
+### Step1: モデルの初期化
+
+まずは$Data\{ (x_{i}, y_{i})\}_{i=1}^{n}$と微分可能な損失関数$L(y_{i}, \gamma)$を用意する。損失関数については、2乗誤差を使用する。$\gamma$は予測値である。
+
+$$
+\begin{eqnarray}
+\text{Step1} &:& \text{Initialize model with a constant value} \\
+F_{0}(x) &=& \underset{\gamma} {\operatorname{argmin}} \sum_{i=1}^{n}L(y_{i}, \gamma)
+\end{eqnarray}
+$$
+これは損失関数(2乗誤差)を最小にするということなので、今回のデータであれば、下記のようになる。
+
+$$
+\begin{eqnarray}
+\sum_{i=1}^{n}L(y_{i}, \gamma) = \frac{1}{2}(88-pred)^{2} + \frac{1}{2}(76-pred)^{2} + \frac{1}{2}(56-pred)^{2}
+\end{eqnarray}
+$$
+
+予測値$\gamma$について、最小にするということなので、微分して0とおく。
+
+$$
+\begin{eqnarray}
+\frac{d \sum_{i=1}^{n}L(y_{i}, \gamma)}{d \gamma} &=& \frac{1}{2}(88-pred)^{2} + \frac{1}{2}(76-pred)^{2} + \frac{1}{2}(56-pred)^{2}=0 \\
+\end{eqnarray}
+$$
+
+下記の通り計算すると$F_{0}(x)=73.3$とわかる。これでStep1は完了。
+
+$$
+\begin{eqnarray}
+0 &=& -(88-pred)-(76-pred)-(56-pred) \\
+0 &=& -88+pred-76+pred-56+pred\\
+3pred &=&  88 + 76 + 56 \\
+pred &=&\frac{88 + 76 + 56}{3} \\
+pred &=&  73.3
+\end{eqnarray}
+$$
+
+### Step2-A: 残差を計算する
+
+このステップでは、下記の式をもとに残差$r_{im}$を計算する。$m$はブースティング回数である。$F(x)=F_{m-1}(x)$は今回は$m=1$なので、$F(x)=F_{0}(x)$となる。
+
+$$
+\begin{eqnarray}
+\text{Step2-A} &:& \text{Compute} \ \ r_{im} \\
+r_{im}  &=& - \left[ \frac{\partial L(y_{i}, F(x_{i}))}{\partial F(x_{i})}\right]_{F(x)=F_{m-1}(x)}, for \ i=1...n
+\end{eqnarray}
+$$
+
+この部分がゴツく見えるが、今回の場合、ここは残差になる。なぜなら、損失関数を予測値で微分すると、残差がでてくるからである。
+
+$$
+\begin{eqnarray}
+r_{im} = - \left[ \frac{\partial L(y_{i}, F_{0}(x))}{\partial F_{0}(x)}\right] &=& - \frac{\frac{1}{2}(y_{i} - F_{0}(x))^2}{\partial F_{0}(x)} \\
+&=& -[ -(y_{i} - F_{0}(x))] \\
+&=&  (y_{i} - F_{0}(x)) \\
+&=&  (y_{i} - 73.3)
+\end{eqnarray}
+$$
+
+これが勾配ブースティングの勾配に当たる部分であり、$r_{im}$は疑似残差である。
+先程の表に、情報を追加しておく。
+
+|No|Height|color|gender|weight(Y)|$r_{i,1}$|
+|:---|:---|:---|:---|:---|:---|
+|1|1.6|blue|male|88|14.7|
+|2|1.6|green|female|76|2.7|
+|3|1.5|blue|female|56|-17.3|
+
+
+### Step2-B: 残差に回帰木を作成する
+
+さきほど計算した残差に対して、回帰木を作成する。$m$はブースティング回数で、$j$はリーフの数。
+
+$$
+\begin{eqnarray}
+\text{Step2-B} &:& \text{Fit a regression tree to the} \ \ r_{im} \text{values and create terminal regions} \ \ R_{jm}, \text{for} \ j = 1...J_m\\
+\end{eqnarray}
+$$
+
+ここでは下記の回帰木ができたとする。数字はさきほど計算した残差で、丸括弧はレコードのNoを表す。
+
+```
+Height < 1.55
+ └ R_{1,1}: Left(yes): -17.3(3)
+ └ R_{1,2}: Right(No): 14.7(1),2.7(2)
+```
+
+### Step2-C: 各リーフの残差を最小化する
+
+このステップでは、各リーフごとに、残差を最小にしていく。$m$はブースティング回数で、$j$はリーフの数。
+
+$$
+\begin{eqnarray}
+\text{Step2-C} &:& \text{For} \ j = 1...J_m \ \ \text{compute} \ \ \gamma_{jm} = \underset{\gamma} {\operatorname{argmin}} \sum_{x_{i} \in R_{ij}} L(y_{i}, F_{m-1}(x_{i})+\gamma)
+\\
+\end{eqnarray}
+$$
+
+さきほど計算したリーフの場合、2つのリーフ(片方は1レコード)しかないので、シンプルに計算できる。
+
+$$
+\begin{eqnarray}
+\gamma_{1,1} &=& \underset{\gamma} {\operatorname{argmin}} \sum_{x_{i} \in R_{i1}} L(y_{i}, F_{0}(x_{i})+\gamma) \\
+&=& \frac{1}{2}( y_{i}-(F_{0}(x_{3})+\gamma) )^{2} \\
+&=& \frac{1}{2}( 56-73.3-\gamma )^{2} \\
+&=& \frac{1}{2}( -17.3-\gamma )^{2}
+\end{eqnarray}
+$$
+
+残差を最小にするために、微分して0とすると、$\gamma_{1,1} = -17.3$となる。
+
+$$
+\begin{eqnarray}
+\frac{\partial \frac{1}{2}( -17.3-\gamma )^{2}}{\partial \gamma} &=&  (-17.3 - \gamma)*-1 = 0 \\
+17.3 + \gamma &=& 0 \\
+\gamma &=& -17.3
+\end{eqnarray}
+$$
+
+$\gamma_{2,1}$も同様に計算する。
+
+$$
+\begin{eqnarray}
+\gamma_{2,1} &=& \underset{\gamma} {\operatorname{argmin}} \sum_{x_{i} \in R_{i2}} L(y_{i}, F_{0}(x_{i})+\gamma) \\
+&=& \frac{1}{2}( y_{1}-(F_{0}(x_{3})+\gamma) )^{2} + \frac{1}{2}( y_{2}-(F_{0}(x_{3})+\gamma) )^{2}\\
+&=& \frac{1}{2}( 88-73.3-\gamma) )^{2} + \frac{1}{2}( 76-73.3-\gamma )^{2}\\
+&=& \frac{1}{2}( 14.7-\gamma) )^{2} + \frac{1}{2}( 2.7-\gamma )^{2}\\
+\end{eqnarray}
+$$
+
+残差を最小にするために、微分して0とすると、$\gamma_{2,1} = 8.7$となる。
+
+$$
+\begin{eqnarray}
+\frac{\partial \frac{1}{2}( 14.7-\gamma) )^{2} + \frac{1}{2}( 2.7-\gamma )^{2}}{\partial \gamma} &=&  (14.7 - \gamma)*-1 + (2,7 - \gamma)*-1 = 0 \\
+-14.7 + \gamma - 2.7 + \gamma &=& 0 \\
+\gamma &=& \frac{14.7 + 2.7}{2} \\
+\gamma &=& 8.7 \\
+\end{eqnarray}
+$$
+
+最終的には各リーフの残差が得らる。
+
+$$
+\begin{eqnarray}
+\gamma_{1,1} = -17.3 \\
+\gamma_{2,1} = 8.7 \\
+\end{eqnarray}
+$$
+
+### Step2-D: 予測値を更新する
+
+このステップでは、各リーフごと得られた残差を使って、予測値を更新していく。$m$はブースティング回数で、$j$はリーフの数で、$\nu$は学習率である。予測値の更新において、どの程度、残差を足し合わせかを調整するパラメタ。小さければあまり反映させず、大きければ強く反映させる。$I(x \in R_{jm})$はインジケータ変数で、対象となる$x$だけを更新することを意味している。
+
+$$
+\begin{eqnarray}
+\text{Step2-D} &:& \text{Update} F_{m}(x) = F_{m-1}(x) + \nu \sum_{j=1}^{J_{m}} r_{jm} I(x \in R_{jm}) 
+\end{eqnarray}
+$$
+
+ここでは、$\nu=0.1$として、$F_{1}(x)$を計算する。
+
+$$
+\begin{eqnarray}
+F_{1}(x) = F_{0}(x) + 0.1* r_{11} = 73.3 + 0.1*-17.3 = 71.6 \\
+F_{1}(x) = F_{0}(x) + 0.1* r_{21} = 73.3 + 0.1*8.7 = 74.2
+\end{eqnarray}
+$$
+
+つまり、リーフに属しているレコードごとに予測値が計算でき、下記の予測値が得られる。
+
+|No|Height|color|gender|weight(Y)|$r_{i,1}$|$F_{1}(x)$|
+|:---|:---|:---|:---|:---|:---|:---|
+|1|1.6|blue|male|88|14.7|74.2|
+|2|1.6|green|female|76|2.7|74.2|
+|3|1.5|blue|female|56|-17.3|71.6|
+
+このStep2のA-Dをブースティングの回数として設定した$m$回実行する。例えば、$m=2$のときは、$F_{1}(x)$の値を利用して計算していく。
+
+$$
+\begin{eqnarray}
+\text{Step2-A} &:& \text{Compute} \ \ r_{im} \\
+r_{im}  &=& - \left[ \frac{\partial L(y_{i}, F(x_{i}))}{\partial F(x_{i})}\right]_{F(x)=F_{m-1}(x)}, for \ i=1...n \\
+\text{Step2-B} &:& \text{Fit a regression tree to the} \ \ r_{im} \text{values and create terminal regions} \ \ R_{jm}, \text{for} \ j = 1...J_m\\
+\text{Step2-C} &:& \text{For} \ j = 1...J_m \ \ \text{compute} \ \ \gamma_{jm} = \underset{\gamma} {\operatorname{argmin}} \sum_{x_{i} \in R_{ij}} L(y_{i}, F_{m-1}(x_{i})+\gamma)
+\\
+\text{Step2-D} &:& \text{Update} F_{m}(x) = F_{m-1}(x) + \nu \sum_{j=1}^{J_{m}} r_{jm} I(x \in R_{jm}) 
+\end{eqnarray}
+$$
+
+そうすることで、$r_{j2}$が得られ、予測値を更新できる。また、2回目の回帰木は1回目の回帰木とは同一ではないことが期待され、多様性が生まれる。こうすることで生まれた弱学習器の残差を取り込むことにより、予測値を更新していく。
+
+### 勾配ブースティングのイメージ
+
+ここまでの説明の通り、勾配ブースティングは、残差に回帰木を当てはめ、モデルを改善していくアルゴリズム。そのイメージを実装しておく。
+
+```{r}
+library(rpart)
+library(tidyverse)
+
+# Create dataframe
+set.seed(1234)
+learning_rate <- 0.03
+
+n <- 1000
+x <- sort(runif(n) * 10 * pi)
+y <- sin(1.5*x) + rnorm(n, 0, 0.5)  # ノイズの分散を小さくする
+df1 <- data.frame(x = x, y = y)
+
+# Fit base tree model
+fit <- rpart(y ~ x, data = df1)
+df1$y_pred_base <- predict(fit)
+y_boost_lr <- predict(fit) * learning_rate
+df1$y_res <- df1$y - y_boost_lr
+y_boost <- y_boost_lr
+
+# Boosting m times
+loops <- 50
+for (t in 1:loops) {
+  fit <- rpart(y_res ~ x, data = df1)
+  y_boost_lr <- predict(fit, newdata = df1) * learning_rate
+  df1$y_res <- df1$y_res - y_boost_lr
+  y_boost <- cbind(y_boost, y_boost_lr)
+}
+
+# Sum residuals 
+y <- apply(y_boost[, 1:loops], 1, sum)
+df2 <- data.frame(x = df1$x, res = y)
+
+# Plot
+ggplot() + 
+  geom_point(data = df1, aes(x, y), size = 1, alpha = 0.1) + 
+  geom_line(data  = df1, aes(x, y_pred_base), size = 1, alpha = 0.5, col = 'tomato') +
+  geom_line(data  = df2, aes(x, res), size = 1, alpha = 0.8, col = '#006E4F') + 
+  theme_bw()
+```
+
+## 勾配ブースティング(分類)のイメージ
+
+次は分類を目的とした勾配ブースティング。回帰のときと流れは同じではあるものの、分類問題に対してそのまま適用すると問題が発生するので、その点は分類用に修正される。例えば回帰のように残差を足し合わせていくと、確率が0-1の範囲を超えてしまう。
+
+
+使用するデータは下記の通り。
+
+|No|Like|Age|Color|LikeMovie(Y)|
+|:---|:---|:---|:---|:---|
+|1|Yes|12|Blue|Yes|
+|2|Yes|87|Green|Yes|
+|3|No |44|Blue|No|
+|4|Yes|19|Red|No|
+|5|No|32|Green|Yes|
+|6|No|14|Blue|Yes|
+
+まずは初期値の確率を計算する。初期予測確率は対数オッズで計算する。対数オッズは$log(4/2)=0.7$となる(説明のために丸めている)。計算にした対数オッズをシグモイド関数に代入し、確率を得る。
+
+$$
+\begin{eqnarray}
+Prob = \frac{e^{log(4/2)}}{1+e^{log(4/2)}} = 0.6667 = 0.7
+\end{eqnarray}
+$$
+
+予測確率と目的変数の残差を計算する。目的変数は2値変数であれば0-1に変換するのが一般的。そして、分類木と残差を計算する。分類木はここでは下記のようになったとする。
+
+```
+Color = Red
+ └ Leaf(1): Left(yes): -0.7(4)
+ └ Right(No)
+   Age > 37
+    └ Leaf(2): Left(yes): 0.3(2), -0.7(3)
+    └ Leaf(3): Right(No): 0.3(1), 0.3(5), 0.3(6)
+```
+
+|No|Like|Age|Color|LikeMovie(Y)|Residual|
+|:---|:---|:---|:---|:---|:---|
+|1|Yes|12|Blue|1|0.3|
+|2|Yes|87|Green|1|0.3|
+|3|No |44|Blue|0|-0.7|
+|4|Yes|19|Red|0|-0.7|
+|5|No|32|Green|1|0.3|
+|6|No|14|Blue|1|0.3|
+ 
+そして、残差を変換するために下記の関数を利用する。このよくわからない変換式は後ほど解説する。
+
+$$
+\begin{eqnarray}
+\frac{\sum residuals_{i}}{\sum[ PreviousProbability_{i} * (1 - PreviousProbability_{i})]}
+\end{eqnarray}
+$$
+
+各Reafを計算すると、下記のようになる。
+
+$$
+\begin{eqnarray}
+Leaf(1)&:& \frac{-0.7}{0.7 * (1 - 0.7)}=-3.3 \\
+Leaf(2)&:& \frac{0.3+-0.7}{(0.7 * (1 - 0.7)) + (0.7 * (1 - 0.7))}=-1 \\
+Leaf(3)&:& \frac{0.3+0.3+0.3}{(0.7 * (1 - 0.7)) + (0.7 * (1 - 0.7)) + (0.7 * (1 - 0.7))}=1.4
+\end{eqnarray}
+$$
+
+これで各レコードの確率の予測値を更新できる。学習率は0.8としている。説明のために数字を丸めている。
+
+$$
+\begin{eqnarray}
+No4 &:& 0.7+(0.8*-3.3)=-1.9 → \frac{e^{-1.9 }}{1+e^{-1.9 }} = 0.1 \\ 
+No2,3 &:& 0.7+(0.8*-1)=-0.1 → \frac{e^{-0.1 }}{1+e^{-0.1 }} = 0.5 \\ 
+No1,5,6 &:& 0.7+(0.8*1.4)=1.8 → \frac{e^{1.8}}{1+e^{1.8}} = 0.9 \\ 
+\end{eqnarray}
+$$
+
+これで確率の予測値が計算される。そして、新しい残差を計算する。
+
+|No|Like|Age|Color|LikeMovie(Y)|Residual|Prob|Residual2|
+|:---|:---|:---|:---|:---|:---|:---|:---|
+|1|Yes|12|Blue|1|0.3|0.9|0.1|
+|2|Yes|87|Green|1|0.3|0.5|0.5|
+|3|No |44|Blue|0|-0.7|0.5|-0.5|
+|4|Yes|19|Red|0|-0.7|0.1|-0.1|
+|5|No|32|Green|1|0.3|0.9|0.1|
+|6|No|14|Blue|1|0.3|0.9|0.1|
+
+そして、新しい残差に対して新しい分類木を作成し、これを繰り返していくことで、残差を小さくしていく。
+
+### 負の対数尤度と損失関数の関係
+
+説明のためにデータを小さくしておく。
+
+|No|Like|Age|Color|LikeMovie(Y)|
+|:---|:---|:---|:---|:---|:---|
+|1|Yes|12|Blue|1|
+|2|No |87|Green|1|
+|3|No |44|Blue|0|
+
+初期確率は、$exp(log(2/1))/ (1+exp(log(2/1)))=0.67$である。ここで対数尤度を考える。
+
+$$
+\begin{eqnarray}
+LogLikelihood &=& \sum_{i=1}^{N} y_{i}*log(p) + (1-y_{i})log(1-p) \\ 
+&=& [1*log(0.67)+(1-1)*log(1-0.67)] + [1*log(0.67)+(1-1)*log(1-0.67)] +  [0*log(0.67)+(1-0)*log(1-0.67)]\\
+&=& log(0.67) + log(0.67) + log(1-0.67)
+\end{eqnarray}
+$$
+
+ロジスティック回帰などを行う場合も、対数尤度を最大化することを目的にする。対数尤度が最も大きい時、パラメタがもっともらしいためである。つまり、対数尤度を損失関数として使いたい場合、損失関数は、より小さい値がよりよく適合するモデルを表すので、対数尤度にに-1を掛ける必要がある。
+
+$$
+\begin{eqnarray}
+-LogLikelihood &=& -\left[\sum_{i=1}^{N} y_{i}*log(p) + (1-y_{i})log(1-p) \right] \\ 
+\end{eqnarray}
+$$
+
+ここで1つの値だけに注文して式を変形してみる。4-5行目の変換は後述。この変形によって、データの負の対数尤度を予測確率$p$の関数で表現でき、これを損失関数として利用できる。
+
+$$
+\begin{eqnarray}
+-[y*log(p) + (1-y)log(1-p)]  &=& -y*log(p) - (1-y)log(1-p) \\ 
+&=& -y*log(p) - (1-p) - y*log(1-p) \\
+&=& -y*[log(p) - log(1-p)] - log(1-p) \\
+&=& -y*log(odds) - log(1-p) \\
+&=& -y*log(odds) + log(1+e^{log(odds)}) \\
+\end{eqnarray}
+$$
+
+4-5行目の変換は下記の通りである。
+
+$$
+\begin{eqnarray}
+log(1-p) &=& log \left( 1 - \frac{e^{log(odds)}}{1+e^{log(odds)}}\right)  \\
+&=& log \left(\frac{1+e^{log(odds)}}{1+e^{log(odds)}} - \frac{e^{log(odds)}}{1+e^{log(odds)}}\right)  \\
+&=& log \left( \frac{1}{1+e^{log(odds)}}\right)  \\
+&=& log(1) - log(1+e^{log(odds)}) \\
+&=& 0 - log(1+e^{log(odds)}) \\
+&=& - log(1+e^{log(odds)})
+\end{eqnarray}
+$$
+
+負の対数関数は、微分可能な損失関数として表現できる。
+
+$$
+\begin{eqnarray}
+\frac{\partial (-y*log(odds) + log(1+e^{log(odds)}))}{\partial \ log(odds)} &=& -y + \frac{1}{1+e^{log(odds)}}*e^{log(odds)} \\
+&=& -y + \frac{e^{log(odds)}}{1+e^{log(odds)}} \\
+&=& -y + p \\
+\end{eqnarray}
+$$
+
+### Step1: モデルの初期化
+
+回帰の時と同様のアルゴリズムで予測値を得るわけではあるが、Stepについては、
+
+$$
+\begin{eqnarray}
+\text{Step1} &:& \text{Initialize model with a constant value} \\
+F_{0}(x) &=& \underset{\gamma} {\operatorname{argmin}} \sum_{i=1}^{n}L(y_{i}, \gamma) \\
+\end{eqnarray}
+$$
+
+下記の損失関数が利用できる。$log(odds)=\gamma$である。これを最小にするわけなので、
+
+$$
+\begin{eqnarray}
+\underset{\gamma} {\operatorname{argmin}} \sum_{i=1}^{n}L(y_{i}, \gamma) &=& -y*log(odds) + log(1+e^{log(odds)}) \\
+&=& -1*log(odds) + log(1+e^{log(odds)}) -1*log(odds) + log(1+e^{log(odds)}) -0*log(odds) + log(1+e^{log(odds)}) \\
+\end{eqnarray}
+$$
+
+あとは微分して0とおくと
+
+$$
+\begin{eqnarray}
+\frac{\partial L(y_{i}, \gamma)}{\partial \gamma} &=& \frac{\partial (-1*log(odds) + log(1+e^{log(odds)}) -1*log(odds) + log(1+e^{log(odds)}) -0*log(odds) + log(1+e^{log(odds)})) }{\partial log(odds)} \\
+&=& -1 + \frac{e^{log(odds)}}{1+e^{log(odds)}}-1 + \frac{e^{log(odds)}}{1+e^{log(odds)}} -0 + \frac{e^{log(odds)}}{1+e^{log(odds)}} \\
+&=& -1 + p -1 + p -0 + p = 0 \\
+p &=& \frac{2}{3}
+\end{eqnarray}
+$$
+
+となって、$F_{0}(x)=0.69$と計算できる。
+
+$$
+\begin{eqnarray}
+log(odds) = log \left(\frac{p}{1-p} \right) = log \left(\frac{\frac{2}{3}}{1-\frac{2}{3}} \right) = log \left(\frac{2}{1} \right) = 0.69
+\end{eqnarray}
+$$
+### Step2-A: 残差を計算する
+
+次はStep2。損失関数を微分したものが必要ではあるが、それは計算済みである。
+
+$$
+\begin{eqnarray}
+\text{Step2-A} &:& \text{Compute} \ \ r_{im} \\
+r_{im}  &=& - \left[ \frac{\partial L(y_{i}, F(x_{i}))}{\partial F(x_{i})}\right]_{F(x)=F_{m-1}(x)}, for \ i=1...n \\
+\end{eqnarray}
+$$
+
+つまり、$r_{1,1}=(y - 0.69)$となる。
+
+$$
+\begin{eqnarray}
+r_{im}  &=& - \left[ \frac{\partial L(y_{i}, F(x_{i}))}{\partial F(x_{i})}\right]_{F(x)=F_{m-1}(x)} \\
+&=& - [-y + p ]  \\
+&=& \left(- [-y + \frac{e^{log(odds)}}{1 + e^{log(odds)}} ] \right) \\
+&=& \left(- [-y + \frac{e^{log(2/1)}}{1 + e^{log(2/1)}} ] \right) \\
+&=& y - 0.67 \\
+\end{eqnarray}
+$$
+ 
+残差を計算すると、下記のようになる。 
+ 
+|No|Like|Age|Color|LikeMovie(Y)|$r_{1,1}$|
+|:---|:---|:---|:---|:---|:---|:---|
+|1|Yes|12|Blue|1|1-0.67=0.33|
+|2|No |87|Green|1|1-0.67=0.33|
+|3|No |44|Blue|0|0-0.67=-0.67|
+
+
+### Step2-B: 残差に分類木を作成する
+
+これで、回帰木(分類木)を作成する次のStep2-Bに進む。
+
+$$
+\begin{eqnarray}
+\text{Step2-B} &:& \text{Fit a regression tree to the} \ \ r_{im} \text{values and create terminal regions} \ \ R_{jm}, \text{for} \ j = 1...J_m\\
+\end{eqnarray}
+$$
+
+ここでは下記の分類木ができたとする。数字はさきほど計算した残差で、丸括弧はレコードのNoを表し、今回は$j=1,m=1$である。
+
+```
+Like = Yes
+ └ R_{1,1}: Left(Yes): 0.33(1)
+ └ R_{1,2}: Right(No): 0.33(2),-0.67(3)
+```
+
+### Step2-C: 各リーフの残差を最小化する
+
+次は、StepCの各リーフの損失関数の予測値を最小化するステップ。
+
+$$
+\begin{eqnarray}
+\text{Step2-C} &:& \text{For} \ j = 1...J_m \ \ \text{compute} \ \ \gamma_{jm} = \underset{\gamma} {\operatorname{argmin}} \sum_{x_{i} \in R_{ij}} L(y_{i}, F_{m-1}(x_{i})+\gamma)
+\\
+\end{eqnarray}
+$$
+
+$\gamma$を微分することは可能ではあるものの、すごく複雑になるため、ここで$\gamma$についての近似を考える。
+
+$$
+\begin{eqnarray}
+\gamma_{1,1} &=& \underset{\gamma} {\operatorname{argmin}} \sum_{x_{i} \in R_{i1}} L(y_{i}, F_{0}(x_{i})+\gamma) \\
+&=& \underset{\gamma} {\operatorname{argmin}} \sum_{x_{i} \in R_{i1}} -y_{i} * [F_{m-1}(x_{i}) + \gamma]+log(1+e^{F_{m-1}(x_{i})+\gamma}) \\
+&=& \underset{\gamma} {\operatorname{argmin}}  -y_{1} * [F_{m-1}(x_{1}) + \gamma]+log(1+e^{F_{m-1}(x_{1})+\gamma}) \\
+\end{eqnarray}
+$$
+
+ここでは$\gamma$に関する2次のテイラー展開を考える。
+
+$$
+\begin{eqnarray}
+L(y_{1}, F_{m-1}(x_{1})+\gamma) &=& -y_{1} * [F_{m-1}(x_{1}) + \gamma]+log(1+e^{F_{m-1}(x_{1})+\gamma}) \\
+&\approx& L(y_{1}, F_{m-1}(x_{1})) + \frac{d }{d \ F()}(y_{1}, F_{m-1}(x_{1})) \gamma + \frac{1}{2} \frac{d^{2} }{d \ F()^{2}} (y_{1}, F_{m-1}(x_{1})) \gamma^{2}
+\end{eqnarray}
+$$
+
+損失関数をテイラー展開で近似することで、$\gamma$に関する導関数がシンプルに表現できる。
+
+$$
+\begin{eqnarray}
+\frac{d }{d} L(y_{1}, F_{m-1}(x_{1})+\gamma) &\approx& 0 + \frac{d }{d \ F()}(y_{1}, F_{m-1}(x_{1})) + \frac{d^{2} }{d \ F()^{2}} (y_{1}, F_{m-1}(x_{1})) \gamma 
+\end{eqnarray}
+$$
+
+この導関数を0とおいて、$\gamma$に関して式変形する。$log(odds)$の2次導関数は後述する。
+
+$$
+\begin{eqnarray}
+\frac{d }{d} L(y_{1}, F_{m-1}(x_{1})+\gamma) &\approx& \frac{d }{d \ F()}(y_{1}, F_{m-1}(x_{1})) + \frac{d^{2} }{d \ F()^{2}} (y_{1}, F_{m-1}(x_{1})) \gamma = 0 \\
+\frac{d^{2} }{d \ F()^{2}} (y_{1}, F_{m-1}(x_{1})) \gamma &=& - \frac{d }{d \ F()}(y_{1}, F_{m-1}(x_{1})) \\
+\gamma &=&  \frac{- \frac{d }{d \ F()}(y_{1}, F_{m-1}(x_{1}))}{\frac{d^{2} }{d \ F()^{2}} (y_{1}, F_{m-1}(x_{1}))} \\
+\gamma &=&  \frac{y_{1} - \frac{e^{log(odds)}}{1+e^{log(odds)}}}{ \frac{d^{2} }{d \ F()^{2}} (y_{1}, F_{m-1}(x_{1})) } \\
+\gamma &=&  \frac{y_{1} - p }{ \frac{d^{2} }{d \ F()^{2}} (y_{1}, F_{m-1}(x_{1})) } \\
+\gamma &=&  \frac{Residuals }{  p * (1-p) }
+\end{eqnarray}
+$$
+
+$log(odds)$の2次導関数は下記の通り$ p * (1-p)$となる。
+
+$$
+\begin{eqnarray}
+\frac{d^{2} }{d \ F()^{2}} (y_{1}, F_{m-1}(x_{1})) &=& -(1+e^{log(odds)})^{-2}e^{log(odds)}*e^{log(odds)}+(1+e^{log(odds)})^{-1}*e^{log(odds)} \\
+&=& \frac{-e^{2*log(odds)}}{(1+e^{log(odds)})^{2}} + \frac{e^{log(odds)}}{1+e^{log(odds)}} \\
+&=& \frac{-e^{2*log(odds)}}{(1+e^{log(odds)})^{2}} + \frac{e^{log(odds)}}{1+e^{log(odds)}} \frac{1+e^{log(odds)}}{1+e^{log(odds)}} \\
+&=& \frac{-e^{2*log(odds)}}{(1+e^{log(odds)})^{2}} + \frac{e^{log(odds) + e^{2*log(odds)}}} {(1+e^{log(odds)})^{2}} \\
+&=& \frac{-e^{2*log(odds)}+ e^{log(odds)} + e^{2*log(odds)}}{(1+e^{log(odds)})^{2}}  \\
+&=& \frac{e^{log(odds)} }{(1+e^{log(odds)})^{2}}  \\
+&=& \frac{e^{log(odds)} }{(1+e^{log(odds)})(1+e^{log(odds)})}  \\
+&=& \frac{e^{log(odds)} }{(1+e^{log(odds)})} *  \frac{1}{(1+e^{log(odds)})} \\
+&=& p * (1-p)
+\end{eqnarray}
+$$
+
+少し前に行っていた$\gamma_{11}$の計算に戻ると、
+
+$$
+\begin{eqnarray}
+\gamma_{1,1} &=& \frac{Residuals }{  p * (1-p) }
+&=& \frac{0.33}{0.67*(1-0.67)}
+&=& 1.5
+\end{eqnarray}
+$$
+
+となる。$\gamma_{21}$の計算も同様に行うと、
+
+$$
+\begin{eqnarray}
+\gamma_{2,1} &=& \underset{\gamma} {\operatorname{argmin}} \sum_{x_{i} \in R_{i1}} L(y_{i}, F_{0}(x_{i})+\gamma) \\
+&=& L(y_{2}, F_{0}(x_{2})+\gamma) + L(y_{3}, F_{0}(x_{3})+\gamma) \\
+&=& \frac{Residuals_{2} + Residuals_{3} }{ (p_{2} * (1-p_{2}))+p_{3} * (1-p_{3})} \\
+&=& \frac{ 0.33-0.67 }{ (0.67 * (1-0.67))+0.67 * (1-0.67)} \\
+&=&  -0.77
+\end{eqnarray}
+$$
+
+と計算できる。まとめておく。
+
+$$
+\begin{eqnarray}
+\gamma_{1,1} &=& 1.5 \\
+\gamma_{2,1} &=& -0.77
+\end{eqnarray}
+$$
+
+### Step2-D: 予測値を更新する
+
+やっとStep2-Dまでこれた。あとは予測確率を更新するだけ。
+
+$$
+\begin{eqnarray}
+\text{Step2-D} &:& \text{Update} F_{m}(x) = F_{m-1}(x) + \nu \sum_{j=1}^{J_{m}} r_{jm} I(x \in R_{jm}) 
+\end{eqnarray}
+$$
+
+学習率は$\nu =0.8$として、$F_{1}(x)$を計算する。
+
+$$
+\begin{eqnarray}
+F_{1}(x) &=&  F_{0}(x) + 0.1* r_{11} = 0.69 + (0.8 * 1.5) = 1.89\\
+F_{1}(x) &=&  F_{0}(x) + 0.1* r_{21} = 0.69 + (0.8 * -0.77) = 0.07 \\
+\end{eqnarray}
+$$
+
+つまり、リーフに属しているレコードごとに予測値が計算でき、下記の予測値が得られる。
+
+|No|Like|Age|Color|LikeMovie(Y)|$r_{1,1}$|$F_{1}(x)$|$p_{1}(x)$|
+|:---|:---|:---|:---|:---|:---|:---|:---|
+|1|Yes|12|Blue|1|0.33|1.89|exp(1.89)/(1+exp(1.89))=0.87|
+|2|No |87|Green|1|0.33|0.07|exp(0.07)/(1+exp(0.07))=0.52|
+|3|No |44|Blue|0|-0.67|0.07|exp(0.07)/(1+exp(0.07))=0.52|
+
+これをブースティング回数分繰り返す。
+
+## 参考文献
+
+- [Gradient Boost Part 2 (of 4): Regression Details](https://www.youtube.com/watch?v=2xudPOBz-vs&t=1169s)
+- [Gradient Boost Part 3 (of 4): Classification](https://www.youtube.com/watch?v=jxuNLH5dXCs&t=1s)
+- [Gradient Boost Part 4 (of 4): Classification Details](https://www.youtube.com/watch?v=StWY5QWMXCw&t=2s)

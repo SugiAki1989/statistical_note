@@ -239,6 +239,16 @@
 - [Robyn が出力するグラフについて](https://sugiaki1989.github.io/statistical_note/note_MarketingMixModeling03/note_MarketingMixModeling03.html)
 - [Robyn R Demo を動かす](https://sugiaki1989.github.io/statistical_note/note_MarketingMixModeling04/note_MarketingMixModeling04.html)
 
+## LightGBM: Pythonパッケージ
+
+- [LightGBMの予測値計算について](https://sugiaki1989.github.io/statistical_note/note_LightGBM01/note_LightGBM01.ipynb)
+- [LightGBMのSHAP](https://sugiaki1989.github.io/statistical_note/note_LightGBM02/note_LightGBM02.ipynb)
+- [LightGBMと分類問題](https://sugiaki1989.github.io/statistical_note/note_LightGBM03/note_LightGBM03.ipynb)
+- [LightGBMとクロスバリデーション](https://sugiaki1989.github.io/statistical_note/note_LightGBM04/note_LightGBM04.ipynb)
+- [LightGBMとパラメタチューニング(Optuna)](https://sugiaki1989.github.io/statistical_note/note_LightGBM05/note_LightGBM05.ipynb)
+- [LightGBMと勾配ブースティングの数理](https://sugiaki1989.github.io/statistical_note/note_LightGBM06/note_LightGBM06.html)
+- [LightGBMの数理](https://sugiaki1989.github.io/statistical_note/note_LightGBM07/note_LightGBM07.html)
+
 ## DataBase系パッケージ
 
 - [SageMarkerからDatabricksに接続する](https://sugiaki1989.github.io/statistical_note/note_db01/note_db01.html)
