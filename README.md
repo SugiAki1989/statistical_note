@@ -252,10 +252,8 @@
 - [LightGBMとXGboost(分類アルゴリズム)](https://sugiaki1989.github.io/statistical_note/note_LightGBM09/note_LightGBM09.ipynb)
 - [LightGBMとXGboost(分割点探索の高速化アルゴリズム)](https://sugiaki1989.github.io/statistical_note/note_LightGBM10/note_LightGBM10.ipynb)
 - [LightGBMのHistogram-based split finding](https://sugiaki1989.github.io/statistical_note/note_LightGBM11/note_LightGBM11.html)
-- [LightGBMのGradient-based One-Side Sampling](https://sugiaki1989.github.io/statistical_note/note_LightGBM12/note_LightGBM12.html)
-- [LightGBMのExclusive Feature Bundling](https://sugiaki1989.github.io/statistical_note/note_LightGBM13/note_LightGBM13.html)
-- [LightGBMのMerge Exclusive Features for EFB](https://sugiaki1989.github.io/statistical_note/note_LightGBM14/note_LightGBM14.html)
-- [LightGBMのGreedy Bundling + Merge Exclusive](https://sugiaki1989.github.io/statistical_note/note_LightGBM15/note_LightGBM15.html)
+- [LightGBMのGradient-based One-Side Sampling(GOSS)](https://sugiaki1989.github.io/statistical_note/note_LightGBM12/note_LightGBM12.html)
+- [LightGBMのExclusive Feature Bundling, Merge Exclusive Features](https://sugiaki1989.github.io/statistical_note/note_LightGBM13/note_LightGBM13.html)
 
 ## DataBase系パッケージ
 
