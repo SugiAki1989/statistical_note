@@ -1,0 +1,255 @@
+---
+title: "LightGBMとXGboost(SimilarityScore)"
+pagetitle: "LightGBMとXGboost(SimilarityScore)"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+このノートではLightGBMを理解するために、LightGBMと同じくらい使用頻度の高いXGboostのアルゴリズムについても理解を深めておく。LightGBMの特徴については別のノートで取り上げる予定ではあるが、XGboostの利点を多く備えているのがLightGBMでもあるので、まずはXGboostを理解する。下記のStatQuestを参考にしている。
+
+- [XGBoost Part 1 (of 4): Regression](https://www.youtube.com/watch?v=OtD8wVaFm6E&t=842s)
+- [XGBoost Part 2 (of 4): Classification](https://www.youtube.com/watch?v=8b1JEDvenQU)
+- [XGBoost Part 3 (of 4): Mathematical Details](https://www.youtube.com/watch?v=ZVFeW798-2I)
+- [XGBoost Part 4 (of 4): Crazy Cool Optimizations](https://www.youtube.com/watch?v=oRrKeUCEbq8&t=1s)
+
+XGboostは木を構築する際にSimilarityという木の分岐の類似度を測る指標を利用しながら分岐するかを決めていく。このノートでは、Similarity Scoreについて理解することを目指す。
+
+## Similarity Score
+
+Similarity Scoreは下記の式で定義される。また、Similarity Scoreを利用したGainという指標も使われるため、ここで紹介しておく。$\lambda$は正則化のためのパラメタで、一旦は0として考える。
+
+$$
+\begin{eqnarray}
+Similarity \ Score &=& \frac{(Sum \ of \ Residuals)^2}{number \ of \ Residuals + \lambda} \\
+Gain &=& Left \ Similarity + Right \ Similarity - Root \ Similarity
+\end{eqnarray}
+$$
+
+## 1階層目のGain
+
+説明のために使用するサンプルデータはこちら。$y$の平均をもとに残差を計算している。
+
+|No|y|x|mean_y|Resid|
+|:---|:---|:---|:---|:---|
+|1| -10| 10 |0.5| -10.5|
+|2| 7  | 20 |0.5|6.5|
+|3| 8  | 25 |0.5|7.5|
+|4| -7 | 35 |0.5|-7.5|
+
+ここから分岐しない場合、これらの残差をすべて1枚のリーフに含まれる。この場合、Similarity Scoreは下記の通り計算できる。
+
+$$
+\begin{eqnarray}
+Similarity \ Score &=& \frac{(-10.5 + 6.5 + 7.5 -7.5)^2}{4 + 0} = 4\\
+\end{eqnarray}
+$$
+
+## 2階層目のGain
+
+次に、$x < 15$で分岐したとする。この場合、下記のように分岐になる。丸括弧は各レコードのNoの数字。コロン以降はSimilarity Scoreを表す。
+
+```
+x < 15
+ └ -10.5(1): (-10.5)^2/(1+0) = 110.25
+ └   6.5(2), 7.5(3), -7,5(4): (6.5+7.5-7.5)^2/(3+0) = 14.08
+```
+
+この結果、ルートノードのSimilarity Scoreは4で左のリーフのSimilarity Scoreは110.25、右のリーフは14.08となる。Similarity Scoreは木のどこでも計算ができる点には注意が必要。ルートノード、左右に分岐したリーフがあればGainが計算できる。
+
+$$
+\begin{eqnarray}
+\text{if x < 15...} \\
+Gain &=& 110.25 + 14.08 - 4 = 120.33
+\end{eqnarray}
+$$
+$x < 15$で分岐したとき、得られるGainは120.33ということ。この数字はこれから分岐条件が変更されるたびに比較されるので、覚えておく。次に、$x < 22.5$で分岐したとき、得られるGainを計算する。
+
+```
+x < 22.5
+ └ -10.5(1),  6.5(2): (-10.5+6.5)^2/(2+0) = 8
+ └   7.5(3), -7,5(4): (7.5-7.5)^2/(2+0) = 0
+```
+
+$$
+\begin{eqnarray}
+\text{if x < 22.5...} \\
+Gain &=& 8 + 0 - 4 = 4
+\end{eqnarray}
+$$
+$x < 15(Gain=120.33)$は$x < 22.5(Gain=4)$よりもGainが大きいので、残差を類似した値のクラスタに分割するのに適しているということになる。さらに分割点をずらして$x \lt 30$で分岐してみる。
+
+```
+x < 30
+ └ -10.5(1),  6.5(2), 7.5(3): (-10.5+6.5+7.5)^2/(3+0) = 4.08
+ └  -7,5(4): (-7.5)^2/(1+0) = 56.25
+```
+
+$$
+\begin{eqnarray}
+\text{if x < 30...} \\
+Gain &=& 4.08 + 56.25 - 4 = 56.33
+\end{eqnarray}
+$$
+
+$x < 15(Gain=120.33)$は$x < 30(Gain=56.33)$よりもGainが大きいので、残差を類似した値のクラスタに分割するのに適しているということになる。$x$に対して、いくつかの分割点でGainを計算したが、$x < 15(Gain=120.33)$のGainが一番大きい。Gainが高いほど、データの区別が明確になり、予測精度が向上することが期待できる。
+
+```
+x < 15.0: 120.33
+x < 22.5: 4
+x < 30.0: 56.33
+```
+
+## 3階層目のGain
+
+ここからは下記の分岐例をもとにさらに$x < 22.5$分岐させてみる。
+
+```
+x < 15
+ └ -10.5(1): (-10.5)^2/(1+0) = 110.25
+ └ 6.5(2), 7.5(3), -7,5(4): (6.5+7.5-7.5)^2/(3+0) = 14.08
+  └ x < 22.5
+    └ 6.5(2).        : (6.5)^2/(1+0) = 42.25
+    └ 7.5(3), -7,5(4): (7.5-7.5)^2/(2+0) = 0
+```
+
+分岐したノードのSimilarity ScoreをもとにGainを計算する。
+
+$$
+\begin{eqnarray}
+\text{if x < 22.5...} \\
+Gain &=& 42.25 + 0 - 14.08 = 28.17
+\end{eqnarray}
+$$
+
+$x < 30$で分岐させることもできる。
+
+```
+x < 15
+ └ -10.5(1): (-10.5)^2/(1+0) = 110.25
+ └ 6.5(2), 7.5(3), -7,5(4): (6.5+7.5-7.5)^2/(3+0) = 14.08
+  └ x < 30
+    └ 6.5(2), 7.5(3): (6.5+7.5)^2/(2+0) = 98
+    └ -7,5(4)       : (7.5)^2/(1+0) = 56.25
+```
+$$
+\begin{eqnarray}
+\text{if x < 30...} \\
+Gain &=& 98 + 56.25 - 14.08 = 140.17
+\end{eqnarray}
+$$
+
+この階層でのGainは下記のようになった。つまり、$x < 30.0$で分岐させるほうが良いことがわかる。
+
+```
+x < 22.5: 28.17
+x < 30.0: 140.17
+```
+
+これは可視化した方がわかりやすい。残差を小さくするという観点で、まずは赤い線で分割することで、赤い線よりも左側にはデータが1つしかなくなる。次に青い線で分割することで、類似している真ん中2つと右端の1つを分割できている。
+
+```{r}
+library(ggplot2)
+
+df <- data.frame(
+  No = c(1, 2, 3, 4),
+  y = c(-10, 7, 8, -7),
+  x = c(10, 20, 25, 35)
+)
+
+ggplot(df, aes(x = x, y = y)) +
+  geom_point() +  
+  geom_vline(xintercept = 15, color = "red") +  
+  geom_vline(xintercept = 30, color = "blue") +  
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "black") +  
+  labs(x = "x", y = "y") +  
+  xlim(c(0,40)) + ylim(c(-15,15))
+```
+
+これ以外の分割を試してみるとわかるが、$x \lt 22.5$のようなうまく分割できていない分割点の場合、$y$の値が相殺されて、Gainが0に近くなってしまうことがわかる。
+
+```{r}
+ggplot(df, aes(x = x, y = y)) +
+  geom_point() +  
+  geom_vline(xintercept = 22.5, color = "red") +  
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "black") +  
+  labs(x = "x", y = "y") +  
+  xlim(c(0,40)) + ylim(c(-15,15))
+```
+
+
+## $\gamma$と$\lambda$
+
+XGboostの$\gamma$はGainの値に対する基準となり、剪定するかどうかを決定する。Gainから$\gamma$を引いて正の値だった場合、剪定せず、分岐を継続する。一方で、Gainから$\gamma$を引いて負の値だった場合、剪定し、分岐を終了させる。$\gamma=130$だとすると、
+
+$$
+\begin{eqnarray}
+\text{if x < 30...} \\
+Gain &=& 98 + 56.25 - 14.08 = 140.17 \\
+140.17 &-& 130 = 10.17
+\end{eqnarray}
+$$
+Gainから$\gamma$を引いた値が正なので、下記の分岐を実行する。
+
+```
+x < 15
+ └ -10.5(1): (-10.5)^2/(1+0) = 110.25
+ └ 6.5(2), 7.5(3), -7,5(4): (6.5+7.5-7.5)^2/(3+0) = 14.08
+  └ x < 30
+    └ 6.5(2), 7.5(3): (6.5+7.5)^2/(2+0) = 98
+    └ -7,5(4)       : (7.5)^2/(1+0) = 56.25
+```
+
+$\gamma=150$だとGainから$\gamma$を引いた値が負(-9.83)なので、剪定が実行される。ここでSimilarity Scoreの$\lambda$を考えてみる。
+
+$$
+\begin{eqnarray}
+Similarity \ Score &=& \frac{(Sum \ of \ Residuals)^2}{number \ of \ Residuals + \lambda} \\
+\end{eqnarray}
+$$
+
+$\lambda=1$だった場合、下記の分岐のSimilarity Scoreは下記の通り更新される。丸括弧は$\lambda=0$だった場合の数値である。
+
+```
+x < 15
+ └ -10.5(1): (-10.5)^2/(1+1) = 55.125(←110.25)
+ └ 6.5(2), 7.5(3), -7,5(4): (6.5+7.5-7.5)^2/(3+1) = 10.5625(←14.08)
+  └ x < 30
+    └ 6.5(2), 7.5(3): (6.5+7.5)^2/(2+1) = 65.33(←98)
+    └ -7,5(4)       : (7.5)^2/(1+1) = 28.125(←56.25)
+```
+
+$\lambda=1$にすることで、Similarity Scoreが小さくなり、$\gamma$を定数として考えると、負になりやすく、剪定がされやすくなる(複雑な分岐を持つ木=過学習を回避する)。これが$\lambda$が正則化パラメタと呼ばれる理由である。
+
+## 参考文献
+
+- [XGBoost Part 1 (of 4): Regression](https://www.youtube.com/watch?v=OtD8wVaFm6E&t=842s)
+- [XGBoost Part 2 (of 4): Classification](https://www.youtube.com/watch?v=8b1JEDvenQU)
+- [XGBoost Part 3 (of 4): Mathematical Details](https://www.youtube.com/watch?v=ZVFeW798-2I)
+- [XGBoost Part 4 (of 4): Crazy Cool Optimizations](https://www.youtube.com/watch?v=oRrKeUCEbq8&t=1s)

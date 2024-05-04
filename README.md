@@ -239,7 +239,7 @@
 - [Robyn が出力するグラフについて](https://sugiaki1989.github.io/statistical_note/note_MarketingMixModeling03/note_MarketingMixModeling03.html)
 - [Robyn R Demo を動かす](https://sugiaki1989.github.io/statistical_note/note_MarketingMixModeling04/note_MarketingMixModeling04.html)
 
-## LightGBM: Pythonパッケージ
+## LightGBM: Pythonのlightgbmパッケージ
 
 - [LightGBMの予測値計算について](https://sugiaki1989.github.io/statistical_note/note_LightGBM01/note_LightGBM01.ipynb)
 - [LightGBMのSHAP](https://sugiaki1989.github.io/statistical_note/note_LightGBM02/note_LightGBM02.ipynb)
@@ -247,7 +247,15 @@
 - [LightGBMとクロスバリデーション](https://sugiaki1989.github.io/statistical_note/note_LightGBM04/note_LightGBM04.ipynb)
 - [LightGBMとパラメタチューニング(Optuna)](https://sugiaki1989.github.io/statistical_note/note_LightGBM05/note_LightGBM05.ipynb)
 - [LightGBMと勾配ブースティングの数理](https://sugiaki1989.github.io/statistical_note/note_LightGBM06/note_LightGBM06.html)
-- [LightGBMの数理](https://sugiaki1989.github.io/statistical_note/note_LightGBM07/note_LightGBM07.html)
+- [LightGBMとXGboost(SimilarityScore)](https://sugiaki1989.github.io/statistical_note/note_LightGBM07/note_LightGBM07.html)
+- [LightGBMとXGboost(回帰アルゴリズム)](https://sugiaki1989.github.io/statistical_note/note_LightGBM08/note_LightGBM08.ipynb)
+- [LightGBMとXGboost(分類アルゴリズム)](https://sugiaki1989.github.io/statistical_note/note_LightGBM09/note_LightGBM09.ipynb)
+- [LightGBMとXGboost(分割点探索の高速化アルゴリズム)](https://sugiaki1989.github.io/statistical_note/note_LightGBM10/note_LightGBM10.ipynb)
+- [LightGBMのHistogram-based split finding](https://sugiaki1989.github.io/statistical_note/note_LightGBM11/note_LightGBM11.html)
+- [LightGBMのGradient-based One-Side Sampling](https://sugiaki1989.github.io/statistical_note/note_LightGBM12/note_LightGBM12.html)
+- [LightGBMのExclusive Feature Bundling](https://sugiaki1989.github.io/statistical_note/note_LightGBM13/note_LightGBM13.html)
+- [LightGBMのMerge Exclusive Features for EFB](https://sugiaki1989.github.io/statistical_note/note_LightGBM14/note_LightGBM14.html)
+- [LightGBMのGreedy Bundling + Merge Exclusive](https://sugiaki1989.github.io/statistical_note/note_LightGBM15/note_LightGBM15.html)
 
 ## DataBase系パッケージ
 
