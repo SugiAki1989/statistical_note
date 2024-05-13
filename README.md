@@ -254,6 +254,8 @@
 - [LightGBMのHistogram-based split finding](https://sugiaki1989.github.io/statistical_note/note_LightGBM11/note_LightGBM11.html)
 - [LightGBMのGradient-based One-Side Sampling(GOSS)](https://sugiaki1989.github.io/statistical_note/note_LightGBM12/note_LightGBM12.html)
 - [LightGBMのExclusive Feature Bundling, Merge Exclusive Features](https://sugiaki1989.github.io/statistical_note/note_LightGBM13/note_LightGBM13.html)
+- [LightGBMのLearnToRank(RankNet,LambdaRank)](https://sugiaki1989.github.io/statistical_note/note_LightGBM14/note_LightGBM14.html)
+- [LightGBMとLambdaMart](https://sugiaki1989.github.io/statistical_note/note_LightGBM15/note_LightGBM15.html)
 
 ## DataBase系パッケージ
 
