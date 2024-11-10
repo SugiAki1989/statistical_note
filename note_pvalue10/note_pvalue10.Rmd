@@ -169,7 +169,10 @@ heads <- 3
 tails <- total_tosses - heads
 # beta params
 # https://web.sfc.keio.ac.jp/~maunz/BS19/BS19_R02.html
-# Βinom(10,0.3)はΒ(4,8) (α=4, Β=8) 
+# Βinom(10,0.3)はΒ(4,8) (α=4(=3+1), Β=8(10-3+1)) 
+# ただBinomi<->betaは離散<->連続の変換なので、整合性が必ずしもとれない。
+# そのためΒinom(10,0.3)をBetaに変換したければ、
+# 10回中3回発生する事象=成功回数3回、失敗回数7としてBeta(3,7)とするでいいかもしれない
 
 alpha <- heads + 1
 beta <- tails + 1

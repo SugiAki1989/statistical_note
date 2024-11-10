@@ -239,6 +239,11 @@
 - [Robyn が出力するグラフについて](https://sugiaki1989.github.io/statistical_note/note_MarketingMixModeling03/note_MarketingMixModeling03.html)
 - [Robyn R Demo を動かす](https://sugiaki1989.github.io/statistical_note/note_MarketingMixModeling04/note_MarketingMixModeling04.html)
 
+## Python Library
+
+- [polarsライブラリ-polar1-](https://sugiaki1989.github.io/statistical_note/note_PythonLibrary01/note_PythonLibrary01.ipynb)
+- [polarsライブラリ-polar2-](https://sugiaki1989.github.io/statistical_note/note_PythonLibrary02/note_PythonLibrary02.ipynb)
+
 ## LightGBM: Pythonのlightgbmパッケージ
 
 - [LightGBMの予測値計算について](https://sugiaki1989.github.io/statistical_note/note_LightGBM01/note_LightGBM01.ipynb)

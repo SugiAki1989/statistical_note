@@ -1,6 +1,6 @@
 ---
-title: "Memo〜多次元尺度構成法 MDS:Multi-Dimensional Scaling〜"
-pagetitle: "Memo〜多次元尺度構成法 MDS:Multi-Dimensional Scaling〜"
+title: "Memo〜時系列データをk-meansで分類〜"
+pagetitle: "Memo〜時系列データをk-meansで分類〜"
 output:
   html_document:
     toc: TRUE

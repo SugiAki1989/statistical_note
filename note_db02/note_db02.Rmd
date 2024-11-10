@@ -233,6 +233,17 @@ $ ls -la  home/ec2-user/SageMaker/opt/simba/spark/lib/64/
 
 本当のところは、ライフサイクル機能で、通常通りのインストール先を使って、必要な環境やパッケージを整えて、ノートブック起動したら、すぐに分析できるが一番良いが、そのあたりの検証はまた今度。
 
+pythonで`opt`でインストールしたければ、下記の通り書けば良い。
+
+```python
+!pip install lightgbm --target=/home/ec2-user/SageMaker/opt/
+
+import sys
+sys.path.append('/home/ec2-user/SageMaker/opt/')
+
+import lightgbm as lgb
+```
+
 ## 追記: ライフサイクルで全部やる
 
 ライフサイクル機能で、通常通りのインストール先を使って、必要な環境やパッケージを整えて、ノートブック起動したら、すぐに分析できる環境を整えることができたので、そのメモを残しておく。Rパッケージの読み込みは下記を参考にした。
