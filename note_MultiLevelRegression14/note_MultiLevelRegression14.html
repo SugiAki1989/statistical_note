@@ -240,7 +240,7 @@ window.initializeCodeFolding = function(show) {
     $(this).detach().appendTo(div);
 
     // add a show code button right above
-    var showCodeText = $('<span>' + (showThis ? 'Hide' : 'Code') + '</span>');
+    var showCodeText = $('<span>' + (showThis ? 'Hide' : 'Show') + '</span>');
     var showCodeButton = $('<button type="button" class="btn btn-default btn-xs btn-secondary btn-sm code-folding-btn pull-right float-right"></button>');
     showCodeButton.append(showCodeText);
     showCodeButton
@@ -266,7 +266,7 @@ window.initializeCodeFolding = function(show) {
     //   * Change text
     //   * add a class for intermediate states styling
     div.on('hide.bs.collapse', function () {
-      showCodeText.text('Code');
+      showCodeText.text('Show');
       showCodeButton.addClass('btn-collapsing');
     });
     div.on('hidden.bs.collapse', function () {
@@ -446,13 +446,8 @@ padding-bottom:5px;
 color: 424242;
 }
 
-.main-container {
-max-width: 1200px;
-margin:0 auto;
-}
-code.r{
-font-size: 15px;
-font-family: ;
+pre code {
+white-space: pre-wrap;
 }
 
 .box{
@@ -466,17 +461,16 @@ box-shadow: 0 3px 5px rgba(0, 0, 0, 0.22);
 .box p {
 margin: 0; padding: 0;
 }
-.tbox{
+.tbox {
 border: 2px solid #5d627b;
+border-radius: 5px; margin-bottom: 20px;
 }
-.tbox th3{
+.tbox th3 {
 background: #5d627b;
 color: #FFF;
 margin: 0;
-display:inline-block;
-padding: .3em;
-border-radius: 0 0 5px 0;
-}
+display: inline-block; padding: .3em;
+border-radius: 0 0 5px 0; }
 .tbox .inner{
 padding: .5em;
 }
@@ -494,6 +488,25 @@ text-align: left;
 
 .update-right{
 text-align: right;
+}
+
+div.main-container {
+max-width: 1300px !important;
+}
+
+pre code {
+font-family: FiraCode-Medium;
+font-size: 15px;
+}
+.scroll-1000 {
+max-height: 1000px;
+overflow-y: auto;
+background-color: inherit;
+}
+.scroll-500 {
+max-height: 500px;
+overflow-y: auto;
+background-color: inherit;
 }
 </style>
 
@@ -620,7 +633,7 @@ display: none;
 </div>
 
 <div class="update-right">
-<p>UPDATE: 2023-11-05 00:02:20</p>
+<p>UPDATE: 2024-12-07 00:20:09.359613</p>
 </div>
 <div id="はじめに" class="section level1">
 <h1>はじめに</h1>
@@ -637,21 +650,21 @@ y_{it} = a + x_{it}&#39;\beta  + \alpha_{it}, \alpha_{it}=μ_{i}+ε_{it}
 \]</span></p>
 <p>固定効果が、各個人ごとに切片として推定される場合は固定効果、誤差項の一部としてパラメタを持つ分布として推定される場合はランダム効果と呼ぶ。マルチレベルモデルは、切片や係数を固定なのか、ランダムなのか、モデルを柔軟に調整できるので、経済系の固定効果モデルは、このうちの1つとして表現できると思われる。</p>
 <p>直接観察できない個人に関する固定的な効果<span class="math inline">\(\alpha\)</span>が変数<span class="math inline">\(Y\)</span>に影響を与え、<span class="math inline">\(X\)</span>とも相関していると想定される場合、<span class="math inline">\(\alpha\)</span>がモデルに含まれないと、内生生バイアスが生じてしまう。つまり、固定効果<span class="math inline">\(\alpha\)</span>を含めることで、<span class="math inline">\(X\)</span>への内生生バイアスをコントロールできる。</p>
-<p>呼び方に関しては、経済系の方は固定効果モデル、ランダム係数モデルと呼ぶ一方で、心理系の方はマルチレベルモデル、線形混合モデル、階層線形モデル、混合効果モデルとかで呼んでいる。心理系の方は、もしかしたら細かい点で異なる部分があるかもしれない。</p>
-<p>Rのパッケージに関しては、経済系の方は<code>plm</code>パッケージ、心理系は<code>nlme</code>や<code>lme4</code>を利用している気がする。</p>
+<p>呼び方に関しては、経済系の方は固定効果モデル、ランダム係数モデルと呼ぶ一方で、心理系の方は固定効果モデル含めマルチレベルモデル、線形混合モデル、階層線形モデル、混合効果モデルとかで呼んでいる。心理系の方は、もしかしたら細かい点で異なる部分があるかもしれない。</p>
+<p>Rのパッケージに関しては、経済系の方は<code>plm</code>パッケージ、心理系は<code>nlme</code>や<code>lme4</code>を利用している気がする。他にも<code>estimatr</code>、<code>fixest</code>パッケージでも計算できる。</p>
 <p>推定法に関しても違いがある。経済系での固定効果モデルの数理の説明を読むと一般化最小2乗法で説明されているケースが個人的には多く見られる。一方で、マルチレベルモデルは最尤法である。最尤法でマルチレベルモデルを推定する話については、このマルチレベルモデルのシリーズで扱ってきたので、そちらを参照願う。</p>
 </div>
 <div id="固定効果モデルの説明" class="section level2">
 <h2>固定効果モデルの説明</h2>
 <p>おまけ程度に固定効果モデルの説明をまとめておく。ここでは、個人、企業、集団などのまとまりのことはユニットと表現する。DIDの流れで説明されることが多いと思うが、それはDIDの欠点を補ってくれるからである。DIDの問題として、ユニットの状態に影響を与える可能性がある要因は観測できないケースが多い。介入前後の観測値を利用するが、その前後でユニット内で変化が生じているケースがありうる。この場合、介入の効果はユニットが変化することでの影響を内生してしまい、介入効果にバイアスが含まれる。</p>
 <p>失業者に職業訓練を与えるプログラムを提供することで、賃金の増加にどの程度の効果があるのか。この例はよく利用されるが、ここでもその例にそって、上記の問題を具体的に説明しておく。失業者の賃金に与えるよう影響は、性別、年齢、学歴、職歴、家族有無など様々あるが、「ビジネス能力」という漠然としたものは観察できない。代替変数を利用してモデリングする場合もあるが、ここでは観測できていないとする。また、この能力は賃金に影響しつつ、学歴や職歴、プログラムの受講有無にも影響する。そこで利用するのが固定効果である。個人ごとの能力は時間が経過しても一定と仮定して、個人をダミー変数としてモデルに取り込む。時間が経過してもあまり変化しないのであれば、時間が経過しても一定と言えるかもしれないが、この仮定をおけるかどうかは難しい。</p>
-<p>このようにして、モデルに固定効果を取り込むことで、観測できないが影響を与える重要な要因をモデルに反映できる。複数時点でデータを取得できるのであれば、ユニット固有の特徴を個別に推定して、固定効果を消し去るモデルが固定効果モデル。100ユニットあれば、99のダミー変数をモデルに含める。</p>
+<p>このようにして、モデルに固定効果を取り込むことで、観測できないが影響を与える重要な要因をモデルに反映できる。複数時点でデータを取得できるのであれば、ユニット固有の特徴を個別に推定して、固定効果を消し去るモデルが固定効果モデル。100ユニットあれば、99のダミー変数をモデルに含める。基本的に、時定変数の効果をモデルに組み込むことができないため、時定定数をモデルに取り込みたい場合、交互作用を用いることによって、時定変数の効果をモデルに組み込むことが可能になる。</p>
 <p>推定方法としては、ダミー変数をモデルに含めOLSで推定する方法やユニットごとに平均値を引いたデータでモデルを推定する平均値除去法も存在する。これらを検討せずパネルデータにそのまま回帰モデルを当てはまる方法をプール回帰分析と呼ばれる。また、ユニットをまとめて推定することになるので、ユニット内(ユニット内変動)のデータが相関してしまう。このため、通常の標準誤差ではなく、これらの問題を考慮したロバスト標準誤差が利用される。</p>
 <p>固定効果モデルが因果的な効果を推定できる識別条件としては「観測できない固定効果を除去すると説明変数と誤差項が無相関となる」がある。当たり前ではあるが、固定効果で観測できないユニット固有の効果を除去しても、誤差項と相関してしまうと、バイアスが存在することになる。当たり前とは言いつつも判断は難しい。</p>
 <p>例えば、観察できない変数が、時間経過とともに変化しているかもしれない。「警察の予算が増えると、犯罪は減るのか」という問題に注目しているとする。ユニットは市区町村とする。識別条件を満たさない1つの変数が好景気となる。好景気は時間経過とともに、景気が上昇することではあるが、好景気だと市区町村の予算が増え続け、そして、犯罪は一般的に起こりにくくなる。各市区町村を固定効果としてモデルに取り込んでいても、実際は時間経過とともに変化しているため、因果効果を識別できない。</p>
 <p>この問題を解決する方法として、時点トレンド(年固定効果モデル-Year
 Fixed
-Effect)をモデルに取り込む。トレンドのう良さが2乗の関係にあるのであれば、トレンドを2乗した変数を入れ、時点とユニットごとで異なるのであれば、交互作用を入れればよい。施策の効果がずれるのであれば、ラグ変数として、時間差の効果を表現する。</p>
+Effect)をモデルに取り込む。トレンドが2乗の関係にあるのであれば、トレンドを2乗した変数を入れ、時点とユニットごとで異なるのであれば、交互作用を入れればよい。施策の効果がずれるのであれば、ラグ変数として、時間差の効果を表現する。</p>
 <p>他にも、目的変数に依存して説明変数が決定される場合、同時決定性という問題が存在する。これは予算を前年度の犯罪率をもとに決める場合のことで、犯罪率が高ければ予算が増え、犯罪率が低ければ予算は減るという関係を意味する。予算の上昇によって、犯罪率が低下した因果関係を想定しているが、メカニズムとしては、犯罪率が高ければ予算が増え、犯罪率が低ければ予算は減るという関係があるため因果を見誤ってしまう。</p>
 </div>
 <div id="固定効果モデルの参考" class="section level2">
@@ -666,49 +679,49 @@ Effect)をモデルに取り込む。トレンドのう良さが2乗の関係に
 <p>能力が均等に分布した個体の所得(<code>income</code>)をアウトカムとした分析を行う。処置変数は職業訓練(<code>training</code>)である。1年目と2年目の2期間DIDのパネルデータを作成する。</p>
 <p>1年目は、誰も職業訓練を受けず、所得は、定数項、能力、誤差項のみによって決まる。2年目は、能力を部分的に反映した適正試験(<code>score</code>)が180点以上であれば職業訓練(<code>training</code>)を受けられる。職業訓練(<code>training</code>)の介入効果は500万円の増加。ここで、職業訓練(<code>training</code>)を受けた個体が処置群、受けなかった個体が対照群となる。、また、年ショックとして乱数を加えておく。</p>
 <p>データ生成過程は下記の通り。</p>
-<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(estimatr)</span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1989</span>)</span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">1000</span></span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>ability <span class="ot">&lt;-</span> <span class="fu">floor</span>(<span class="fu">runif</span>(n, <span class="at">min =</span> <span class="dv">1</span>, <span class="at">max =</span> <span class="dv">100</span>))</span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">tibble</span>(<span class="at">ID =</span> <span class="dv">1</span><span class="sc">:</span>n, ability)</span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="co"># 1年目</span></span>
-<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>df0 <span class="ot">&lt;-</span> df <span class="sc">%&gt;%</span> <span class="fu">mutate</span>(</span>
-<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">year =</span> <span class="dv">0</span>,</span>
-<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">training =</span> <span class="dv">0</span>,</span>
-<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>  <span class="at">income =</span> <span class="dv">200</span> <span class="sc">+</span> <span class="dv">10</span><span class="sc">*</span>ability <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="at">mean =</span> <span class="dv">0</span>, <span class="at">sd =</span> <span class="dv">50</span>)</span>
-<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>  ) </span>
-<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="co"># 2年目</span></span>
-<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a><span class="do">## 職業訓練フラグ(training)</span></span>
-<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a><span class="do">## 条件: </span></span>
-<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a><span class="do">## abilityをlogで非線形に変換しscoreが180点以上(約20%が該当)であればtrainingを受ける</span></span>
-<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a><span class="do">## abilityとscoreの関係は非線形</span></span>
-<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a><span class="do">## trainingの介入効果はincomeを500引き上げる</span></span>
-<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a>df1 <span class="ot">&lt;-</span> df <span class="sc">%&gt;%</span> <span class="fu">mutate</span>(</span>
-<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a>  <span class="at">year =</span> <span class="dv">1</span>,</span>
-<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a>  <span class="at">score =</span> <span class="dv">30</span> <span class="sc">*</span> <span class="fu">log10</span>(ability) <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="at">mean =</span> <span class="dv">115</span>, <span class="at">sd =</span> <span class="dv">10</span>),</span>
-<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a>  <span class="at">training =</span> <span class="fu">case_when</span>(score <span class="sc">&gt;=</span> <span class="dv">180</span> <span class="sc">~</span> <span class="dv">1</span>, <span class="cn">TRUE</span> <span class="sc">~</span> <span class="dv">0</span>),</span>
-<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a>  <span class="at">income =</span> <span class="dv">200</span> <span class="sc">+</span> <span class="dv">10</span><span class="sc">*</span>ability <span class="sc">+</span> <span class="dv">500</span> <span class="sc">*</span> training <span class="sc">+</span> </span>
-<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a>    <span class="co"># year effectを明示するため*year(=1)としている</span></span>
-<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a>    <span class="fu">rnorm</span>(n, <span class="at">mean =</span> <span class="dv">100</span>, <span class="at">sd =</span> <span class="dv">25</span>) <span class="sc">*</span> year <span class="sc">+</span> </span>
-<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a>    <span class="fu">rnorm</span>(n, <span class="at">mean =</span> <span class="dv">0</span>, <span class="at">sd =</span> <span class="dv">50</span>)</span>
-<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a><span class="co"># フラグ関係を処理する</span></span>
-<span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a>df_binded <span class="ot">&lt;-</span> <span class="fu">bind_rows</span>(df0, df1)</span>
-<span id="cb1-34"><a href="#cb1-34" aria-hidden="true" tabindex="-1"></a>df_treated <span class="ot">&lt;-</span> df_binded <span class="sc">%&gt;%</span> <span class="fu">filter</span>(training <span class="sc">==</span> <span class="dv">1</span>) <span class="sc">%&gt;%</span> <span class="fu">select</span>(ID)<span class="sc">%&gt;%</span> <span class="fu">mutate</span>(<span class="at">treated =</span> <span class="dv">1</span>)</span>
-<span id="cb1-35"><a href="#cb1-35" aria-hidden="true" tabindex="-1"></a>df_panel <span class="ot">&lt;-</span> <span class="fu">left_join</span>(df_binded, df_treated, <span class="at">by =</span><span class="st">&quot;ID&quot;</span>) <span class="sc">%&gt;%</span> </span>
-<span id="cb1-36"><a href="#cb1-36" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
-<span id="cb1-37"><a href="#cb1-37" aria-hidden="true" tabindex="-1"></a>    <span class="at">treated =</span> <span class="fu">replace</span>(treated, <span class="fu">which</span>(<span class="fu">is.na</span>(treated)), <span class="dv">0</span>),</span>
-<span id="cb1-38"><a href="#cb1-38" aria-hidden="true" tabindex="-1"></a>    <span class="at">ID_fctr =</span> <span class="fu">as.factor</span>(ID),</span>
-<span id="cb1-39"><a href="#cb1-39" aria-hidden="true" tabindex="-1"></a>    <span class="at">year_fctr =</span> <span class="fu">as.factor</span>(year)</span>
-<span id="cb1-40"><a href="#cb1-40" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">%&gt;%</span> </span>
-<span id="cb1-41"><a href="#cb1-41" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(ID)</span>
-<span id="cb1-42"><a href="#cb1-42" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-43"><a href="#cb1-43" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(df_panel,<span class="dv">20</span>)</span></code></pre></div>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="fu">library</span>(estimatr)</span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1989</span>)</span>
+<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">1000</span></span>
+<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a>ability <span class="ot">&lt;-</span> <span class="fu">floor</span>(<span class="fu">runif</span>(n, <span class="at">min =</span> <span class="dv">1</span>, <span class="at">max =</span> <span class="dv">100</span>))</span>
+<span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">tibble</span>(<span class="at">ID =</span> <span class="dv">1</span><span class="sc">:</span>n, ability)</span>
+<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a></span>
+<span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a><span class="co"># 1年目</span></span>
+<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a>df0 <span class="ot">&lt;-</span> df <span class="sc">%&gt;%</span> <span class="fu">mutate</span>(</span>
+<span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a>  <span class="at">year =</span> <span class="dv">0</span>,</span>
+<span id="cb1-12"><a href="#cb1-12" tabindex="-1"></a>  <span class="at">training =</span> <span class="dv">0</span>,</span>
+<span id="cb1-13"><a href="#cb1-13" tabindex="-1"></a>  <span class="at">income =</span> <span class="dv">200</span> <span class="sc">+</span> <span class="dv">10</span><span class="sc">*</span>ability <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="at">mean =</span> <span class="dv">0</span>, <span class="at">sd =</span> <span class="dv">50</span>)</span>
+<span id="cb1-14"><a href="#cb1-14" tabindex="-1"></a>  ) </span>
+<span id="cb1-15"><a href="#cb1-15" tabindex="-1"></a></span>
+<span id="cb1-16"><a href="#cb1-16" tabindex="-1"></a><span class="co"># 2年目</span></span>
+<span id="cb1-17"><a href="#cb1-17" tabindex="-1"></a><span class="do">## 職業訓練フラグ(training)</span></span>
+<span id="cb1-18"><a href="#cb1-18" tabindex="-1"></a><span class="do">## 条件: </span></span>
+<span id="cb1-19"><a href="#cb1-19" tabindex="-1"></a><span class="do">## abilityをlogで非線形に変換しscoreが180点以上(約20%が該当)であればtrainingを受ける</span></span>
+<span id="cb1-20"><a href="#cb1-20" tabindex="-1"></a><span class="do">## abilityとscoreの関係は非線形</span></span>
+<span id="cb1-21"><a href="#cb1-21" tabindex="-1"></a><span class="do">## trainingの介入効果はincomeを500引き上げる</span></span>
+<span id="cb1-22"><a href="#cb1-22" tabindex="-1"></a>df1 <span class="ot">&lt;-</span> df <span class="sc">%&gt;%</span> <span class="fu">mutate</span>(</span>
+<span id="cb1-23"><a href="#cb1-23" tabindex="-1"></a>  <span class="at">year =</span> <span class="dv">1</span>,</span>
+<span id="cb1-24"><a href="#cb1-24" tabindex="-1"></a>  <span class="at">score =</span> <span class="dv">30</span> <span class="sc">*</span> <span class="fu">log10</span>(ability) <span class="sc">+</span> <span class="fu">rnorm</span>(n, <span class="at">mean =</span> <span class="dv">115</span>, <span class="at">sd =</span> <span class="dv">10</span>),</span>
+<span id="cb1-25"><a href="#cb1-25" tabindex="-1"></a>  <span class="at">training =</span> <span class="fu">case_when</span>(score <span class="sc">&gt;=</span> <span class="dv">180</span> <span class="sc">~</span> <span class="dv">1</span>, <span class="cn">TRUE</span> <span class="sc">~</span> <span class="dv">0</span>),</span>
+<span id="cb1-26"><a href="#cb1-26" tabindex="-1"></a>  <span class="at">income =</span> <span class="dv">200</span> <span class="sc">+</span> <span class="dv">10</span><span class="sc">*</span>ability <span class="sc">+</span> <span class="dv">500</span> <span class="sc">*</span> training <span class="sc">+</span> </span>
+<span id="cb1-27"><a href="#cb1-27" tabindex="-1"></a>    <span class="co"># year effectを明示するため*year(=1)としている</span></span>
+<span id="cb1-28"><a href="#cb1-28" tabindex="-1"></a>    <span class="fu">rnorm</span>(n, <span class="at">mean =</span> <span class="dv">100</span>, <span class="at">sd =</span> <span class="dv">25</span>) <span class="sc">*</span> year <span class="sc">+</span> </span>
+<span id="cb1-29"><a href="#cb1-29" tabindex="-1"></a>    <span class="fu">rnorm</span>(n, <span class="at">mean =</span> <span class="dv">0</span>, <span class="at">sd =</span> <span class="dv">50</span>)</span>
+<span id="cb1-30"><a href="#cb1-30" tabindex="-1"></a>  )</span>
+<span id="cb1-31"><a href="#cb1-31" tabindex="-1"></a></span>
+<span id="cb1-32"><a href="#cb1-32" tabindex="-1"></a><span class="co"># フラグ関係を処理する</span></span>
+<span id="cb1-33"><a href="#cb1-33" tabindex="-1"></a>df_binded <span class="ot">&lt;-</span> <span class="fu">bind_rows</span>(df0, df1)</span>
+<span id="cb1-34"><a href="#cb1-34" tabindex="-1"></a>df_treated <span class="ot">&lt;-</span> df_binded <span class="sc">%&gt;%</span> <span class="fu">filter</span>(training <span class="sc">==</span> <span class="dv">1</span>) <span class="sc">%&gt;%</span> <span class="fu">select</span>(ID)<span class="sc">%&gt;%</span> <span class="fu">mutate</span>(<span class="at">treated =</span> <span class="dv">1</span>)</span>
+<span id="cb1-35"><a href="#cb1-35" tabindex="-1"></a>df_panel <span class="ot">&lt;-</span> <span class="fu">left_join</span>(df_binded, df_treated, <span class="at">by =</span><span class="st">&quot;ID&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb1-36"><a href="#cb1-36" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
+<span id="cb1-37"><a href="#cb1-37" tabindex="-1"></a>    <span class="at">treated =</span> <span class="fu">replace</span>(treated, <span class="fu">which</span>(<span class="fu">is.na</span>(treated)), <span class="dv">0</span>),</span>
+<span id="cb1-38"><a href="#cb1-38" tabindex="-1"></a>    <span class="at">ID_fctr =</span> <span class="fu">as.factor</span>(ID),</span>
+<span id="cb1-39"><a href="#cb1-39" tabindex="-1"></a>    <span class="at">year_fctr =</span> <span class="fu">as.factor</span>(year)</span>
+<span id="cb1-40"><a href="#cb1-40" tabindex="-1"></a>    ) <span class="sc">%&gt;%</span> </span>
+<span id="cb1-41"><a href="#cb1-41" tabindex="-1"></a>  <span class="fu">arrange</span>(ID)</span>
+<span id="cb1-42"><a href="#cb1-42" tabindex="-1"></a></span>
+<span id="cb1-43"><a href="#cb1-43" tabindex="-1"></a><span class="fu">head</span>(df_panel,<span class="dv">20</span>)</span></code></pre></div>
 <pre><code>## # A tibble: 20 × 9
 ##       ID ability  year training income score treated ID_fctr year_fctr
 ##    &lt;int&gt;   &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;   &lt;dbl&gt; &lt;fct&gt;   &lt;fct&gt;    
@@ -733,61 +746,61 @@ Effect)をモデルに取り込む。トレンドのう良さが2乗の関係に
 ## 19    10      10     0        0   319.   NA        0 10      0        
 ## 20    10      10     1        0   309.  155.       0 10      1</code></pre>
 <p>モデリングを行う。まずは固定効果と年固定効果がないモデルで試して、推定が誤ることを確認する。職業訓練(<code>training</code>)の介入効果は500万円の増加なので、過大に推定している。</p>
-<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 固定効果と年固定効果が足りていないので推定が誤っている</span></span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="fu">lm_robust</span>(</span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  income <span class="sc">~</span> training,</span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> df_panel,</span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span></span>
-<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="co"># 固定効果と年固定効果が足りていないので推定が誤っている</span></span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a><span class="fu">lm_robust</span>(</span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a>  income <span class="sc">~</span> training,</span>
+<span id="cb3-4"><a href="#cb3-4" tabindex="-1"></a>  <span class="at">data =</span> df_panel,</span>
+<span id="cb3-5"><a href="#cb3-5" tabindex="-1"></a>  <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span></span>
+<span id="cb3-6"><a href="#cb3-6" tabindex="-1"></a>)</span></code></pre></div>
 <pre><code>##             Estimate Std. Error   t value      Pr(&gt;|t|) CI Lower CI Upper   DF
 ## (Intercept) 733.3682   6.732235 108.93384  0.000000e+00 720.1653 746.5711 1998
 ## training    821.9369  18.985267  43.29341 2.092348e-289 784.7039 859.1699 1998</code></pre>
 <p>次に固定効果として、個体効果を追加する。介入効果の500万円に近くはなったが、年固定効果が欠落しているので、まだ過大推定している。</p>
-<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 年固定効果が足りていないので推定が誤っている</span></span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="fu">lm_robust</span>(</span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  income <span class="sc">~</span> training,</span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">fixed_effects =</span> <span class="sc">~</span> ID_fctr,</span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> df_panel,</span>
-<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span></span>
-<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a><span class="co"># 年固定効果が足りていないので推定が誤っている</span></span>
+<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a><span class="fu">lm_robust</span>(</span>
+<span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a>  income <span class="sc">~</span> training,</span>
+<span id="cb5-4"><a href="#cb5-4" tabindex="-1"></a>  <span class="at">fixed_effects =</span> <span class="sc">~</span> ID_fctr,</span>
+<span id="cb5-5"><a href="#cb5-5" tabindex="-1"></a>  <span class="at">data =</span> df_panel,</span>
+<span id="cb5-6"><a href="#cb5-6" tabindex="-1"></a>  <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span></span>
+<span id="cb5-7"><a href="#cb5-7" tabindex="-1"></a>)</span></code></pre></div>
 <pre><code>##          Estimate Std. Error  t value Pr(&gt;|t|) CI Lower CI Upper  DF
 ## training 596.7208    7.69846 77.51171        0 581.6138 611.8278 999</code></pre>
 <p>逆のパターンでも同様である。</p>
-<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 固定効果が足りていないので推定が誤っている</span></span>
-<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="fu">lm_robust</span>(</span>
-<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  income <span class="sc">~</span> training,</span>
-<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">fixed_effects =</span> <span class="sc">~</span> year_fctr,</span>
-<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> df_panel,</span>
-<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span></span>
-<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a><span class="co"># 固定効果が足りていないので推定が誤っている</span></span>
+<span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a><span class="fu">lm_robust</span>(</span>
+<span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a>  income <span class="sc">~</span> training,</span>
+<span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a>  <span class="at">fixed_effects =</span> <span class="sc">~</span> year_fctr,</span>
+<span id="cb7-5"><a href="#cb7-5" tabindex="-1"></a>  <span class="at">data =</span> df_panel,</span>
+<span id="cb7-6"><a href="#cb7-6" tabindex="-1"></a>  <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span></span>
+<span id="cb7-7"><a href="#cb7-7" tabindex="-1"></a>)</span></code></pre></div>
 <pre><code>##          Estimate Std. Error  t value     Pr(&gt;|t|) CI Lower CI Upper   DF
 ## training 784.3567   20.22375 38.78394 9.17329e-246 744.6948 824.0186 1997</code></pre>
-<p>目的は同じなので、書き方はどれでもよい。特定のパラメタの係数を確認したいなどあれば、それに適している方法で記載する。</p>
-<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 固定効果と年固定効果が足りているので推定が誤っていない</span></span>
-<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="co"># DID with a two-by-two DID model (オーソドックスなDIDモデル)</span></span>
-<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>DID_robust1 <span class="ot">&lt;-</span> <span class="fu">lm_robust</span>(income <span class="sc">~</span> treated <span class="sc">+</span> year <span class="sc">+</span> treated<span class="sc">:</span>year,</span>
-<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>                         <span class="at">data =</span> df_panel,</span>
-<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>                         <span class="at">clusters =</span> ID,</span>
-<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>                         <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span>)</span>
-<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a><span class="co"># DID with two-way FE model (年ダミー変数は活用し、個体固定効果はlm_robustで指定） </span></span>
-<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>DID_robust2 <span class="ot">&lt;-</span> <span class="fu">lm_robust</span>(income <span class="sc">~</span> treated<span class="sc">:</span>year <span class="sc">+</span> year,</span>
-<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>                         <span class="at">fixed_effects =</span> <span class="sc">~</span> ID, <span class="co">#個体固定効果</span></span>
-<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>                         <span class="at">data =</span> df_panel,</span>
-<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>                         <span class="at">clusters =</span> ID,</span>
-<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>                         <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span>)</span>
-<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a><span class="co"># DID with two-way FE model（個体固定効果と年固定効果をlm_robustで指定）</span></span>
-<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a>DID_robust3 <span class="ot">&lt;-</span> <span class="fu">lm_robust</span>(income <span class="sc">~</span> treated<span class="sc">:</span>year,</span>
-<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a>                         <span class="at">fixed_effects =</span> <span class="sc">~</span> ID <span class="sc">+</span> year, <span class="co">#個体固定効果と年固定効果</span></span>
-<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a>                         <span class="at">data =</span> df_panel,</span>
-<span id="cb9-19"><a href="#cb9-19" aria-hidden="true" tabindex="-1"></a>                         <span class="at">clusters =</span> ID,</span>
-<span id="cb9-20"><a href="#cb9-20" aria-hidden="true" tabindex="-1"></a>                         <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span>)</span>
-<span id="cb9-21"><a href="#cb9-21" aria-hidden="true" tabindex="-1"></a><span class="fu">list</span>(</span>
-<span id="cb9-22"><a href="#cb9-22" aria-hidden="true" tabindex="-1"></a>  DID_robust1,</span>
-<span id="cb9-23"><a href="#cb9-23" aria-hidden="true" tabindex="-1"></a>  DID_robust2,</span>
-<span id="cb9-24"><a href="#cb9-24" aria-hidden="true" tabindex="-1"></a>  DID_robust3</span>
-<span id="cb9-25"><a href="#cb9-25" aria-hidden="true" tabindex="-1"></a>  )</span></code></pre></div>
+<p>目的は同じなので、書き方はどれでもよい。特定のパラメタの係数を確認したいなどあれば、それに適している方法で記載する。ただ、<code>training</code>を使った方法のほうが直感的である。</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a><span class="co"># 固定効果と年固定効果が足りているので推定が誤っていない</span></span>
+<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a><span class="co"># DID with a two-by-two DID model (オーソドックスなDIDモデル)</span></span>
+<span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a>DID_robust1 <span class="ot">&lt;-</span> <span class="fu">lm_robust</span>(income <span class="sc">~</span> treated <span class="sc">+</span> year <span class="sc">+</span> treated<span class="sc">:</span>year,</span>
+<span id="cb9-4"><a href="#cb9-4" tabindex="-1"></a>                         <span class="at">data =</span> df_panel,</span>
+<span id="cb9-5"><a href="#cb9-5" tabindex="-1"></a>                         <span class="at">clusters =</span> ID,</span>
+<span id="cb9-6"><a href="#cb9-6" tabindex="-1"></a>                         <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span>)</span>
+<span id="cb9-7"><a href="#cb9-7" tabindex="-1"></a></span>
+<span id="cb9-8"><a href="#cb9-8" tabindex="-1"></a><span class="co"># DID with two-way FE model (年ダミー変数は活用し、個体固定効果はlm_robustで指定） </span></span>
+<span id="cb9-9"><a href="#cb9-9" tabindex="-1"></a>DID_robust2 <span class="ot">&lt;-</span> <span class="fu">lm_robust</span>(income <span class="sc">~</span> treated<span class="sc">:</span>year <span class="sc">+</span> year,</span>
+<span id="cb9-10"><a href="#cb9-10" tabindex="-1"></a>                         <span class="at">fixed_effects =</span> <span class="sc">~</span> ID, <span class="co">#個体固定効果</span></span>
+<span id="cb9-11"><a href="#cb9-11" tabindex="-1"></a>                         <span class="at">data =</span> df_panel,</span>
+<span id="cb9-12"><a href="#cb9-12" tabindex="-1"></a>                         <span class="at">clusters =</span> ID,</span>
+<span id="cb9-13"><a href="#cb9-13" tabindex="-1"></a>                         <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span>)</span>
+<span id="cb9-14"><a href="#cb9-14" tabindex="-1"></a></span>
+<span id="cb9-15"><a href="#cb9-15" tabindex="-1"></a><span class="co"># DID with two-way FE model（個体固定効果と年固定効果をlm_robustで指定）</span></span>
+<span id="cb9-16"><a href="#cb9-16" tabindex="-1"></a>DID_robust3 <span class="ot">&lt;-</span> <span class="fu">lm_robust</span>(income <span class="sc">~</span> treated<span class="sc">:</span>year,</span>
+<span id="cb9-17"><a href="#cb9-17" tabindex="-1"></a>                         <span class="at">fixed_effects =</span> <span class="sc">~</span> ID <span class="sc">+</span> year, <span class="co">#個体固定効果と年固定効果</span></span>
+<span id="cb9-18"><a href="#cb9-18" tabindex="-1"></a>                         <span class="at">data =</span> df_panel,</span>
+<span id="cb9-19"><a href="#cb9-19" tabindex="-1"></a>                         <span class="at">clusters =</span> ID,</span>
+<span id="cb9-20"><a href="#cb9-20" tabindex="-1"></a>                         <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span>)</span>
+<span id="cb9-21"><a href="#cb9-21" tabindex="-1"></a><span class="fu">list</span>(</span>
+<span id="cb9-22"><a href="#cb9-22" tabindex="-1"></a>  DID_robust1,</span>
+<span id="cb9-23"><a href="#cb9-23" tabindex="-1"></a>  DID_robust2,</span>
+<span id="cb9-24"><a href="#cb9-24" tabindex="-1"></a>  DID_robust3</span>
+<span id="cb9-25"><a href="#cb9-25" tabindex="-1"></a>  )</span></code></pre></div>
 <pre><code>## [[1]]
 ##              Estimate Std. Error  t value      Pr(&gt;|t|)  CI Lower CI Upper  DF
 ## (Intercept)  670.4856   9.630112 69.62387  0.000000e+00 651.58805 689.3832 999
@@ -803,30 +816,50 @@ Effect)をモデルに取り込む。トレンドのう良さが2乗の関係に
 ## [[3]]
 ##              Estimate Std. Error  t value      Pr(&gt;|t|) CI Lower CI Upper  DF
 ## treated:year  496.258    11.4711 43.26159 3.333556e-231 473.7478 518.7682 999</code></pre>
-<p><code>training</code>を使っても同様に推定できる。</p>
-<div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 介入効果を測定したいので、treatedではなくtrainingを利用する</span></span>
-<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="co"># treatedだと介入前も1が付与されるため、介入効果がわからない</span></span>
-<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>DID_robust4 <span class="ot">&lt;-</span> <span class="fu">lm_robust</span>(</span>
-<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>  income <span class="sc">~</span> training,</span>
-<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">fixed_effects =</span> <span class="sc">~</span> ID_fctr <span class="sc">+</span> year_fctr, <span class="co">#固定効果と年固定効果</span></span>
-<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">clusters =</span> ID_fctr,</span>
-<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> df_panel,</span>
-<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span></span>
-<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a><span class="co"># 上と同じ</span></span>
-<span id="cb11-11"><a href="#cb11-11" aria-hidden="true" tabindex="-1"></a>DID_robust5 <span class="ot">&lt;-</span> <span class="fu">lm_robust</span>(</span>
-<span id="cb11-12"><a href="#cb11-12" aria-hidden="true" tabindex="-1"></a>   income <span class="sc">~</span> training <span class="sc">+</span> ID_fctr <span class="sc">+</span> year_fctr,</span>
-<span id="cb11-13"><a href="#cb11-13" aria-hidden="true" tabindex="-1"></a>   <span class="at">clusters =</span> ID_fctr,</span>
-<span id="cb11-14"><a href="#cb11-14" aria-hidden="true" tabindex="-1"></a>   <span class="at">data =</span> df_panel,</span>
-<span id="cb11-15"><a href="#cb11-15" aria-hidden="true" tabindex="-1"></a>   <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span></span>
-<span id="cb11-16"><a href="#cb11-16" aria-hidden="true" tabindex="-1"></a> ) <span class="sc">%&gt;%</span> </span>
-<span id="cb11-17"><a href="#cb11-17" aria-hidden="true" tabindex="-1"></a>   <span class="fu">tidy</span>() <span class="sc">%&gt;%</span> </span>
-<span id="cb11-18"><a href="#cb11-18" aria-hidden="true" tabindex="-1"></a>   <span class="fu">filter</span>(term <span class="sc">==</span> <span class="st">&#39;training&#39;</span>)</span>
-<span id="cb11-19"><a href="#cb11-19" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb11-20"><a href="#cb11-20" aria-hidden="true" tabindex="-1"></a><span class="fu">list</span>(</span>
-<span id="cb11-21"><a href="#cb11-21" aria-hidden="true" tabindex="-1"></a>  DID_robust4,</span>
-<span id="cb11-22"><a href="#cb11-22" aria-hidden="true" tabindex="-1"></a>  DID_robust5</span>
-<span id="cb11-23"><a href="#cb11-23" aria-hidden="true" tabindex="-1"></a>  )</span></code></pre></div>
+<p><code>training</code>を使っても同様に推定できる。<code>training</code>と<code>treated</code>の違いをおさらいしておく。<code>training</code>は<code>score</code>が180点以上であれば<code>treated</code>されるデータの作りになっている。</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a>df_panel <span class="sc">%&gt;%</span> </span>
+<span id="cb11-2"><a href="#cb11-2" tabindex="-1"></a>  <span class="fu">filter</span>(ID <span class="sc">==</span> <span class="dv">37</span> <span class="sc">|</span> ID <span class="sc">==</span> <span class="dv">38</span>)</span></code></pre></div>
+<pre><code>## # A tibble: 4 × 9
+##      ID ability  year training income score treated ID_fctr year_fctr
+##   &lt;int&gt;   &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;   &lt;dbl&gt; &lt;fct&gt;   &lt;fct&gt;    
+## 1    37      85     0        0  1112.   NA        1 37      0        
+## 2    37      85     1        1  1637.  186.       1 37      1        
+## 3    38      63     0        0   804.   NA        0 38      0        
+## 4    38      63     1        0   945.  156.       0 38      1</code></pre>
+<p><code>treated</code>だと介入前も後も<code>1</code>が付与されるため、介入効果がわからない。そのため、介入効果を測定したいので、<code>treated</code>ではなく<code>training</code>を利用する。</p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" tabindex="-1"></a>DID_robust4 <span class="ot">&lt;-</span> <span class="fu">lm_robust</span>(</span>
+<span id="cb13-2"><a href="#cb13-2" tabindex="-1"></a>  income <span class="sc">~</span> training,</span>
+<span id="cb13-3"><a href="#cb13-3" tabindex="-1"></a>  <span class="at">fixed_effects =</span> <span class="sc">~</span> ID_fctr <span class="sc">+</span> year_fctr, <span class="co">#固定効果と年固定効果</span></span>
+<span id="cb13-4"><a href="#cb13-4" tabindex="-1"></a>  <span class="at">clusters =</span> ID_fctr,</span>
+<span id="cb13-5"><a href="#cb13-5" tabindex="-1"></a>  <span class="at">data =</span> df_panel,</span>
+<span id="cb13-6"><a href="#cb13-6" tabindex="-1"></a>  <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span></span>
+<span id="cb13-7"><a href="#cb13-7" tabindex="-1"></a>)</span>
+<span id="cb13-8"><a href="#cb13-8" tabindex="-1"></a><span class="co"># 上と同じ</span></span>
+<span id="cb13-9"><a href="#cb13-9" tabindex="-1"></a>DID_robust5 <span class="ot">&lt;-</span> <span class="fu">lm_robust</span>(</span>
+<span id="cb13-10"><a href="#cb13-10" tabindex="-1"></a>   income <span class="sc">~</span> training <span class="sc">+</span> ID_fctr <span class="sc">+</span> year_fctr,</span>
+<span id="cb13-11"><a href="#cb13-11" tabindex="-1"></a>   <span class="at">clusters =</span> ID_fctr,</span>
+<span id="cb13-12"><a href="#cb13-12" tabindex="-1"></a>   <span class="at">data =</span> df_panel,</span>
+<span id="cb13-13"><a href="#cb13-13" tabindex="-1"></a>   <span class="at">se_type =</span> <span class="st">&quot;stata&quot;</span></span>
+<span id="cb13-14"><a href="#cb13-14" tabindex="-1"></a> ) <span class="sc">%&gt;%</span> </span>
+<span id="cb13-15"><a href="#cb13-15" tabindex="-1"></a>   <span class="fu">tidy</span>() <span class="sc">%&gt;%</span> </span>
+<span id="cb13-16"><a href="#cb13-16" tabindex="-1"></a>  <span class="fu">filter</span>(term <span class="sc">==</span> <span class="st">&#39;training&#39;</span>)</span>
+<span id="cb13-17"><a href="#cb13-17" tabindex="-1"></a></span>
+<span id="cb13-18"><a href="#cb13-18" tabindex="-1"></a><span class="co"># filterしなければ下記の通りダミー変数も表示される</span></span>
+<span id="cb13-19"><a href="#cb13-19" tabindex="-1"></a><span class="co">#            term    estimate    std.error     statistic       p.value    conf.low   conf.high  df outcome</span></span>
+<span id="cb13-20"><a href="#cb13-20" tabindex="-1"></a><span class="co"># 1   (Intercept) 1054.753410 1.794113e+00  5.878970e+02  0.000000e+00 1051.232749 1058.274072 999  income</span></span>
+<span id="cb13-21"><a href="#cb13-21" tabindex="-1"></a><span class="co"># 2      training  496.258003 1.147110e+01  4.326159e+01 3.333556e-231  473.747791  518.768215 999  income</span></span>
+<span id="cb13-22"><a href="#cb13-22" tabindex="-1"></a><span class="co"># 3      ID_fctr2 -570.024066 1.200855e-10 -4.746820e+12  0.000000e+00 -570.024066 -570.024066 999  income</span></span>
+<span id="cb13-23"><a href="#cb13-23" tabindex="-1"></a><span class="co"># 4      ID_fctr3  -21.619969 9.462377e-11 -2.284835e+11  0.000000e+00  -21.619969  -21.619969 999  income</span></span>
+<span id="cb13-24"><a href="#cb13-24" tabindex="-1"></a><span class="co"># 5      ID_fctr4 -193.387682 9.471148e-11 -2.041861e+12  0.000000e+00 -193.387682 -193.387682 999  income</span></span>
+<span id="cb13-25"><a href="#cb13-25" tabindex="-1"></a><span class="co"># ...</span></span>
+<span id="cb13-26"><a href="#cb13-26" tabindex="-1"></a><span class="co"># 1000  ID_fctr999 -271.38622905 9.444440e-11 -2.873503e+12  0.000000e+00</span></span>
+<span id="cb13-27"><a href="#cb13-27" tabindex="-1"></a><span class="co"># 1001 ID_fctr1000 -262.30428524 9.442125e-11 -2.778022e+12  0.000000e+00</span></span>
+<span id="cb13-28"><a href="#cb13-28" tabindex="-1"></a><span class="co"># 1002  year_fctr1  100.46282033 3.588225e+00  2.799791e+01 8.452938e-128</span></span>
+<span id="cb13-29"><a href="#cb13-29" tabindex="-1"></a></span>
+<span id="cb13-30"><a href="#cb13-30" tabindex="-1"></a><span class="fu">list</span>(</span>
+<span id="cb13-31"><a href="#cb13-31" tabindex="-1"></a>  DID_robust4,</span>
+<span id="cb13-32"><a href="#cb13-32" tabindex="-1"></a>  DID_robust5</span>
+<span id="cb13-33"><a href="#cb13-33" tabindex="-1"></a>  )</span></code></pre></div>
 <pre><code>## [[1]]
 ##          Estimate Std. Error  t value      Pr(&gt;|t|) CI Lower CI Upper  DF
 ## training  496.258    11.4711 43.26159 3.333556e-231 473.7478 518.7682 999
@@ -836,6 +869,24 @@ Effect)をモデルに取り込む。トレンドのう良さが2乗の関係に
 ## 1 training  496.258   11.4711  43.26159 3.333556e-231 473.7478  518.7682 999
 ##   outcome
 ## 1  income</code></pre>
+<p><code>fixest</code>パッケージではこのように書けば良い。</p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a><span class="fu">library</span>(fixest)</span>
+<span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a></span>
+<span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a><span class="fu">feols</span>(</span>
+<span id="cb15-4"><a href="#cb15-4" tabindex="-1"></a>  <span class="co"># income ~ training + ID_fctr + year_fctrでもよい</span></span>
+<span id="cb15-5"><a href="#cb15-5" tabindex="-1"></a>  income <span class="sc">~</span> training <span class="sc">|</span> ID_fctr <span class="sc">+</span> year_fctr,</span>
+<span id="cb15-6"><a href="#cb15-6" tabindex="-1"></a>  <span class="at">data =</span> df_panel</span>
+<span id="cb15-7"><a href="#cb15-7" tabindex="-1"></a>  ) </span></code></pre></div>
+<pre><code>## OLS estimation, Dep. Var.: income
+## Observations: 2,000
+## Fixed-effects: ID_fctr: 1,000,  year_fctr: 2
+## Standard-errors: Clustered (ID_fctr) 
+##          Estimate Std. Error t value  Pr(&gt;|t|)    
+## training  496.258    8.10926 61.1965 &lt; 2.2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## RMSE: 38.1     Adj. R2: 0.974911
+##              Within R2: 0.794215</code></pre>
 </div>
 <div id="参考文献" class="section level2">
 <h2>参考文献</h2>
