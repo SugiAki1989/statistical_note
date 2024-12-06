@@ -240,7 +240,7 @@ window.initializeCodeFolding = function(show) {
     $(this).detach().appendTo(div);
 
     // add a show code button right above
-    var showCodeText = $('<span>' + (showThis ? 'Hide' : 'Code') + '</span>');
+    var showCodeText = $('<span>' + (showThis ? 'Hide' : 'Show') + '</span>');
     var showCodeButton = $('<button type="button" class="btn btn-default btn-xs btn-secondary btn-sm code-folding-btn pull-right float-right"></button>');
     showCodeButton.append(showCodeText);
     showCodeButton
@@ -266,7 +266,7 @@ window.initializeCodeFolding = function(show) {
     //   * Change text
     //   * add a class for intermediate states styling
     div.on('hide.bs.collapse', function () {
-      showCodeText.text('Code');
+      showCodeText.text('Show');
       showCodeButton.addClass('btn-collapsing');
     });
     div.on('hidden.bs.collapse', function () {
@@ -446,13 +446,8 @@ padding-bottom:5px;
 color: 424242;
 }
 
-.main-container {
-max-width: 1200px;
-margin:0 auto;
-}
-code.r{
-font-size: 15px;
-font-family: ;
+pre code {
+white-space: pre-wrap;
 }
 
 .box{
@@ -466,17 +461,16 @@ box-shadow: 0 3px 5px rgba(0, 0, 0, 0.22);
 .box p {
 margin: 0; padding: 0;
 }
-.tbox{
+.tbox {
 border: 2px solid #5d627b;
+border-radius: 5px; margin-bottom: 20px;
 }
-.tbox th3{
+.tbox th3 {
 background: #5d627b;
 color: #FFF;
 margin: 0;
-display:inline-block;
-padding: .3em;
-border-radius: 0 0 5px 0;
-}
+display: inline-block; padding: .3em;
+border-radius: 0 0 5px 0; }
 .tbox .inner{
 padding: .5em;
 }
@@ -494,6 +488,25 @@ text-align: left;
 
 .update-right{
 text-align: right;
+}
+
+div.main-container {
+max-width: 1300px !important;
+}
+
+pre code {
+font-family: FiraCode-Medium;
+font-size: 15px;
+}
+.scroll-1000 {
+max-height: 1000px;
+overflow-y: auto;
+background-color: inherit;
+}
+.scroll-500 {
+max-height: 500px;
+overflow-y: auto;
+background-color: inherit;
 }
 </style>
 
@@ -619,7 +632,7 @@ display: none;
 </div>
 
 <div class="update-right">
-<p>UPDATE: 2023-11-23 23:33:53</p>
+<p>UPDATE: 2024-12-07 00:53:04.270224</p>
 </div>
 <div id="はじめに" class="section level1">
 <h1>はじめに</h1>
@@ -639,10 +652,10 @@ display: none;
 Model)はパネルデータで使用される分析モデル。パネルデータは同一の個体を複数の時点で観察したデータのこと。ここでの個体は、人間や地域のことを指す。クロスセクションデータとは異なるので、データの性質を先にまとめておく。パネルデータの変数<span class="math inline">\(X_{it}\)</span>は、個人<span class="math inline">\(i\)</span>の時点<span class="math inline">\(t\)</span>における値を表す。<span class="math inline">\(X_{it}\)</span>はいくつかのパターンを持つ。</p>
 <ul>
 <li><ol style="list-style-type: decimal">
-<li>個人<span class="math inline">\(i\)</span>と時点<span class="math inline">\(t\)</span>の両方が変化する(年収、労働時間、失業率など)</li>
+<li>個人<span class="math inline">\(i\)</span>と時点<span class="math inline">\(t\)</span>の両方が変化する(年収、労働時間、失業率など時変変数)</li>
 </ol></li>
 <li><ol start="2" style="list-style-type: decimal">
-<li>各個人<span class="math inline">\(i\)</span>では異なるが、時点<span class="math inline">\(t\)</span>では変化しない(性別や地域や個人など時間変化しない特性など)</li>
+<li>各個人<span class="math inline">\(i\)</span>では異なるが、時点<span class="math inline">\(t\)</span>では変化しない(性別や地域や個人など時間変化しない特性などの時定変数)</li>
 </ol></li>
 <li><ol start="3" style="list-style-type: decimal">
 <li>個人<span class="math inline">\(i\)</span>では変化せずに共通で、時点<span class="math inline">\(t\)</span>では異なる(コロナによる行動制限など、皆に共通の影響があるもの)</li>
@@ -724,16 +737,16 @@ I_{ij}\phi_{j} + \epsilon_{it} - \bar{ \epsilon_{i} } \\
 <h2>固定効果モデルの推定</h2>
 <p><a href="https://www.rniyoru.com/">Rによる実証分析
 回帰分析から因果分析へ第2版</a>のp269で使用されるデータをお借りして固定効果モデルの推定を行う。まずは必要なライブラリを読み込む。書籍では、<code>fixest</code>パッケージを使用しているが、<code>estimatr</code>パッケージでも固定効果モデルは推定できるはずなので、<code>estimatr</code>パッケージも利用する。</p>
-<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(broom)</span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(fixest)</span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(estimatr)</span></code></pre></div>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="fu">library</span>(broom)</span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a><span class="fu">library</span>(fixest)</span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a><span class="fu">library</span>(estimatr)</span></code></pre></div>
 <p>このデータには、47都道府県(<code>pref</code>)の1997年から2019年(<code>year</code>)までの失業率(<code>unemp</code>)と自殺死亡率(<code>suicide</code>)が含まれる。このデータを利用して、固定効果モデルを用いることで、失業率が自殺死亡率に影響するかどうかを分析する。</p>
 <p>パネルデータなので、下記の通り地域<span class="math inline">\(i\)</span>を北海道に限定すると、時点<span class="math inline">\(t\)</span>が数多く記録されている。</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>prefdata <span class="ot">&lt;-</span> readr<span class="sc">::</span><span class="fu">read_csv</span>(<span class="st">&quot;~/Desktop/prefecture.csv&quot;</span>)</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>prefdata <span class="sc">%&gt;%</span> </span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(pref <span class="sc">==</span> <span class="st">&#39;北海道&#39;</span>) <span class="sc">%&gt;%</span> </span>
-<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(pref)</span></code></pre></div>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a>prefdata <span class="ot">&lt;-</span> readr<span class="sc">::</span><span class="fu">read_csv</span>(<span class="st">&quot;~/Desktop/prefecture.csv&quot;</span>)</span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a>prefdata <span class="sc">%&gt;%</span> </span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>  <span class="fu">filter</span>(pref <span class="sc">==</span> <span class="st">&#39;北海道&#39;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>  <span class="fu">arrange</span>(pref)</span></code></pre></div>
 <pre><code>## # A tibble: 23 × 4
 ##    pref    year suicide unemp
 ##    &lt;chr&gt;  &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt;
@@ -749,44 +762,44 @@ I_{ij}\phi_{j} + \epsilon_{it} - \bar{ \epsilon_{i} } \\
 ## 10 北海道  2006    26.4   5.4
 ## # ℹ 13 more rows</code></pre>
 <p>まずは地域の固定効果をモデルに取り込んで、パラメタを推定する。モデルの結果を見る限り、失業率が1%増加すると、人口10万人あたりの自殺者数がおよそ3人増加することになる。</p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>prefdata <span class="sc">%&gt;%</span> </span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">lm</span>(suicide <span class="sc">~</span> <span class="sc">-</span><span class="dv">1</span> <span class="sc">+</span> unemp <span class="sc">+</span> pref,</span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>     <span class="at">data =</span> .) <span class="sc">%&gt;%</span> </span>
-<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">tidy</span>() <span class="sc">%&gt;%</span> </span>
-<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(term <span class="sc">==</span> <span class="st">&#39;unemp&#39;</span>)</span></code></pre></div>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a>prefdata <span class="sc">%&gt;%</span> </span>
+<span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a>  <span class="fu">lm</span>(suicide <span class="sc">~</span> <span class="sc">-</span><span class="dv">1</span> <span class="sc">+</span> unemp <span class="sc">+</span> pref,</span>
+<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a>     <span class="at">data =</span> .) <span class="sc">%&gt;%</span> </span>
+<span id="cb4-4"><a href="#cb4-4" tabindex="-1"></a>  <span class="fu">tidy</span>() <span class="sc">%&gt;%</span> </span>
+<span id="cb4-5"><a href="#cb4-5" tabindex="-1"></a>  <span class="fu">filter</span>(term <span class="sc">==</span> <span class="st">&#39;unemp&#39;</span>)</span></code></pre></div>
 <pre><code>## # A tibble: 1 × 5
 ##   term  estimate std.error statistic   p.value
 ##   &lt;chr&gt;    &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;
 ## 1 unemp     3.07    0.0862      35.6 1.09e-181</code></pre>
 <p>within推定でも同様の数値が計算できる。</p>
-<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>prefdata <span class="sc">%&gt;%</span> </span>
-<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(pref) <span class="sc">%&gt;%</span> </span>
-<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">suicidebar =</span> <span class="fu">mean</span>(suicide),</span>
-<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>         <span class="at">unempbar   =</span> <span class="fu">mean</span>(unemp),</span>
-<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>         <span class="at">suicide2   =</span> suicide <span class="sc">-</span> suicidebar,</span>
-<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>         <span class="at">unemp2     =</span> unemp <span class="sc">-</span> unempbar) <span class="sc">%&gt;%</span> </span>
-<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">lm</span>(suicide2 <span class="sc">~</span> <span class="sc">-</span><span class="dv">1</span> <span class="sc">+</span> unemp2,</span>
-<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>     <span class="at">data =</span> .) <span class="sc">%&gt;%</span> </span>
-<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">tidy</span>() <span class="sc">%&gt;%</span> </span>
-<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(term <span class="sc">==</span> <span class="st">&#39;unemp2&#39;</span>)</span></code></pre></div>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>prefdata <span class="sc">%&gt;%</span> </span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a>  <span class="fu">group_by</span>(pref) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">suicidebar =</span> <span class="fu">mean</span>(suicide),</span>
+<span id="cb6-4"><a href="#cb6-4" tabindex="-1"></a>         <span class="at">unempbar   =</span> <span class="fu">mean</span>(unemp),</span>
+<span id="cb6-5"><a href="#cb6-5" tabindex="-1"></a>         <span class="at">suicide2   =</span> suicide <span class="sc">-</span> suicidebar,</span>
+<span id="cb6-6"><a href="#cb6-6" tabindex="-1"></a>         <span class="at">unemp2     =</span> unemp <span class="sc">-</span> unempbar) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-7"><a href="#cb6-7" tabindex="-1"></a>  <span class="fu">lm</span>(suicide2 <span class="sc">~</span> <span class="sc">-</span><span class="dv">1</span> <span class="sc">+</span> unemp2,</span>
+<span id="cb6-8"><a href="#cb6-8" tabindex="-1"></a>     <span class="at">data =</span> .) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-9"><a href="#cb6-9" tabindex="-1"></a>  <span class="fu">tidy</span>() <span class="sc">%&gt;%</span> </span>
+<span id="cb6-10"><a href="#cb6-10" tabindex="-1"></a>  <span class="fu">filter</span>(term <span class="sc">==</span> <span class="st">&#39;unemp2&#39;</span>)</span></code></pre></div>
 <pre><code>## # A tibble: 1 × 5
 ##   term   estimate std.error statistic   p.value
 ##   &lt;chr&gt;     &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;
 ## 1 unemp2     3.07    0.0843      36.4 7.27e-190</code></pre>
 <p>さらに時点効果を含めたモデルを作成する(2方向固定効果モデル)。パラメタの値が小さくなり、失業率が1%増加すると、人口10万人あたりの自殺者数がおよそ0.77人増加する、という結果となった。</p>
-<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>prefdata <span class="sc">%&gt;%</span> </span>
-<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">lm</span>(suicide <span class="sc">~</span> <span class="sc">-</span><span class="dv">1</span> <span class="sc">+</span> unemp <span class="sc">+</span> pref <span class="sc">+</span> <span class="fu">as.factor</span>(year),</span>
-<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>     <span class="at">data =</span> .) <span class="sc">%&gt;%</span> </span>
-<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">tidy</span>() <span class="sc">%&gt;%</span> </span>
-<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(term <span class="sc">==</span> <span class="st">&#39;unemp&#39;</span>)</span></code></pre></div>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>prefdata <span class="sc">%&gt;%</span> </span>
+<span id="cb8-2"><a href="#cb8-2" tabindex="-1"></a>  <span class="fu">lm</span>(suicide <span class="sc">~</span> <span class="sc">-</span><span class="dv">1</span> <span class="sc">+</span> unemp <span class="sc">+</span> pref <span class="sc">+</span> <span class="fu">as.factor</span>(year),</span>
+<span id="cb8-3"><a href="#cb8-3" tabindex="-1"></a>     <span class="at">data =</span> .) <span class="sc">%&gt;%</span> </span>
+<span id="cb8-4"><a href="#cb8-4" tabindex="-1"></a>  <span class="fu">tidy</span>() <span class="sc">%&gt;%</span> </span>
+<span id="cb8-5"><a href="#cb8-5" tabindex="-1"></a>  <span class="fu">filter</span>(term <span class="sc">==</span> <span class="st">&#39;unemp&#39;</span>)</span></code></pre></div>
 <pre><code>## # A tibble: 1 × 5
 ##   term  estimate std.error statistic    p.value
 ##   &lt;chr&gt;    &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;      &lt;dbl&gt;
 ## 1 unemp    0.771     0.159      4.85 0.00000142</code></pre>
 <p><code>fixest</code>パッケージの<code>feols</code>関数では<code>|</code>の後に固定効果を記述すれば固定効果モデルとして推定できる。先程の結果と同じくパラメタの値は0.77となったが、<code>std.error</code>の値が異なることがわかる。</p>
-<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">feols</span>(suicide <span class="sc">~</span> unemp <span class="sc">|</span> pref <span class="sc">+</span> year, <span class="at">data =</span> prefdata)</span></code></pre></div>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a><span class="fu">feols</span>(suicide <span class="sc">~</span> unemp <span class="sc">|</span> pref <span class="sc">+</span> year, <span class="at">data =</span> prefdata)</span></code></pre></div>
 <pre><code>## OLS estimation, Dep. Var.: suicide
-## Observations: 1,081 
+## Observations: 1,081
 ## Fixed-effects: pref: 47,  year: 23
 ## Standard-errors: Clustered (pref) 
 ##       Estimate Std. Error t value Pr(&gt;|t|)    
@@ -800,8 +813,8 @@ I_{ij}\phi_{j} + \epsilon_{it} - \bar{ \epsilon_{i} } \\
 <li><a href="https://sugiaki1989.github.io/statistical_note/note_regression10/note_regression10.html">不均一分散とロバスト標準誤差</a></li>
 </ul>
 <p>固定効果を確認したければ、<code>fixef</code>関数を利用する。</p>
-<div class="sourceCode" id="cb12"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">feols</span>(suicide <span class="sc">~</span> unemp <span class="sc">|</span> pref <span class="sc">+</span> year, <span class="at">data =</span> prefdata) <span class="sc">%&gt;%</span> </span>
-<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">fixef</span>()</span></code></pre></div>
+<div class="sourceCode" id="cb12"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a><span class="fu">feols</span>(suicide <span class="sc">~</span> unemp <span class="sc">|</span> pref <span class="sc">+</span> year, <span class="at">data =</span> prefdata) <span class="sc">%&gt;%</span> </span>
+<span id="cb12-2"><a href="#cb12-2" tabindex="-1"></a>  <span class="fu">fixef</span>()</span></code></pre></div>
 <pre><code>## $pref
 ##     三重     京都     佐賀     兵庫   北海道     千葉   和歌山     埼玉 
 ## 15.45397 14.13019 17.11202 15.45899 17.49214 14.90050 19.09119 15.04125 
@@ -834,13 +847,13 @@ I_{ij}\phi_{j} + \epsilon_{it} - \bar{ \epsilon_{i} } \\
 ## attr(,&quot;exponential&quot;)
 ## [1] FALSE</code></pre>
 <p><code>estimatr</code>パッケージの<code>lm_robust</code>関数でも固定効果モデルを推定する。先程の結果と同じくパラメタの値は0.77となり、<code>std.error</code>の値も調整されていることがわかる。</p>
-<div class="sourceCode" id="cb14"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">lm_robust</span>(</span>
-<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>  suicide <span class="sc">~</span> unemp,</span>
-<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">fixed_effects =</span> <span class="sc">~</span> pref <span class="sc">+</span> year, <span class="co">#固定効果と年固定効果</span></span>
-<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">clusters =</span> pref,</span>
-<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> prefdata,</span>
-<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">se_type =</span> <span class="st">&quot;CR0&quot;</span></span>
-<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div>
+<div class="sourceCode" id="cb14"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" tabindex="-1"></a><span class="fu">lm_robust</span>(</span>
+<span id="cb14-2"><a href="#cb14-2" tabindex="-1"></a>  suicide <span class="sc">~</span> unemp,</span>
+<span id="cb14-3"><a href="#cb14-3" tabindex="-1"></a>  <span class="at">fixed_effects =</span> <span class="sc">~</span> pref <span class="sc">+</span> year, <span class="co">#固定効果と年固定効果</span></span>
+<span id="cb14-4"><a href="#cb14-4" tabindex="-1"></a>  <span class="at">clusters =</span> pref,</span>
+<span id="cb14-5"><a href="#cb14-5" tabindex="-1"></a>  <span class="at">data =</span> prefdata,</span>
+<span id="cb14-6"><a href="#cb14-6" tabindex="-1"></a>  <span class="at">se_type =</span> <span class="st">&quot;CR0&quot;</span></span>
+<span id="cb14-7"><a href="#cb14-7" tabindex="-1"></a>)</span></code></pre></div>
 <pre><code>##        Estimate Std. Error  t value   Pr(&gt;|t|)  CI Lower CI Upper DF
 ## unemp 0.7708683  0.2923652 2.636662 0.01137947 0.1823677 1.359369 46</code></pre>
 </div>
