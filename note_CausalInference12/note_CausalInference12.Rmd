@@ -1,0 +1,304 @@
+---
+title: "DID回帰モデル"
+pagetitle: "DID回帰モデル"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+今回は、差分の差分法の仮定をおさらいし、DID回帰モデルを実際に実行するまでをまとめておく。
+
+## 差分の差分法の仮定
+
+[Rによる実証分析（第2版）回帰分析から因果分析へ](https://www.ohmsha.co.jp/book/9784274230028/)を参考に、下記の通り、差分の差分法の仮定についてまとめた。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference12/DID1.png')
+```
+
+## DID回帰
+
+[9.6.6 Castle-doctrine statutes and homicides](https://mixtape.scunning.com/09-difference_in_differences#castle-doctrine-statutes-and-homicides)のCheng and Hoekstra (2013)の例を参考にDIDの回帰を実行してみる。[書籍のRコードはこちら](https://github.com/scunning1975/mixtape/blob/master/R/castle_1.R)。
+
+### データセットの背景
+
+「Castle-doctrine statutes and homicides」の章のデータセットは、異なるタイミングで行われた銃の規制に関する処置と暴力の関係を分析しているデータセットで実際の研究データを再現しているものになる。Castle Doctrineは、自宅や自分が法的に占有する場所にいる際に、侵入者や脅威に対する自己防衛を正当化する法的な原則のことで、これが犯罪抑止効果を持っているという説と、正当防衛という名の殺傷をしやすくなったという点で、犯罪率を増加させている説がある。Cheng and Hoekstra (2013)の研究では、Castle Doctrineはが殺人率を増加させる可能性を示唆している。殺人件数が8%増加することで、法改正が行われた21州で年間約600件の殺人事件が増加することを示した。下記はアブストラクトを和訳したもの。
+
+> 2000年から2010年にかけて、20以上の州が、正当防衛のための殺傷力の行使を容易にする法律を可決した。これらの法律には、自宅以外の場所での退却義務の撤廃、危害が迫っているという合理的確信の推定規定の追加、法律に基づいて行動する者の民事責任の撤廃などが含まれる。 本稿では、このような方法で正当防衛を助けることが犯罪抑止につながるのか、あるいは逆に殺人を増加させるのかを検証する。 そのために、法の採用における州内のばらつきを利用した差分研究デザインを適用する。 強盗、窃盗、加重暴行は法律の影響を受けていない。 一方、殺人事件は約8％増加し、これらの殺人事件は警察によって大部分が殺人事件として分類されていることがわかった。このことは、自衛権強化の主な結果が殺人の純増であることを示唆している。最後に、報告された正当化される殺人の相対的増加に関する証拠と、過少報告の程度と性質に関する仮定を用いて、この増加全体が法的に正当化されたものであるかどうかを評価するために、封筒裏計算を提示する。
+
+
+### DIDモデル
+
+Cheng and Hoekstra (2013)では下記のモデルが利用されている。$D_{it}$はは本来01のことが多いものの、いくつかの州が年の途中で法改正を行うため、0から1までの範囲を取る変数になっている。7月に法改正した場合、$D_{it}$は法改正の採用年よりも前は0、採用年は0.5、採用年よりも後は1となる。$X_{it}$はReigin-by-Yearという地域別年別固定とのこと。
+ 
+$$
+Y_{it} = \alpha + \delta D_{it} + \gamma X_{it} + \sigma_{i} + \tau_{t} + \epsilon_{it}
+$$
+
+パネルデータは下記の通りダウンロードして使用できる。
+
+```{r}
+library(bacondecomp)
+library(tidyverse)
+library(haven)
+library(lfe)
+
+read_data <- function(df){
+  full_path <- paste("https://github.com/scunning1975/mixtape/raw/master/", df, sep = "")
+  df <- read_dta(full_path)
+  return(df)
+}
+castle <- read_data("castle.dta")
+castle
+```
+
+全部はいらないので、カラムを絞っておく。
+
+```{r}
+castle <- castle %>%
+  select(state, year, sid, cdl, post, l_homicide, popwt) %>% 
+  mutate(year_f = as.factor(year))
+```
+
+2006年に法改正した州と法改正しなかった州の並行トレンドを確認したいが、これは難しい問題であれる。
+
+```{r}
+# 2006年に法改正した州
+treated_states <-c(
+  "Alabama", "Alaska", "Arizona", "Florida", "Georgia",
+  "Indiana", "Kansas", "Kentucky", "Louisiana", "Michigan",
+  "Mississippi", "Oklahoma", "South Carolina", "South Dakota"
+)
+
+# 法改正した州
+#treated_states <- c(
+#  "Alabama", "Alaska", "Arizona", "Florida", "Georgia", 
+#  "Indiana", "Kansas", "Kentucky", "Louisiana", "Michigan", 
+#  "Mississippi", "Missouri", "Montana", "North Dakota", "Ohio",
+#  "Oklahoma", "South Carolina", "South Dakota", 
+#  "Tennessee", "Texas", "West Virginia"
+#)
+
+nevertreated_states <- c(
+  "Arkansas", "California", "Colorado", "Connecticut", "Delaware",
+  "Hawaii", "Idaho", "Illinois", "Iowa", "Maine",
+  "Maryland", "Massachusetts", "Minnesota", "Nebraska", "Nevada",
+  "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina",
+  "Oregon", "Pennsylvania", "Rhode Island", "Utah", "Vermont",
+  "Virginia", "Washington", "Wisconsin", "Wyoming"
+)
+
+
+# データフレームにフラグ列を追加
+tmp <- castle %>% 
+  mutate(
+    state_flag = case_when(
+      state %in% treated_states ~ "Treated",              # 2006 Treated states
+      state %in% nevertreated_states ~ "Never Treated",   # Never treated states
+      TRUE ~ "Other" # 2006以降
+      )
+    )
+
+ggplot(tmp, aes(x = year, y = l_homicide, color = state_flag, group = state)) +
+  geom_line(size = 1.2) + 
+  geom_point(size = 3) +
+  geom_vline(xintercept = 2005.2, linetype = "solid", color = "gray", size = 1) + 
+  labs(
+    title = "States That Enacted Castle Doctrine in 2006 \nCompared to States That Did Not Enact Castle Doctrine from 2000 to 2010",
+    x = "Year",
+    y = "Log Homicides per 100K",
+    color = "State Type",
+    linetype = "State Type"
+  ) +
+  scale_x_continuous(
+    breaks = seq(2000, 2010, by = 1), 
+    labels = seq(2000, 2010, by = 1)  
+  ) +
+  scale_y_continuous(
+    breaks = seq(1.0, 2.5, by = 0.1)
+  ) +
+  theme_minimal()
+```
+
+そのため、ここでは研究で示されている通り、2006年に法改正した州と法改正しなかった州で並行トレンドを確認する。これを見て並行トレンドがあることを決定することはどうなのかわからないが、法改正した州では雑人率が上がっていそうである。
+
+```{r}
+filtered_data <- tmp %>% 
+  filter(state_flag != "Other") %>% 
+  group_by(state_flag, year) %>% 
+  summarise(l_homicide_m = mean(l_homicide))
+
+# 折れ線グラフを描画
+ggplot(filtered_data, aes(x = year, y = l_homicide_m, color = state_flag, group = state_flag)) +
+  geom_line(size = 1.2) + 
+  geom_point(size = 3) + 
+  geom_vline(xintercept = 2005.2, linetype = "solid", color = "gray", size = 1) + 
+  labs(
+    title = "Figure 4: \nLog Homicide Rate for the 13 States That Enacted Castle Doctrine in 2006 \nCompared to States That Did Not Enact Castle Doctrine from 2000 to 2010",
+    x = "Year",
+    y = "Log Homicides per 100K",
+    color = "State Type",
+    linetype = "State Type"
+  ) +
+  scale_x_continuous(
+    breaks = seq(2000, 2010, by = 1), 
+    labels = seq(2000, 2010, by = 1)  
+  ) +
+  scale_y_continuous(
+    breaks = seq(1.0, 2.5, by = 0.1)
+  ) +
+  theme_minimal()
+
+```
+
+最後にこれをDIDが回帰モデルで法改正の効果を確認する。研究だと下記のようになっている。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference12/DID2.png')
+```
+
+固定効果として、州と年を入れてDID回帰を実行した結果がこちら。研究の数値ともだいたい一致していることがわかる。また、法改正によって、殺人件数が8%増加することも核にできる。
+
+```{r}
+library(estimatr)
+
+lm_robust(
+  l_homicide ~ cdl,
+  fixed_effects = state + year_f, 
+  clusters = state,
+  weights = popwt,
+  data = castle,
+  se_type = "stata"
+) 
+```
+
+ちなみにこの書き方でもOK。
+
+```{r}
+# こちらでもOK
+lm_robust(
+  l_homicide ~ 0 + cdl + state + year_f,
+  data = castle,
+  clusters = state,
+  weights = popwt,
+  se_type = "stata") 
+
+# こちらでもOK
+#library(fixest)
+#feols(
+#  l_homicide ~ cdl | state + year, 
+#  weights = castle$popwt,
+#  data = castle) %>% 
+#  fixef()
+```
+## 参考文献および参考資料
+
+- [Cheng, Cheng, and Mark Hoekstra. 2013. “Does Strengthening Self-Defense Law Deter Crime or Escalate Violence? Evidence from Expansions to Castle Doctrine.” Journal of Human Resources 48 (3): 821–54.](https://www.nber.org/system/files/working_papers/w18134/w18134.pdf)
+- [Rによる実証分析（第2版）回帰分析から因果分析へ](https://www.ohmsha.co.jp/book/9784274230028/)
+
+
+## Cheng and Hoekstra (2013)の研究を再現するためのスクリプト
+
+```
+library(bacondecomp)
+library(tidyverse)
+library(haven)
+library(lfe)
+
+read_data <- function(df)
+{
+  full_path <- paste("https://github.com/scunning1975/mixtape/raw/master/", 
+                     df, sep = "")
+  df <- read_dta(full_path)
+  return(df)
+}
+
+castle <- read_data("castle.dta")
+
+#--- global variables
+crime1 <- c("jhcitizen_c", "jhpolice_c", 
+            "murder", "homicide", 
+            "robbery", "assault", "burglary",
+            "larceny", "motor", "robbery_gun_r")
+
+demo <- c("emo", "blackm_15_24", "whitem_15_24", 
+          "blackm_25_44", "whitem_25_44")
+
+# variables dropped to prevent colinearity
+dropped_vars <- c("r20004", "r20014",
+                  "r20024", "r20034",
+                  "r20044", "r20054",
+                  "r20064", "r20074",
+                  "r20084", "r20094",
+                  "r20101", "r20102", "r20103",
+                  "r20104", "trend_9", "trend_46",
+                  "trend_49", "trend_50", "trend_51"
+)
+
+lintrend <- castle %>%
+    select(starts_with("trend")) %>% 
+  colnames %>% 
+  # remove due to colinearity
+  subset(.,! . %in% dropped_vars) 
+
+region <- castle %>%
+  select(starts_with("r20")) %>% 
+  colnames %>% 
+  # remove due to colinearity
+  subset(.,! . %in% dropped_vars) 
+
+
+exocrime <- c("l_lacerny", "l_motor")
+spending <- c("l_exp_subsidy", "l_exp_pubwelfare")
+
+
+xvar <- c(
+  "blackm_15_24", "whitem_15_24", "blackm_25_44", "whitem_25_44",
+  "l_exp_subsidy", "l_exp_pubwelfare",
+  "l_police", "unemployrt", "poverty", 
+  "l_income", "l_prisoner", "l_lagprisoner"
+)
+
+law <- c("cdl")
+
+dd_formula <- as.formula(
+  paste("l_homicide ~ ",
+        paste(
+          paste(xvar, collapse = " + "),
+          paste(region, collapse = " + "),
+          paste(lintrend, collapse = " + "),
+          paste("post", collapse = " + "), sep = " + "),
+        "| year + sid | 0 | sid"
+  )
+)
+
+#Fixed effect regression using post as treatment variable 
+dd_reg <- felm(dd_formula, weights = castle$popwt, data = castle)
+summary(dd_reg)
+```

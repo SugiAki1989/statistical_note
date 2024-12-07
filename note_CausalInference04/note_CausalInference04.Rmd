@@ -391,11 +391,17 @@ ggplot() +
   theme_classic()
 ```
 
-このデータは単純に差分の差分法を利用できない。なぜならば、処置のパターンが1つではなく、処置のタイミングが州によって異なるためである。詳細は参照先の[こちら](https://yukiyanai.github.io/econometrics2/difference-in-differences.html)を確認のこと。回帰分析を利用してDID回帰を行うが、さきほどの回帰モデルには下記が必要だった。
+このデータは単純に差分の差分法を利用できない。なぜならば、処置のパターンが1つではなく、処置のタイミングも州によって異なるためである。処置のパタンについては、下記の通り。詳細は参照先の[こちら](https://yukiyanai.github.io/econometrics2/difference-in-differences.html)を確認のこと。
+
+- 21歳から18歳(3歳引き下げ)
+- 21歳から20歳(1歳引き下げ)
+- 18歳から21歳(3歳引き上げ)
+
+回帰分析を利用してDID回帰を行うが、さきほどの回帰モデルには下記が必要だった。
 
 - 処置群と統制群の個体差の区別を`D`: `state`
 - 時間前後の区別を表す`P`: `year_fct`
-- 処置後の観測値を表す`D×P`: ？
+- 処置後の観測値を表す`D×P`: `legal`
 
 この分析では、処置後の観測値であるかどうかは、これら2つの交差項では表現できない。そのため、研究データでは、この問題を解決するために、18歳から20歳の人が飲酒できる割合を表す変数`legal`を作ることで対処している。
 
@@ -403,7 +409,11 @@ ggplot() +
 
 なんとなくわかるようでわからない感じのわたしの理解力助けるためにメモを残しておく。正確かどうかはわからない。下記の州(`state=1`)では、1975年から飲酒年齢を引き下げている。おそらく19歳から飲酒可能にしていると思われる。1970年から1974年までは、「18歳から20歳までの人口」のうち何割が合法的に飲酒できるかを表す`legal`は0である、つまり、この期間に「19歳から20歳」も人はそもそも飲酒が法律的に認められない。
 
-1975年は何かあったのか、年の途中から飲酒年齢が引き下げられたのかわからないが、数値が他の年と比べて小さいため、年の途中でMLDAが変更されたために調整されていると思われる。その他の年では、だいたい67%なので、「19歳から20歳」の人口を「18歳から20歳」の人口で割っていると思われる。超絶簡単なイメージで説明すると、各年代100人いて、毎年100人が18歳(in)になり、100人が21歳(out)になるのであれば、18歳から20歳という範囲`term`には、常に一定inoutが発生することで、`legalは200(19-20)/300(18-20)=0.66`となる。
+1975年は何かあったのか、年の途中から飲酒年齢が引き下げられたのかわからないが、数値が他の年と比べて小さいため、年の途中でMLDAが変更されたために調整されていると思われる。その他の年では、だいたい67%なので、「19歳から20歳」の人口を「18歳から20歳」の人口で割っていると思われる。超絶簡単なイメージで説明すると、各年代100人いて、毎年100人が18歳(in)になり、100人が21歳(out)になるのであれば、18歳から20歳という範囲`term`には、常に一定inoutが発生することで、`legalは200(19-20)/300(18-20)=0.66`となる。浅野先生の資料が詳しいので、[こちら](http://www.ner.takushoku-u.ac.jp/masano/class_material/waseda/keiryo/R29_reg12_DID.html#51_DID_%E5%9B%9E%E5%B8%B0%E5%BC%8F:~:text=%E3%83%9D%E3%82%A4%E3%83%B3%E3%83%88%E5%A2%97%E3%81%88%E3%81%9F-,5.%20DID%20%E3%81%AE%E5%AE%9F%E4%BE%8B%EF%BC%88%E6%B3%95%E5%AE%9A%E9%A3%B2%E9%85%92%E5%B9%B4%E9%BD%A2,-%EF%BC%89)から画像をお借りする。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference04/mlda.png')
+```
 
 ```{r}
 #     year state mrate legal
@@ -443,7 +453,6 @@ df2 %>%
   arrange(start_year)
 ```
 
-
 データへの理解が深まったところで、DID回帰を行う。モデルは下記の通り。
 
 $$
@@ -474,21 +483,93 @@ lm(mrate ~ 0 + legal + state + year_fct, data = df2) %>%
 
 ```{r}
 library(estimatr)
-lm_robust(mrate ~ 0 + legal + state + year_fct, data = df2, clusters = state, se_type = "CR2") %>% 
-  tidy() %>% 
-  select(term, estimate, std.error) %>% 
-  as.data.frame()
+# mrate ~ 0 + legal + state + year_fct のように書いてもよい
+lm_robust(mrate ~ legal,
+          fixed_effects = state + year_fct,
+          data = df2, 
+          #clusters = state, 
+          # se_type = "stata"
+          ) 
 ```
 
-`lm_robust`関数で計算することで、標準誤差が大きくなっている。差分の差分法では、平行トレンドが仮定されるが、今回のように個体と期間の数が多い場合、個体ごとの時間トレンドの違いを説明する変数をモデルに加えることで、並行トレンド仮定を緩めて平均置効果を推定する。
+Angrist and Pischke (2009)の論文の数値とestimateが一致している。std.errorは一致していないので、修正する。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference04/stat1.png')
+```
+
+同一州内の観測値が類似するという系列相関が発生し、クラスター内で相関してしまうので、これを修正するクラスター標準誤差を計算することで、標準誤差も修正できる。クラスタ化を考慮しない分析では、標準誤差が過小評価されてしまう。
+
+```{r}
+lm_robust(mrate ~ legal,
+          fixed_effects = state + year_fct,
+          data = df2, 
+          clusters = state, 
+          se_type = "stata"
+          ) 
+```
+
+次は重み付きDID回帰の結果を確認する。州の人口を考慮した重み付き回帰を実行することで、人口の多い州、人口の少ない州の重みを考慮できる。人口の多い州の影響を反映し、人口が小さい州の過度な影響に左右しないようにできる。
+
+```{r}
+lm_robust(mrate ~ legal,
+          fixed_effects = state + year_fct,
+          data = df2, 
+          clusters = state, 
+          se_type = "stata",
+          weights = pop
+          ) 
+```
+
+こちらも数字が一致していることが確認できる。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference04/stat3.png')
+```
+
+差分の差分法では、平行トレンドが仮定されるが、今回のように個体と期間の数が多い場合、個体ごとの時間トレンドの違いを説明する変数をモデルに加えることで、並行トレンド仮定を緩めて平均置効果を推定する。トレンドが完全に平行でなくても、平均置効果を推定することができるようになるらしい。
+
+$$
+y_{st} = \alpha + \delta LEGAL_{st} + \sum_{k=1}^{50}\beta_{k}STATE_{ks} + \sum_{j=1971}^{1983}\gamma_{j}YEAR_{jt} + \sum_{k=1}^{50}\theta_{k}(STATE_{ks} * time ) + e_{st}
+$$
 
 下記の分析では、各州の時間トレンドは線形、つまり、処置がないときの死亡率は、変化しない、単調増加、単調減少のどれかであることを仮定する。州ごとの時間トレンドは`state × year`で表している。`year_fct`ではないので注意。`state`は個体効果、`year_fct`は時間効果、`state:year`は州ごとのトレンド効果という感じ。
 
 ```{r}
-lm_robust(mrate ~ 0 + legal + state + year_fct + state:year, data = df2, clusters = state, se_type = "CR2") %>% 
-  tidy() %>% 
-  select(term, estimate, std.error) %>% 
-  as.data.frame()
+# 時間トレンドを含める場合、fixed_effects = state + year_fct + state:yearのようには書けない。実行はできるが結果が意図通りではない。
+lm_robust(mrate ~ 0 + legal + state + year_fct + state:year,
+          data = df2, 
+          clusters = state, 
+          se_type = "stata"
+          ) 
+#  %>% tidy() %>% 
+#  select(term, estimate, std.error) %>% 
+#  as.data.frame()
+```
+
+論文の結果とも一致している。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference04/stat2.png')
+```
+
+最後に時間トレンドと重みを考慮したDID回帰モデルの数字を確認する。
+
+```{r}
+# 時間トレンドを含める場合、fixed_effects = state + year_fct + state:yearのようには書けない。実行はできるが結果が意図通りではない。
+lm_robust(mrate ~ 0 + legal + state + year_fct + state:year,
+          data = df2, 
+          clusters = state, 
+          se_type = "stata",
+          weights = pop
+          ) %>% 
+  tidy()%>% 
+  select(term, estimate, std.error, p.value) %>% 
+  filter(term == "legal") 
+```
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference04/stat4.png')
 ```
 
 他にもDID回帰は下記のように発展版がある。画像は立教大学の安藤先生の下記のスライドより引用している。
