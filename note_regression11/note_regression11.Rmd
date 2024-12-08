@@ -1,0 +1,129 @@
+---
+title: "重み付き回帰分析"
+pagetitle: "重み付き回帰分析"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      #out.width  = 1280,
+                      #out.height = 720,
+                      # fig.dim = c(8, 6),
+                      fig.align  = "center",
+                      dev        = "ragg_png")
+```
+
+<div class="update-right">
+UPDATE: `r Sys.time()`
+</div>
+
+# はじめに
+
+ここでは重み付き回帰分析についてまとめておく。基本的には回帰モデルを計算できる関数には、引数として利用可能であるものの、あまり使ってこなかったので、裏側がわかってなかった。そのため、ここでは重みがどのように計算されるかを理解する。下記のブログで丁寧にまとめてあったので、この内容を参考にする。
+
+- [重み付き回帰分析を自力でやってる](https://chemstat.hatenablog.com/entry/2021/01/23/194405)
+
+## 重み付き回帰分析
+
+重み付き回帰分析は、各サンプルに対して、重みをつけることで、推定結果を調整する。通常、回帰モデルでは残差の2乗和を最小とするようなパラメタを推定する。重み付き回帰分析では、重みをつけた残差の2乗和を最小とするパラメタを推定する。つまり、重みつき回帰では、重みつき残差$\epsilon_{i} \sqrt(w_{i})$となる。
+
+$$
+\small\begin{align*}E=\sum_{i=1}^nw_i\varepsilon_i^2 = \sum_{i=1}^nw_i(y_{i} - a + bx_{i})^2 \end{align*}
+$$
+
+上記の式が最小となるように、$a,b$で偏微分したものを0とおいて、
+
+$$
+\begin{align*} \frac{\partial E}{\partial a}=0,  \frac{\partial E}{\partial b}=0\end{align*}
+$$
+連立方程式を得る。
+
+$$
+{\displaystyle \begin{eqnarray} \left\{ \begin{array}{l} \sum\limits_{i=1}^nw_ibx_i - \sum\limits_{i=1}^nw_i(y_n -a) = 0 \\ \sum\limits_{i=1}^nw_ib{x_i}^2 - \sum\limits_{i=1}^nw_ix_n(y_n -a) = 0 \end{array} \right. \end{eqnarray} }
+$$
+
+これを計算すれば、$a,b$が得られる。
+
+$$
+\begin{align*}
+\hat{a} = \frac{\sum\limits_{i=1}^nw_ix_i^2\sum\limits_{i=1}^nw_iy_i-\sum\limits_{i=1}^nw_ix_i\sum\limits_{i=1}^nw_ix_iy_i}{\sum\limits_{i=1}^nw_i\sum\limits_{i=1}^nw_ix_i^2-(\sum\limits_{i=1}^n{w_ix_i})^2 } \\
+\hat{b} = \frac{\sum\limits_{i=1}^nw_i\sum\limits_{i=1}^nw_ix_iy_i-\sum\limits_{i=1}^nw_ix_i\sum\limits_{i=1}^nw_iy_i}{\sum\limits_{i=1}^nw_i\sum\limits_{i=1}^nw_ix_i^2-(\sum\limits_{i=1}^n{w_ix_i})^2 }\\
+\end{align*}
+$$
+
+参考先のブログの方が丁寧に計算内容までまとめてくれているので、これを確認する。この式の内容をみるとわかるが、例えば$w_{i}$が小さい場合、その重みがついている$x,y$を小さくすることで、その値がなかったかのように、影響を小さくして計算していることがわかる。
+
+$$
+\begin{align*}
+\sum\limits_{i=1}^nw_i\sum\limits_{i=1}^nw_ix_iy_i &=(1+0.5+1+0.5+1)\times(1\times1\times2+0.5\times2\times6+1\times3\times6+0.5\times4\times9+1\times5\times6)=296 \\
+\sum\limits_{i=1}^nw_ix_i\sum\limits_{i=1}^nw_iy_i  &=(1\times1+0.5\times2+1\times3+0.5\times4+1\times5)\times(1\times2+0.5\times6+1\times6+0.5\times9+1\times6)=258 \\
+\sum\limits_{i=1}^nw_ix_i^2\sum\limits_{i=1}^nw_iy_i  &=(1\times1^2+0.5\times2^2+1\times3^2+0.5\times4^2+1\times5^2)\times(1\times2+0.5\times6+1\times6+0.5\times9+1\times6)=967.5\\
+\sum\limits_{i=1}^nw_ix_i\sum\limits_{i=1}^nw_ix_iy_i  &=(1\times1+0.5\times2+1\times3+0.5\times4+1\times5)\times(1\times1\times2+0.5\times2\times6+1\times3\times6+0.5\times4\times9+1\times5\times6)=888 \\
+\sum\limits_{i=1}^nw_i\sum\limits_{i=1}^nw_ix_i^2  &=(1+0.5+1+0.5+1)\times(1\times1^2+0.5\times2^2+1\times3^2+0.5\times4^2+1\times5^2)=180\\
+(\sum\limits_{i=1}^n{w_ix_i})^2 
+&=(1\times1+0.5\times2+1\times3+0.5\times4+1\times5)^2=144
+\end{align*}
+$$
+
+
+最終的に得られるパラメタはこちら。
+
+$$
+\begin{align*} \hat{b} = \frac{\sum\limits_{i=1}^nw_i\sum\limits_{i=1}^nw_ix_iy_i-\sum\limits_{i=1}^nw_ix_i\sum\limits_{i=1}^nw_iy_i}{\sum\limits_{i=1}^nw_i\sum\limits_{i=1}^nw_ix_i^2-(\sum\limits_{i=1}^n{w_ix_i})^2 }=\frac{296-258}{180-144}=1.05555...\\
+ \hat{a} = \frac{\sum\limits_{i=1}^nw_ix_i^2\sum\limits_{i=1}^nw_iy_i-\sum\limits_{i=1}^nw_ix_i\sum\limits_{i=1}^nw_ix_iy_i}{\sum\limits_{i=1}^nw_i\sum\limits_{i=1}^nw_ix_i^2-(\sum\limits_{i=1}^n{w_ix_i})^2 }=\frac{967.5-888}{180-144}=2.2083...\end{align*}
+$$
+
+実際に計算してみると、パラメタが一致していることがわかる。
+
+```{r}
+lm(c(2,6,6,9,6) ~ c(1,2,3,4,5), weights = c(1,0.5,1,0.5,1))
+```
+
+重みの影響を可視化してみた図がこちら。赤色は外れ値の影響に引っ張られ、傾きが大きくなっているが、青色は$x=10$の重みを小さくしているので、まるで$x=10$がなかったかのように推定できている。
+
+```{r}
+library(ggplot2)
+
+# データの生成
+set.seed(123)
+n <- 10
+x <- c(1:(n-1),n)
+y <- c((3 * x[1:n-1] + rnorm((n-1), sd = 2)),50) # 線形関係にノイズを加える
+
+# 極端な重みを設定
+weights <- c(rep(1,(n-1)), 0.1)
+
+# 重み付き回帰モデル
+model_weighted <- lm(y ~ x, weights = weights)
+
+# 重みなし回帰モデル
+model_unweighted <- lm(y ~ x)
+
+# データフレームの作成
+df <- data.frame(x = x, y = y, weights = weights)
+df$predicted_weighted <- predict(model_weighted, newdata = df)
+df$predicted_unweighted <- predict(model_unweighted, newdata = df)
+
+ggplot(df, aes(x = x, y = y)) +
+  geom_point(aes(size = weights), alpha = 0.8) +
+  geom_line(aes(y = predicted_weighted), color = "royalblue", size = 1, linetype = "solid") +
+  geom_line(aes(y = predicted_unweighted), color = "tomato", size = 1, linetype = "solid") +
+  theme_bw()
+
+```
+
+## 参考文献
+
+- []()

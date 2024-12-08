@@ -87,7 +87,7 @@
 - [重回帰の偏回帰係数を分解する](https://sugiaki1989.github.io/statistical_note/note_regression01/note_regression01.html)
 - [回帰分析と回帰診断図](https://sugiaki1989.github.io/statistical_note/note_regression02/note_regression02.html)
 - [ポアソン回帰分析の誤差構造とリンク関数の視覚化](https://sugiaki1989.github.io/statistical_note/note_regression03/note_regression03.html)
-- [最小 2 乗法の BLUE が成立しないケースについて](https://sugiaki1989.github.io/statistical_note/note_regression04/note_regression04.html)
+- [最小2乗法の BLUE が成立しないケースについて](https://sugiaki1989.github.io/statistical_note/note_regression04/note_regression04.html)
   ※数理については[回帰モデルの仮定のおさらい](https://sugiaki1989.github.io/statistical_note/note_MultiLevelRegression00/note_MultiLevelRegression00.html)に詳細をまとめた。
 - [ロジスティック回帰の平均限界効果について](https://sugiaki1989.github.io/statistical_note/note_regression05/note_regression05.html)
 - [対数正規分布を用いた回帰モデル](https://sugiaki1989.github.io/statistical_note/note_regression06/note_regression06.html)
@@ -95,6 +95,7 @@
 - [タイプ 1 トービットモデルのパラメタ推定について](https://sugiaki1989.github.io/statistical_note/note_regression08/note_regression08.html)
 - [指数曲線のあてはめについて](https://sugiaki1989.github.io/statistical_note/note_regression09/note_regression09.html)
 - [不均一分散とロバスト標準誤差](https://sugiaki1989.github.io/statistical_note/note_regression10/note_regression10.html)
+- [重み付き回帰分析](https://sugiaki1989.github.io/statistical_note/note_regression11/note_regression11.html)
 
 ## マルチレベル回帰モデル(非公開)
 
@@ -139,6 +140,7 @@
 - [Meta-Learnersについて](https://sugiaki1989.github.io/statistical_note/note_CausalInference09/note_CausalInference09.html)
 - [条件付き確率のおさらい](https://sugiaki1989.github.io/statistical_note/note_CausalInference10/note_CausalInference10.html)
 - [条件付き独立性と交換可能性のおさらい](https://sugiaki1989.github.io/statistical_note/note_CausalInference11/note_CausalInference11.html)
+- [差分の差分法の基礎とDID回帰モデル](https://sugiaki1989.github.io/statistical_note/note_CausalInference12/note_CausalInference12.html)
 
 ## 生存時間解析(非公開)
 
