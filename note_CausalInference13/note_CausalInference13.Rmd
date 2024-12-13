@@ -1,0 +1,428 @@
+---
+title: "イベントスタディ分析"
+pagetitle: "イベントスタディ分析"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+今回は、イベントスタディ分析の内容と実行方法をまとめておく。[Pythonで学ぶ効果検証入門](https://www.ohmsha.co.jp/book/9784274231162/)のDIDの章で紹介されているイベントスタディ分析を再現する。`fixest`パッケージについては下記が詳しい。`fixest`パッケージの使い方は末尾にまとめておく。
+
+- [Fast Fixed-Effects Estimation: Short Introduction](https://cran.r-project.org/web/packages/fixest/vignettes/fixest_walkthrough.html#2_The_vcov_argument)
+- [【R】固定効果モデルの推定がめっちゃ速いパッケージ { fixest}](https://keita43a.hatenablog.com/entry/2020/12/01/202122)
+- [【R】差の差法でイベントスタディやるときのコード](https://keita43a.hatenablog.com/entry/2022/04/07/025153)
+
+クラスター標準誤差については下記が詳しい。1つ目は`fixest`パッケージの作者が、`fixest`パッケージの標準誤差の計算方法について、小サンプル補正などを絡めて、他のパッケージとの違いを説明してくれているもの。
+
+- [On standard-errors](https://cran.r-project.org/web/packages/fixest/vignettes/standard_errors.html)
+- [Mathematical notes for estimatr](https://declaredesign.org/r/estimatr/articles/mathematical-notes.html)
+
+## イベントスタディ分析
+
+データは[Pythonで学ぶ効果検証入門](https://www.ohmsha.co.jp/book/9784274231162/)のDIDの章で利用されているものを利用する。ここでもまずは書籍に従って、DIDによる施策の分析をRでも再現しつつ、イベントスタディ分析の再現まで行う。
+
+このデータセットは、アメリカの臓器提供登録率が変化するかどうかをカルフォルニア州を介入群として実験したデータセット。
+
+- `State`: 27州が記録されている
+- `Quarter`: Q42010 ~ Q12012の6期間
+- `Quarter_Num`: `Quarter`のQ42010を1としたもの
+- `Rate`: 登録率
+- `IsTreatmentGroup`: 介入群であれば`1`、対照群であれば`0`
+- `AfterTreatment`: `Quarter_Num`が4以降であれば`1`が立つ。これは期間を識別するフラグなので、介入の有無は関係ない。
+- `IsTreatment`:  `Quarter_Num`が4以降&`California`であれば`1`。これは介入期間かつ介入群を識別するフラグ。
+
+
+```{r}
+library(tidyverse)
+library(fixest)
+
+organ_full <- read_csv('~/Desktop/ch4_organ_donations_full.csv')
+organ_full %>% 
+  filter(State == 'Alaska' | State == 'California') %>% 
+  print(n = 12)
+```
+
+集計するとこのような結果になる。介入したカルフォルニア州では登録率が低下しているように見える
+
+```{r}
+organ_full %>% 
+  group_by(IsTreatmentGroup, Quarter_Num) %>% 
+  summarise(avg_rate = mean(Rate)) %>% 
+  ggplot(., aes(x = factor(Quarter_Num), y = avg_rate, color = factor(IsTreatmentGroup), group = factor(IsTreatmentGroup))) +
+  geom_line(size = 1.2) +
+  geom_point(size = 3) +
+  geom_vline(xintercept = 3.5) + 
+  labs(
+    title = "Difference-in-Differences (DID) Plot",
+    x = "After Treatment (0 = Before, 1 = After)",
+    y = "Average Rate",
+    color = "Group"
+  ) +
+  ylim(c(0.2, 0.5)) +
+  scale_color_manual(values = c("0" = "royalblue", "1" = "tomato"),
+                     labels = c("0" = "Control Group", "1" = "Treatment Group")) +
+  theme_bw()
+```
+
+書籍のモデルを再現する。知りたいのは$\tau$である。
+
+$$
+Rate_{it} = \sum_{i=1}^{27} State_{i} + \sum_{t=1}^{6}Quarter\_Num_{t} + \tau IsTreatment_{it} + \epsilon_{it}
+$$
+書籍の結果とクラスター標準誤差がずれるのは、末尾に背景をまとめている。結果をみると、`-0.022`となっており、「臓器提供フォームの文言を変えたことで登録率が下がった」ことを意味する。
+
+```{r}
+f_did <- feols(
+  Rate ~ IsTreatment | State + Quarter_Num, 
+  data = organ_full,
+  cluster = 'State'
+)
+etable(f_did)
+```
+
+ここまでの再現で、データセットやDIDの結果への理解が深まったところで、イベントスタディ分析に移る。イベントスタディ分析の主たる目的は「介入後の効果は時間によって上下に変化する」ことを分析するところにある。介入後は効果が小さくても、時間が経過すると効果が大きくなる場合もある。
+
+イベントスタディのモデルは下記の通り。
+
+$$
+Y_{it} = \sum_{i=1}^{27} State_{i} + \sum_{t=1}^{6}Quarter\_Num_{t} + \sum_{t=1}^{m-2} \nu_{t} W_{i} 1_{t} + \sum_{t=m}^{T} \tau_{t} W_{i} 1_{t} + \epsilon_{it}
+$$
+イベントスタディ分析では、さきほどの分析とは異なり$\tau$は1つではなく、$m$期の施策効果であれば、$\tau_m$、$m+1$期施策効果であれば$\tau_{m+1}$と複数存在します。総じて、$m$期から$T$期までの$T-m$期の施策効果が係数$\tau_t$として表現される。そのため、この係数$\tau_t$を推定することで、イベントの効果を推定する。つまり、$T=6,m=4$であれば、$t=1,2$と$t=4,5,6$となり、$t=3$は基準点なので、モデルからは除外する。簡略化したイベントスタディ分析のモデルは下記の通り。
+
+$$
+Rate_{it} = State_{i} + Quarter\_Num_{t} \\
+ + \nu_{1} IsTreatmenrGroup_{i} * Quarter\_Num_{1} \\
+ + \nu_{2} IsTreatmenrGroup_{i} * Quarter\_Num_{2} \\
+ + \nu_{4} IsTreatmenrGroup_{i} * Quarter\_Num_{4} \\
+ + \nu_{5} IsTreatmenrGroup_{i} * Quarter\_Num_{5} \\
+ + \nu_{6} IsTreatmenrGroup_{i} * Quarter\_Num_{6} \\
+ + \epsilon_{it} \\
+$$
+
+イベントスタディ分析を行う前に、少しデータを前処理しておく。ここではパッケージによる便利な関数の使用は控え、分析方法への理解を深める。
+
+```{r}
+organ_event <- organ_full %>% 
+  mutate(
+    # case文でもよい
+    QuarterNum_1 = if_else(Quarter_Num == 1, 1, 0),
+    QuarterNum_2 = if_else(Quarter_Num == 2, 1, 0),
+    QuarterNum_4 = if_else(Quarter_Num == 4, 1, 0),
+    QuarterNum_5 = if_else(Quarter_Num == 5, 1, 0),
+    QuarterNum_6 = if_else(Quarter_Num == 6, 1, 0),
+  )
+organ_event %>% 
+  filter(State == 'Alaska' | State == 'California') %>% 
+  as.data.frame()
+```
+
+実行結果がこちら。
+
+```{r}
+# fl = 'Rate ~ 
+#   QuarterNum_1*IsTreatmentGroup + 
+#   QuarterNum_2*IsTreatmentGroup + 
+#   QuarterNum_4*IsTreatmentGroup + 
+#   QuarterNum_5*IsTreatmentGroup + 
+#   QuarterNum_6*IsTreatmentGroup | State + Quarter_Num'
+
+f_pre <- paste0("IsTreatmentGroup", "*QuarterNum_", c(1:2, 4:6), collapse = " + ")
+fl <- paste0('Rate ~ ', f_pre, ' | State + Quarter_Num')
+
+f_event <- feols(
+  fml = as.formula(fl),
+  data = organ_event,
+  cluster = 'State'
+)
+etable(f_event)
+```
+
+あとはこれを可視化する。
+
+```{r}
+f_event_df <- tibble(
+  label = c(names(f_event$coefficients), 't=3'),
+  time = c(1:2, 4:6, 3),
+  coef = c(f_event$coefficients, 0),
+  se = c(f_event$se, 0),
+  n = nrow(organ_event)) %>%
+  mutate(
+    ci_lwr = coef - qt(0.975, df = n)*se,
+    ci_upr = coef + qt(0.975, df = n)*se
+  )
+f_event_df
+```
+
+
+プロットを見る限り、施策介入後は`-2%`近辺を推移しているため、施策実行後から時間が経過しても、この期間においては変化してないことがわかる。
+
+```{r}
+ggplot(f_event_df, aes(x = time, y = coef)) +
+  geom_line(color = 'royalblue') +  
+  geom_point(color = 'royalblue') +  
+  geom_ribbon(aes(ymin = ci_lwr, ymax = ci_upr), alpha = 0.2, fill = 'royalblue') +
+  geom_vline(xintercept = 3.5, linetype = 'dotted', color = 'gray50') +  
+  geom_hline(yintercept = 0, linetype = 'dotted', color = 'gray50') +
+  scale_x_continuous(breaks = 1:6, labels = paste("T", 1:6, sep = "")) + 
+  coord_cartesian(ylim = c(-0.05, 0.05)) +  
+  labs(
+    title = "Event Study Plot",
+    x = "Time",
+    y = "Coefficient"
+  ) +
+  theme_minimal() + 
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12) 
+  )
+
+```
+
+
+DIDを用いて介入効果を計測するためにはパラレルトレンド仮定が成立していることが前提になる。イベントスタディを実行することで、パラレルトレンド仮定を検証できる。先程の回帰モデルでは、介入前の時点でもパラメタを推定している。このパラメタは、施策を実施していないにも関わらず、介入群であることが、アウトカムへ与える影響を意味している。さきほどの可視化では、介入前の部分では0を中心に推移しているため、この結果から「介入前には施策効果はなかった」と結論を導けます。ただパラレルトレンド仮定は根本的に実証不可な点は注意したい。
+
+## 介入時期が一律ではない場合
+
+さきほどの例では、介入時期がすべての州で同一だったが、実際は介入時期がずれる可能性がある。例えば、前回のノートで扱った[Mixtape](https://github.com/scunning1975/mixtape/blob/master/R/castle_1.R)の「Castle-doctrine statutes and homicides」の章のデータセットは、異なるタイミングで行われた銃の規制に関するデータセットになっている。
+
+その場合は、下記の画像の通り、分析前に介入時点を0として、前後のレコードを識別するフラグを作成する処理を加える必要がある。他の国では、`lead7,8,9`や`lag5`が存在しているが、ここでの説明で使用している国は該当してない。
+
+- `Alabama`に介入したのは2006年なので、2006年を基準に前後のダミーフラグを作成する。2005年が`lead1`で、2007年が`lag1`になる。
+- `Texas`に介入したのは2007年なので、2007年を基準に前後のダミーフラグを作成する。2006年が`lead1`で、2008年が`lag1`になる。
+- `Wyoming`に介入していないので`NA`しかない。説明のために｀NA`にしているが、実際には0で埋める。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference13/eventstudy.png')
+```
+
+```{r}
+castle <- read_csv('~/Desktop/castle.csv')
+
+castle2 <- castle %>% 
+  select(l_homicide, popwt, cdl, state, year, treatment_date) %>% 
+  mutate(
+    time_til = year - treatment_date,
+    lead9 = case_when(time_til == -9 ~ 1, TRUE ~ 0),
+    lead8 = case_when(time_til == -8 ~ 1, TRUE ~ 0),
+    lead7 = case_when(time_til == -7 ~ 1, TRUE ~ 0),
+    lead6 = case_when(time_til == -6 ~ 1, TRUE ~ 0),
+    lead5 = case_when(time_til == -5 ~ 1, TRUE ~ 0),
+    lead4 = case_when(time_til == -4 ~ 1, TRUE ~ 0),
+    lead3 = case_when(time_til == -3 ~ 1, TRUE ~ 0),
+    lead2 = case_when(time_til == -2 ~ 1, TRUE ~ 0),
+    lead1 = case_when(time_til == -1 ~ 1, TRUE ~ 0),
+    lag0 = case_when(time_til == 0 ~ 1, TRUE ~ 0),
+    lag1 = case_when(time_til == 1 ~ 1, TRUE ~ 0),
+    lag2 = case_when(time_til == 2 ~ 1, TRUE ~ 0),
+    lag3 = case_when(time_til == 3 ~ 1, TRUE ~ 0),
+    lag4 = case_when(time_til == 4 ~ 1, TRUE ~ 0),
+    lag5 = case_when(time_til == 5 ~ 1, TRUE ~ 0)
+    ) 
+
+event_study_formula <- as.formula(
+  paste("l_homicide ~ ",
+        paste(
+          paste(paste("lead", 1:9, sep = ""), collapse = " + "),
+          paste(paste("lag", 1:5, sep = ""), collapse = " + "), sep = " + "),
+        "| year + state"
+  ),
+)
+event_study_reg <- lfe::felm(
+  event_study_formula, 
+  weights = castle2$popwt, 
+  data = castle2)
+
+summary(event_study_reg)
+```
+
+後は先程と同様に可視化すれば良い。
+
+```{r}
+
+# order of the coefficients for the plot
+plot_order <- c("lead9", "lead8", "lead7", 
+                "lead6", "lead5", "lead4", "lead3", 
+                "lead2", "lead1", "lag1", 
+                "lag2", "lag3", "lag4", "lag5")
+leadslags_plot <- tibble(
+  sd = c(event_study_reg$se[plot_order], 0),
+  mean = c(coef(event_study_reg)[plot_order], 0),
+  label = c(-9,-8,-7,-6, -5, -4, -3, -2, -1, 1,2,3,4,5, 0)
+) %>% 
+  mutate(
+    ymin = mean-1.96*sd, 
+    ymax = mean+1.96*sd
+  )
+
+ggplot(leadslags_plot, aes(x = label, y = mean)) +
+  geom_line(color = 'royalblue') +  
+  geom_point(color = 'royalblue') +  
+  geom_ribbon(aes(ymin = ymin, ymax = ymax), alpha = 0.2, fill = 'royalblue') +
+  geom_vline(xintercept = 0, linetype = 'dotted', color = 'gray50') +  
+  geom_hline(yintercept = 0, linetype = 'dotted', color = 'gray50') +
+  scale_x_continuous(breaks = -9:5) + 
+  coord_cartesian(ylim = c(-0.5, 0.5)) +
+  xlab("Years before and after castle doctrine expansion") +
+  ylab("log(Homicide Rate)") +
+  theme_bw()
+
+```
+
+## `fixest`パッケージの使用方法
+
+作者のイントロダクションを見ながら`fixest`パッケージの使用方法を簡単にまとめておく。
+
+- [Fast Fixed-Effects Estimation: Short Introduction](https://cran.r-project.org/web/packages/fixest/vignettes/fixest_walkthrough.html#2_The_vcov_argument)
+
+基本的にはRで回帰を実行するときのようにフォーミュラを記載すれば良い。固定効果を追加したい場合は、`|`で区切って変数を追加していく。
+
+```
+feols(y ~  x1 + x2 + x3 + x4 | a1 + a2 + a3 + a4, data)
+```
+
+```{r}
+organ_full %>% 
+  group_by(IsTreatmentGroup, AfterTreatment) %>% 
+  summarise(avg_rate = mean(Rate))
+```
+
+2x2差分の差分法を回帰モデルで実行する方法は下記の通り。
+
+```{r}
+feols(Rate ~ IsTreatmentGroup*AfterTreatment, data = organ_full) 
+```
+
+固定効果モデルを実行する方法は下記の通り。クラスター標準誤差ももちろん利用可能。`cluster`引数に指定すれば良い。
+
+```{r}
+f1 <- feols(
+  Rate ~ IsTreatment | State + Quarter_Num, 
+  data = organ_full,
+  cluster = 'State'
+)
+summary(f1)
+```
+
+他の書き方として、`summary()`で渡しても良いとのこと。
+
+```{r}
+f2 <- feols(
+  Rate ~ IsTreatment | State + Quarter_Num, 
+  data = organ_full
+)
+summary(f2, cluster = 'State')
+```
+
+固定効果の2つのカテゴリについてクラスター標準誤差を計算したい場合、`summary()`の中で`se = "twoway"`を利用する。1つの場合は`cluster`、2つの場合は`twoway`、3つの場合は`threeway`、4つの場合は`fourway`を利用する。他にも、`standard`、`hetero`も利用できる。
+
+```{r}
+f3 <- feols(
+  Rate ~ IsTreatment | State + Quarter_Num, 
+  data = organ_full
+)
+summary(f3, se = 'twoway')
+```
+
+もしくは、`vcov`引数を利用しても同じ。オプションは`cluster`、`twoway`、`newey_west`、`driscoll_kraay`、`conley`が用意されている。
+
+```{r}
+f4 <- feols(
+  Rate ~ IsTreatment | State + Quarter_Num, 
+  data = organ_full,
+  vcov = 'twoway'
+)
+summary(f4)
+```
+
+クラスター標準誤差の計算については、パッケージの作者が下記の通りnoteを用意してくれている。一部抜粋すると、
+
+- [On standard-errors](https://cran.r-project.org/web/packages/fixest/vignettes/standard_errors.html)
+
+> 標準誤差は推定の重要な要素であると言うのは婉曲表現です。文字通り、論文の結果は標準誤差に依存します。したがって、標準誤差を計算する従来の「最良」の方法が存在しないのは残念です。
+たとえば、さまざまなソフトウェアでまったく同じ推定を実行すると、異なる標準誤差が得られることは珍しくありません。最初に「バグがあるに違いない」と思ったとしても、その考えは脇に置いてください。バグなど存在しないのですから。多くの場合、それは開発者が小規模サンプル補正に関して行った選択に帰着しますが、驚くべきことに、実装に関しては多くの自由度があります。
+複数の定義があると混乱が生じる可能性があるため、このドキュメントの目的は、このパッケージの標準誤差計算の面倒な詳細を明らかにすることです。
+
+例えば、`estimatr`パッケージの下記の実行結果と同じもの(詳細までは調べていない)を得るには、小規模サンプル補正やクラスター標準誤差の計算方法を調整する必要がある。
+
+```{r}
+estimatr::lm_robust(Rate ~ IsTreatment,
+  fixed_effects = State + Quarter_Num, 
+  data = organ_full,
+  clusters = State,
+  se_type = 'CR0'
+)
+```
+
+`ssc`は小規模サンプル補正のオプション。
+
+```{r}
+feols(
+  Rate ~ IsTreatment | State + Quarter_Num, 
+  data = organ_full,
+  cluster = 'State', 
+  ssc = ssc(adj = FALSE, cluster.adj = FALSE)
+)
+```
+
+`fixef()`を利用すれば、固定効果のパラメタを確認できる。いくつかのサンプルについてのみ、`plot(fixef(f5))`で可視化できる。
+
+```{r}
+f5 <- feols(
+  Rate ~ IsTreatment | State, 
+  data = organ_full,
+  cluster = 'State'
+)
+fixef(f5)
+```
+
+`etable()`を利用すれば、複数のモデルを説明と共にレイアウトして表示してくれる。
+
+```{r}
+etable(f1, f5)
+```
+
+本ノートでも説明しているイベントスタディ分析も簡単にできる。
+
+```{r}
+f_event <- feols(
+  Rate ~ i(Quarter_Num, IsTreatmentGroup, ref = 3) | State + Quarter_Num,
+  data = organ_full, 
+  cluster = 'State'
+  )
+f_event
+```
+
+`iplot()`で可視化できる。
+
+```{r}
+iplot(f_event)
+```
+
+
