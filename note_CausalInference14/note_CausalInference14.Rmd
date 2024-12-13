@@ -1,0 +1,255 @@
+---
+title: "クラスター標準誤差"
+pagetitle: "クラスター標準誤差"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+今回は、クラスター標準誤差の計算内容をまとめておく。固定効果モデルではクラスター標準誤差を使うことが一般的ではあるものの、数理の部分をあまり理解できていなかったので、下記を参考に0からクラスター標準誤差を計算することで理解を深める。
+
+- [Clustered standard errors with R](https://www.r-bloggers.com/2021/05/clustered-standard-errors-with-r/)
+
+## クラスター標準誤差
+
+通常の回帰モデルでは、回帰モデルの誤差は独立していると仮定する。しかし、固定効果モデルなどのパネルデータは、各個体ごとを追跡してデータを蓄積するデータ構造であるため、各個体の反復測定内で誤差が相関する。誤差が相関する問題は、推定値には影響ないが、推定値の精度に影響する。
+
+クラスター標準誤差を使用しない場合、標準誤差seは、過小推定され、値が低くなる。結果として、回帰係数が有意になってしまう。同じ個体から繰り返しデータを得るため、相関してしまい、個体クラスター内では分散が小さくなる。この結果、推定値のseは小さくなる。
+
+回帰モデルは下記の通り表現される。$p$は切片を含むパラメタ数、$\beta$は$p×1$ベクトル、$Y$は$n×1$ベクトル、$X$は$n×p$行列、$n$はデータのサイズ。$e$は$n×1$ベクトルで平均0、分散$\sigma^2$である。
+
+$$
+Y = X\beta + e
+$$
+
+$e = Y - X \beta$を最小にすることで、パラメタを推定する。$\beta$は下記の通り推定できる。
+
+$$
+\hat {\beta} = (X^{t} X)^{-1}Y
+$$
+
+また、分散は下記の通り推定できる。分子は残差平方和、分母は自由度である。
+
+$$
+\begin{eqnarray}
+\hat {V} [\hat {\beta}] &=& \hat{\sigma}^{2}(X^{t} X)^{-1} \\
+\hat{\sigma}^{2} &=& \frac{\sum \hat {e}^{2}_{i} }{n-p} \\
+\end{eqnarray}
+$$
+
+サンプルパネルデータを作ってシュミレーションをしてみる。
+
+```{r}
+set.seed(123)
+n <- 15
+clusters <- 3
+t <- 5
+cluster_id <- rep(1:clusters, each = n / clusters)
+time <- rep(1:t, times = clusters)
+X <- rnorm(n)
+beta <- 2
+epsilon <- rnorm(n,0,0.001) + rnorm(clusters, 0, 1)[cluster_id]
+y <- beta * X + epsilon
+
+data <- data.frame(
+  y = y, 
+  cluster_id = cluster_id,
+  time = time,
+  X = X
+  )
+data
+```
+
+推定した結果の`Std. Error`に注目する。
+
+```{r}
+f <- lm(y ~ X, data = data)
+summary(f)
+```
+
+計算式に沿って計算すると、さきほどの`Std. Error`と同じ数字が得られている。
+
+```{r}
+X <- model.matrix(f)
+u <- residuals(f)
+n <- nobs(f)
+p <- ncol(X)
+sigma2 <- sum(u^2) / (n - p)
+Xinv <- solve(t(X) %*% X, diag(p))
+f_se <- sqrt(diag(sigma2 * Xinv))
+f_se
+```
+
+回帰モデルの標準誤差の計算方法への理解を深められたので、ここからは誤差が独立という仮定を緩めていく。その方法がサンドイッチ推定量を計算するための方法がある。1行目から式を紐解いてゆく。通常の回帰モデルの誤差の分散が一定という仮定がある。これは、$\boldsymbol\Omega$は同一の対角行列である$\hat {\sigma}^2$要素、すなわち$\boldsymbol\Omega = \hat {\sigma}^2 \boldsymbol I$を先程の回帰モデルの分散推定式に代入すると、先程の推定式が得られる。
+
+$$
+\begin{eqnarray}
+\hat V[\hat\beta] &=& (X^TX)^{-1} X^T \boldsymbol\Omega X (X^TX)^{-1} \\
+\Omega &=& \frac{n-1}{n-p}\frac{c}{c-1} \sum_{j=1}^c (X_j^T \hat e_j \hat e_j^T X_j)
+\end{eqnarray}
+$$
+
+3から4行目では、$(X^TX)^{-1} X^T X = \boldsymbol I$を利用している。見て分かる通り、回帰モデルOLSのパラメタの分散がサンドイッチ推定量の特殊な形であることがわかる。
+
+$$
+\begin{eqnarray}
+\hat V[\hat\beta] &=& (X^TX)^{-1} X^T \boldsymbol\Omega X (X^TX)^{-1} \\
+&=& (X^TX)^{-1} X^T \hat {\sigma}^2 \boldsymbol I X (X^TX)^{-1} \\
+&=& \hat {\sigma}^2 (X^TX)^{-1} X^T X (X^TX)^{-1} \\
+&=& \hat {\sigma}^2  (X^TX)^{-1} \\
+\end{eqnarray}
+$$
+
+クラスター標準誤差を計算する場合、$\boldsymbol \Omega$は、同一の対角行列ではない点に注意する必要があるが、$\boldsymbol \Omega$をブロック対角であると考える。これは、誤差の分散がクラスター$j$内でのみ一定と仮定し、計算することを意味する。各$\boldsymbol \Omega_{j}$を計算して合計したものを平均化することで計算する。$c$はクラスターの数。
+
+$$
+\begin{eqnarray}
+\Omega &=& \frac{n-1}{n-p}\frac{c}{c-1} \sum_{j=1}^c (X_j^T \hat e_j \hat e_j^T X_j)
+\end{eqnarray}
+$$
+
+計算式をそのままコードをこのようになる。
+
+```{r}
+# omegaj <- lapply(unique(data$cluster_id), function(cluster_id) {
+#   j <- data$cluster_id == cluster_id
+#   X_j <- X[j, , drop = FALSE] # drop = FALSE: don't drop dimensions when we have only one obs.
+#   t(X_j) %*% u[j] %*% t(u[j]) %*% X_j
+# })
+# n_cl <- length(unique(data$cluster_id)) 
+# omega <- (n-1) / (n-p) * (n_cl / (n_cl-1)) * Reduce('+', omegaj)
+# sqrt(diag(Xinv %*% omega %*% Xinv)) 
+# [1] 0.34591975 0.04592547
+# > omegaj
+# [[1]]
+#             (Intercept)           X
+# (Intercept)  0.16100311 -0.08326557
+# X           -0.08326557  0.04306224
+# 
+# [[2]]
+#             (Intercept)         X
+# (Intercept)    9.508927 1.3612339
+# X              1.361234 0.1948651
+# 
+# [[3]]
+#             (Intercept)         X
+# (Intercept)    7.195286 1.7407445
+# X              1.740744 0.4211357
+# 
+# > Reduce('+', omegaj)
+#             (Intercept)        X
+# (Intercept)   16.865216 3.018713
+# X              3.018713 0.659063
+
+cluster_se <- function(model, cluster) {
+  X <- model.matrix(model)
+  residuals <- residuals(model)
+  p <- ncol(X)
+  n <- length(cluster)
+  # クラスターごとに集計
+  cluster_ids <- unique(cluster)
+  n_clusters <- length(cluster_ids)
+  bread <- solve(t(X) %*% X)
+  meat <- matrix(0, nrow = ncol(X), ncol = ncol(X))
+  
+  for (cl in cluster_ids) {
+    indices <- which(cluster == cl)
+    X_c <- X[indices, , drop = FALSE]
+    u_c <- residuals[indices]
+    meat <- meat + t(X_c) %*% (u_c %*% t(u_c)) %*% X_c
+  }
+  
+  # クラスター標準誤差の分散共分散行列
+  vcov_cluster <- (n-1) / (n-p) * (n_clusters / (n_clusters-1)) * bread %*% meat %*% bread
+  return(sqrt(diag(vcov_cluster)))
+}
+
+cluster_se(f, data$cluster_id)
+```
+
+`estimatr`パッケージでは簡単にクラスター標準誤差が計算できるので、`se_type = "stata"`の計算方法で計算する(ここで紹介したクラスタ標準誤差の計算式は`stata`と一致する)。結果を見ればわかるが、クラスタ標準誤差の数値が一致している。
+
+```{r}
+library(estimatr)
+
+f <- lm_robust(
+  y ~ X,
+  data = data,
+  clusters = cluster_id,
+  se_type = "stata"
+  )
+summary(f)
+# > f_cse
+# [1] 0.34591975 0.04592547
+```
+
+
+## おまけ
+
+クラスターごとに相関があるケースはこんな感じ。
+
+```{r}
+library(tidyverse)
+set.seed(1989)
+n <- 50    # 総観測数
+clusters <- 10  # クラスター数
+cluster_id <- rep(1:clusters, each = n / clusters)
+
+# クラスター内で誤差が相関している場合
+cluster_means <- rnorm(clusters, mean = 0, sd = 5)  # クラスターごとの平均誤差
+correlated_errors <- cluster_means[cluster_id] + rnorm(n, mean = 0, sd = 0.025)
+
+# データフレーム
+data <- data.frame(
+  x = runif(n),
+  y_correlated = 5 + 5 * runif(n) + correlated_errors,
+  cluster_id = factor(cluster_id)
+)
+
+# クラスターごとの平均値を計算
+cluster_means <- data %>%
+  group_by(cluster_id) %>%
+  summarise(
+    x_mean = mean(x),
+    y_mean_correlated = mean(y_correlated))
+
+# クラスター内相関の可視化プロット
+ggplot(data, aes(x = x, y = y_correlated, color = cluster_id)) +
+  geom_point(alpha = 0.7) +
+  geom_segment(
+    data = data %>%
+      left_join(cluster_means, by = "cluster_id"), # クラスター平均を結合
+    aes(x = x_mean, y = y_mean_correlated, 
+        xend = x, yend = y_correlated),
+    inherit.aes = FALSE, arrow = arrow(length = unit(0.1, "cm")),
+    color = "gray", size = 0.5, alpha = 0.5
+  ) +
+  geom_smooth(method = "lm", se = FALSE, aes(group = cluster_id)) + 
+  theme_minimal()
+```
