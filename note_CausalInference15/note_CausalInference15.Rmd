@@ -1,0 +1,214 @@
+---
+title: "分割時系列デザイン"
+pagetitle: "分割時系列デザイン"
+output:
+  html_document:
+  toc: TRUE
+toc_depth: 5
+toc_float: FALSE
+# number_sectios: TRUE
+code_folding: "show"
+highlight: "kate"
+# theme: "flatly"
+css: ../style.css
+md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+今回は、分割時系列デザイン(Interrupted Time Series Analysis: ITSA)についてまとめておく。
+分割時系列デザインでは、ABテストのようにRCTができない時系列データに対して、アウトカムへの介入効果を測定できる準実験デザインのこと。下記にて詳しくまとめられている。
+
+- [Interrupted time series regression for the evaluation of public health interventions: a tutorial | International Journal of Epidemiology | Oxford Academic](https://academic.oup.com/ije/article/46/1/348/2622842)
+- [分割時系列解析(ITS)の入門 | PPT](https://www.slideshare.net/slideshow/its-81063341/81063341)
+- [【統計的因果推論】分割時系列解析の初歩を解説する【ITS 回帰不連続デザイン】 - Syleir’s note](https://syleir.hatenablog.com/entry/2022/11/04/185721)
+- [【統計的因果推論】分割時系列解析をPythonで実装する【ITS 回帰不連続デザイン】 - Syleir’s note](https://syleir.hatenablog.com/entry/2023/03/17/202117)
+- [【統計的因果推論】分割時系列解析をPythonで結果の解析・解釈をする【ITS】 - Syleir’s note](https://syleir.hatenablog.com/entry/2023/03/22/201219)
+- [回帰不連続デザインRegression discontinuity design（および分割時系列デザイン） – 医療政策学×医療経済学](https://healthpolicyhealthecon.com/2015/05/16/regression_discontinuity_design/)
+
+ざっくりいうと、回帰不連続デザインとの違いは、回帰不連続デザインの場合には、介入のカットオフ値の両側の集団を比較している一方、介入を「時間」にして、前後を見ているのが分割時系列デザインとなる。分割時系列デザインでは、同じ集団のアウトカムを計測するため、自己相関を適切に処理する必要がある。
+
+## 分割時系列デザインのモデル
+
+分割時系列デザインのモデルは非常にシンプル。介入によるアウトカムへの効果を時系列のレベル変化とスロープ変化に分離して効果を測定する。このデザインの肝は、「介入がなければ、介入前のトレンドだっただろう」という反事実(Counterfactual)との比較を行うことで、因果効果を計算する。
+
+$$
+Y = \beta_0 + \beta_1 T + \beta_2 X_t + \beta_3(T - T_i) X_t
+$$
+
+- $T$: 時系列データの時間
+- $X_{t}$: 介入前は0、介入後は1をとる介入フラグ
+- $T_{i}$: 介入が行われた時間
+
+
+分析で使用するデータのイメージをお借りする。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference15/model.png')
+```
+
+これをみても分かる通り、介入前は$X_{t}=0$なので、モデルはシンプルに時間の回帰モデルである。
+
+$$
+Y_{i} = \beta_{0} + \beta_{1}T
+$$
+
+介入後は$X_{t}=1$なので、モデルは交互作用を使ったモデルとなり、
+
+$$
+\begin{eqnarray}
+Y &=& \beta_0 + \beta_1 T + \beta_2 X_t + \beta_3(T - T_i) X_t \\
+&=& \beta_0 + \beta_1 T + \beta_2 1 + \beta_3(T - T_i) 1 \\
+&=& \beta_0 + \beta_2 + \beta_1 T + \beta_3(T - T_i)  \\
+&=& (\beta_0 + \beta_2 - \beta_3 T_i) + (\beta_1 + \beta_3)T \\
+\end{eqnarray}
+$$
+
+となる。[こちらの方](https://syleir.hatenablog.com/entry/2023/03/22/201219)がわかりやすく、分割時系列デザインについてまとめられており、非常にわかりやすくパラメタの役割を説明している図があったのでお借りする。
+
+```{r, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics('/Users/aki/Documents/statistical_note/note_CausalInference15/model2.png')
+```
+
+パラメタをまとめると下記の通りとなる。
+
+- $\beta_{0}$: 切片
+- $\beta_{1}$: 介入前の傾き
+- $\beta_{2}$: 介入前後の切片の差。介入によるレベル変化。
+- $\beta_{1}+\beta_{3}$: 介入後の傾き。介入によるスロープ変化。
+
+あとは、データからパラメタを推定すればおしまい、チャンチャン。とはいかない。分割時系列デザインは前提が成立していないと、確からしい介入の効果は計算できない。前提としては下記が挙げられる。
+
+- 介入前後で、集団の分布が異なる、変化しない。介入前後では同じ集団であり、介入の違い以外は存在しない、と仮定する。
+- 介入前のトレンドを線形で表現できる。非線形であれば、周期性などを反映することで修正する。
+- 介入後の期間では、その他の介入を受けていない。介入後の期間が長くなると、他の介入の影響を受ける可能性がある。
+
+自己相関については、回帰モデルの独立性の過程を損なう可能性があるが、このあたりの話は調べてもあまり出てこない。Newey-West標準誤差であれば、不均一分散と自己相関の両方が存在していても、得られる推定値は一致性を持つので、いいのかも？
+
+## 分割時系列デザインの実践
+
+まずはデータを用意しておく。
+
+```{r}
+library(tidyverse)
+
+df <- tibble(
+    t = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23),
+    x_t =  c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+    `x(t-ti)` = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+    y = c(2030, 2201, 2100, 2000, 2035, 2343, 2854, 2400, 2748, 2443, 2600, 3194, 1506, 1340, 1456, 1256, 1345, 1100, 1304, 1405, 1245, 852, 1200, 840)
+)
+
+df
+```
+
+可視化しておく。12時点目で介入の効果がでていることがわかる。
+
+```{r}
+ggplot(df, aes(x = t, y = y)) +
+  geom_line() +  
+  geom_point() +     
+  theme_bw()
+```
+
+このデータに対して、下記の通り分割時系列デザインで分析する。
+
+$$
+Y = \beta_0 + \beta_1 T + \beta_2 X_t + \beta_3(T - T_i) X_t
+$$
+
+- $\beta_{0}$: 切片(1948.06)
+- $\beta_{1}$: 介入前の傾き(84.41)
+- $\beta_{2}$: 介入前後の切片の差。介入によるレベル変化。(-1483.50)
+- $\beta_{1}+\beta_{3}$: 介入後の傾き。介入によるスロープ変化。(84.41-128.07=-43.66)
+
+```{r}
+fit <- glm(y ~ t + x_t + `x(t-ti)`, data = df, family = gaussian(link = 'identity'))
+summary(fit)
+```
+
+$\beta_{1}+\beta_{3}$の介入後の傾き(介入によるスロープ変化(84.41-128.07=-43.66))を直接計算したければ、下記のように式変形する。
+
+$$
+\begin{eqnarray}
+Y &=& \beta_0 + \beta_1 T + \beta_2 X_t + \beta_3(T - T_i) X_t \\
+&=& \beta_0 + \beta_1 T + \beta_2 X_t + \beta_3 T X_t - \beta_3 T_i X_t \\
+&=& \beta_0 + \beta_1 T + \beta_1 T X_t -  \beta_1 T X_t + \beta_2 X_t + \beta_3 T X_t - \beta_3 T_i X_t \\
+&=& \beta_0 + \beta_1 T -  \beta_1 T X_t + (\beta_1 + \beta_3) T X_t + \beta_2 X_t - \beta_3 T_i X_t \\
+&=& \beta_0 + \beta_1 T(1 -  X_t) + (\beta_1 + \beta_3) T X_t + \beta_2 X_t - \beta_3 T_i X_t \\
+&=& \beta_0 + \beta_1 T(1 -  X_t) + (\beta_1 + \beta_3) T X_t + (\beta_2  - \beta_3 T_i)X_t \\
+\end{eqnarray}
+$$
+
+加工済みのテーブルはこちら。
+
+```{r}
+df$`t(1-xt)` <- df$t * (1 - df$x_t)
+df$`t*xt` <- df$t * df$x_t
+df
+```
+
+加工したデータを使って、モデルを推定する。
+
+```{r}
+fit2 <- glm(y ~ `t(1-xt)` + `t*xt` + x_t, data = df, family = gaussian(link = 'identity'))
+summary(fit2)
+```
+
+最後にここまでの結果を可視化しておく。
+
+```{r}
+prediction <- predict(fit, newdata = df, interval = "confidence", se.fit = TRUE)
+df$pred <- prediction$fit
+df$lower <- prediction$fit - 1.96 * prediction$se.fit  # 95% 信頼区間の下限
+df$upper <- prediction$fit + 1.96 * prediction$se.fit  # 95% 信頼区間の上限
+
+# 半事実のデータを作成
+cf <- df
+cf$x_t <- 0
+cf$`x(t-ti)` <- 0
+prediction_cf <- predict(fit, newdata = cf, interval = "confidence", se.fit = TRUE)
+df$pred_cf <- prediction_cf$fit
+df$lower_cf <- prediction_cf$fit - 1.96 * prediction_cf$se.fit  # 95% 信頼区間の下限
+df$upper_cf <- prediction_cf$fit + 1.96 * prediction_cf$se.fit  # 95% 信頼区間の上限
+
+df
+```
+
+
+```{r}
+ggplot(df) +
+  geom_point(aes(x = t, y = y), color = 'black', size = 1) +  
+  geom_ribbon(aes(x = t, y = y, ymin = lower, ymax = upper, fill = 'Prediction'), alpha = 0.2) +
+  geom_line(aes(x = t, y = pred, color = 'Prediction'), size = 1) +  
+  geom_ribbon(aes(x = t, y = y, ymin = lower_cf, ymax = upper_cf, fill = 'CounterFuctual'), alpha = 0.2) + 
+  geom_line(aes(x = t, y = pred_cf, color = 'CounterFuctual'), linetype = 'dotted', size = 1) +  
+  scale_color_manual(values = c('Prediction' = 'royalblue', 'CounterFuctual' = 'tomato')) + 
+  theme_bw() +   
+  theme(legend.position = 'none') 
+```
+
+## 参考
+
+- [Interrupted time series regression for the evaluation of public health interventions: a tutorial | International Journal of Epidemiology | Oxford Academic](https://academic.oup.com/ije/article/46/1/348/2622842)
+- [分割時系列解析(ITS)の入門 | PPT](https://www.slideshare.net/slideshow/its-81063341/81063341)
+- [【統計的因果推論】分割時系列解析の初歩を解説する【ITS 回帰不連続デザイン】 - Syleir’s note](https://syleir.hatenablog.com/entry/2022/11/04/185721)
+- [【統計的因果推論】分割時系列解析をPythonで実装する【ITS 回帰不連続デザイン】 - Syleir’s note](https://syleir.hatenablog.com/entry/2023/03/17/202117)
+- [【統計的因果推論】分割時系列解析をPythonで結果の解析・解釈をする【ITS】 - Syleir’s note](https://syleir.hatenablog.com/entry/2023/03/22/201219)
+- [回帰不連続デザインRegression discontinuity design（および分割時系列デザイン） – 医療政策学×医療経済学](https://healthpolicyhealthecon.com/2015/05/16/regression_discontinuity_design/)
