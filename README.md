@@ -1,8 +1,12 @@
 # 目次
 
 自習内容をまとめているノートです。
+書籍を読んで理解に躓いた部分、書籍で実行されたコードの出力までの過程などを中心にメモをまとめているだけです。
 記載している内容が正確かどうかはわかりません。
 参考にされる場合は、ご利用者ご自身の判断と責任のもとで、利用してください。
+基本的にはRですが、たまにPyhtonが混じります。
+
+SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note)。
 
 ## 統計学
 
@@ -99,7 +103,7 @@
 - [不均一分散とロバスト標準誤差](https://sugiaki1989.github.io/statistical_note/note_regression10/note_regression10.html)
 - [重み付き回帰分析](https://sugiaki1989.github.io/statistical_note/note_regression11/note_regression11.html)
 
-## マルチレベル回帰モデル(非公開)
+## マルチレベル回帰モデル
 
 - [回帰モデルの仮定のおさらい](https://sugiaki1989.github.io/statistical_note/note_MultiLevelRegression00/note_MultiLevelRegression00.html)
 - [経験的成長プロット](https://sugiaki1989.github.io/statistical_note/note_MultiLevelRegression01/note_MultiLevelRegression01.html)
