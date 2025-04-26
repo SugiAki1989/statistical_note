@@ -647,7 +647,7 @@ display: none;
 </div>
 
 <div class="update-right">
-<p>CreatedAt: 2024-04-18 00:34:33</p>
+<p>CreatedAt: 2025-04-26 11:17:52</p>
 </div>
 <div id="はじめに" class="section level1">
 <h1>はじめに</h1>
@@ -740,7 +740,7 @@ distribution)を利用する。2項分布は離散型の確率分布で、確率
 </ul>
 <p>成功確率<span class="math inline">\(\theta\)</span>で起こる独立な事象が<span class="math inline">\(n\)</span>回のうち<span class="math inline">\(y\)</span>回起こる確率を表す。</p>
 <p><span class="math display">\[
-f(y) = {}_n C_{y} \theta^y (1-\theta)^{n-y}
+f(y) = \binom{n}{y} \theta^y (1-\theta)^{n-y}
 \]</span></p>
 <p>5人のうち4人(データ<span class="math inline">\(y\)</span>)がコンバージョンする尤もらしさを表す関数(尤度関数)を可視化すると、下記の通り可視化できる。<span class="math inline">\(\theta=0.8\)</span>が他の<span class="math inline">\(\theta\)</span>よりも尤もらしい(=最尤法)ことがわかる。</p>
 <div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a>theta <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">1</span>, <span class="at">by =</span> <span class="fl">0.0001</span>)</span>
@@ -814,9 +814,9 @@ f(\theta) = \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta -
 <p><span class="math display">\[
 \begin{eqnarray}
 p(\theta|y) &amp;=&amp; \frac{p(y|\theta)p(\theta)} {p(y)} \\
-&amp;=&amp; \frac{{}_n C_{y} \theta^y (1-\theta)^{n-y}
+&amp;=&amp; \frac{\binom{n}{y} \theta^y (1-\theta)^{n-y}
 \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta - 1}}{B(\alpha,
-\beta)}}{\int_0^1 {}_n C_{y} \theta^y (1-\theta)^{n-y}
+\beta)}}{\int_0^1 \binom{n}{y} \theta^y (1-\theta)^{n-y}
 \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta - 1}}{B(\alpha, \beta)} d
 \theta}\\
 &amp;=&amp; \frac{5 \theta^4 (1-\theta)^{5-4} \frac{\theta^{1 - 1} (1 -
@@ -1002,7 +1002,7 @@ n-y+\beta)\)</span>となるため、パターンAの場合、</p>
 <p><span class="math display">\[
 \begin{eqnarray}
 p(\theta|y) &amp;=&amp; p(y|\theta)p(\theta)/p(y) \\
-&amp;\propto&amp; {}_n C_{y} \theta^y (1-\theta)^{n-y}
+&amp;\propto&amp; \binom{n}{y} \theta^y (1-\theta)^{n-y}
 \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta - 1}}{B(\alpha, \beta)}\\
 &amp;\propto&amp; \theta^{30} (1-\theta)^{10000-30} 1\\
 &amp;\propto&amp; \theta^{30} (1-\theta)^{9970}\\

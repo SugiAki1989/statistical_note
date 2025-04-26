@@ -120,7 +120,7 @@ list(
 成功確率$\theta$で起こる独立な事象が$n$回のうち$y$回起こる確率を表す。
 
 $$
-f(y) = {}_n C_{y} \theta^y (1-\theta)^{n-y}
+f(y) = \binom{n}{y} \theta^y (1-\theta)^{n-y}
 $$
 
 5人のうち4人(データ$y$)がコンバージョンする尤もらしさを表す関数(尤度関数)を可視化すると、下記の通り可視化できる。$\theta=0.8$が他の$\theta$よりも尤もらしい(=最尤法)ことがわかる。
@@ -199,7 +199,7 @@ plot(
 $$
 \begin{eqnarray}
 p(\theta|y) &=& \frac{p(y|\theta)p(\theta)} {p(y)} \\
-&=& \frac{{}_n C_{y} \theta^y (1-\theta)^{n-y} \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta - 1}}{B(\alpha, \beta)}}{\int_0^1 {}_n C_{y} \theta^y (1-\theta)^{n-y} \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta - 1}}{B(\alpha, \beta)} d \theta}\\
+&=& \frac{\binom{n}{y} \theta^y (1-\theta)^{n-y} \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta - 1}}{B(\alpha, \beta)}}{\int_0^1 \binom{n}{y} \theta^y (1-\theta)^{n-y} \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta - 1}}{B(\alpha, \beta)} d \theta}\\
 &=& \frac{5 \theta^4 (1-\theta)^{5-4} \frac{\theta^{1 - 1} (1 - \theta)^{1 - 1}}{1}} {0.1666667}\\
 &=& 30 \theta^4 (1-\theta)^{1} 1 \\
 &=& 30 \theta^4 (1-\theta)^{1} \\ 
@@ -379,7 +379,7 @@ GoogleのGeminiによると、ベイジアンABテストのメリットは下記
 $$
 \begin{eqnarray}
 p(\theta|y) &=& p(y|\theta)p(\theta)/p(y) \\
-&\propto& {}_n C_{y} \theta^y (1-\theta)^{n-y} \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta - 1}}{B(\alpha, \beta)}\\
+&\propto& \binom{n}{y} \theta^y (1-\theta)^{n-y} \frac{\theta^{\alpha - 1} (1 - \theta)^{\beta - 1}}{B(\alpha, \beta)}\\
 &\propto& \theta^{30} (1-\theta)^{10000-30} 1\\
 &\propto& \theta^{30} (1-\theta)^{9970}\\
 &\propto& \theta^{31−1} (1-\theta)^{9971-1}\\
