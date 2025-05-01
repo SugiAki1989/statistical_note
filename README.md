@@ -6,7 +6,7 @@
 参考にされる場合は、ご利用者ご自身の判断と責任のもとで、利用してください。
 基本的にはRですが、たまにPyhtonが混じります。
 
-SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note)。
+SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=readme-ov-file#sql-query-note)。
 
 ## 統計学
 
