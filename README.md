@@ -147,8 +147,9 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [条件付き確率のおさらい](https://sugiaki1989.github.io/statistical_note/note_CausalInference10/note_CausalInference10.html)
 - [条件付き独立性と交換可能性のおさらい](https://sugiaki1989.github.io/statistical_note/note_CausalInference11/note_CausalInference11.html)
 - [差分の差分法の基礎とDID回帰モデル](https://sugiaki1989.github.io/statistical_note/note_CausalInference12/note_CausalInference12.html)
-- [イベントスタディ分析](https://sugiaki1989.github.io/statistical_note/note_CausalInference12/note_CausalInference13.html)
-- [クラスタ標準誤差について](https://sugiaki1989.github.io/statistical_note/note_CausalInference12/note_CausalInference14.html)
+- [イベントスタディ分析](https://sugiaki1989.github.io/statistical_note/note_CausalInference13/note_CausalInference13.html)
+- [クラスタ標準誤差について](https://sugiaki1989.github.io/statistical_note/note_CausalInference14/note_CausalInference14.html)
+- [分断時系列回帰分析](https://sugiaki1989.github.io/statistical_note/note_CausalInference12/note_CausalInference15.html)
 
 ## 生存時間解析(非公開)
 
