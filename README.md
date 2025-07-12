@@ -276,8 +276,8 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 
 ## 強化学習(Reinforcement Learning)
 
-- [第1章: バンディット問題](https://github.com/SugiAki1989/statistical_note/blob/main/note_ReinforcementLearning01/note_ ReinforcementLearning01.ipynb)
-- [第2章: マルコフ決定過程](https://github.com/SugiAki1989/statistical_note/blob/main/note_ReinforcementLearning02/note_ ReinforcementLearning02.ipynb)
+- [第1章:バンディット問題](https://github.com/SugiAki1989/statistical_note/blob/main/note_ReinforcementLearning01/note_ReinforcementLearning01.ipynb)
+- [第2章:マルコフ決定過程](https://github.com/SugiAki1989/statistical_note/blob/main/note_ReinforcementLearning02/note_ReinforcementLearning02.ipynb)
 
 
 ## DataBase系パッケージ
