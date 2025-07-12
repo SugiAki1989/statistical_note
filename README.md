@@ -274,6 +274,12 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [LightGBMとLambdaMart](https://github.com/SugiAki1989/statistical_note/blob/main/note_LightGBM15/note_LightGBM15.ipynb)
 - [LightGBMとLambdaRank](https://github.com/SugiAki1989/statistical_note/blob/main/note_LightGBM16/note_LightGBM16.ipynb)
 
+## 強化学習(Reinforcement Learning)
+
+- [第1章: バンディット問題](https://github.com/SugiAki1989/statistical_note/blob/main/note_ReinforcementLearning01/note_ ReinforcementLearning01.ipynb)
+- [第2章: マルコフ決定過程](https://github.com/SugiAki1989/statistical_note/blob/main/note_ReinforcementLearning02/note_ ReinforcementLearning02.ipynb)
+
+
 ## DataBase系パッケージ
 
 - [SageMarkerからDatabricksに接続する](https://sugiaki1989.github.io/statistical_note/note_db01/note_db01.html)
