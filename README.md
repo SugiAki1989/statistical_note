@@ -278,6 +278,7 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 
 - [第1章:バンディット問題](https://github.com/SugiAki1989/statistical_note/blob/main/note_ReinforcementLearning01/note_ReinforcementLearning01.ipynb)
 - [第2章:マルコフ決定過程](https://github.com/SugiAki1989/statistical_note/blob/main/note_ReinforcementLearning02/note_ReinforcementLearning02.ipynb)
+- [第3章:ベルマン方程式](https://github.com/SugiAki1989/statistical_note/blob/main/note_ReinforcementLearning03/note_ReinforcementLearning03.ipynb)
 
 
 ## DataBase系パッケージ
