@@ -221,7 +221,8 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [Prophet の周期変動](https://sugiaki1989.github.io/statistical_note/note_prophet05/note_prophet05.html)
 - [Prophet の外部予測変数](https://sugiaki1989.github.io/statistical_note/note_prophet06/note_prophet06.html)
 - [Prophet のモデル検証](https://sugiaki1989.github.io/statistical_note/note_prophet07/note_prophet07.html)
-- [複数の prophet でクロスバリデーションしながら複数モデルを比較する](https://sugiaki1989.github.io/statistical_note/note_prophet07/note_prophet07.html)
+- [複数の prophet でクロスバリデーションしながら複数モデルを比較する](https://sugiaki1989.github.io/statistical_note/note_prophet08/note_prophet08.html)
+- [Prophet の使い方(Python編)](https://sugiaki1989.github.io/statistical_note/note_prophet09/note_prophet09.ipynb)
 
 ## TidyModels パッケージ
 
