@@ -38,10 +38,12 @@ knitr::opts_chunk$set(
 
 - [レーティングの理論 (Eloレーティング, Glickoレーティング) | henatips](https://henatips.com/page/26/)
 
-## レーティングの理論 (EloとGlickoレーティング)
+## Eloレーティング
 
 ![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating2.png)
 ![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating3.png)
+
+## Glickレーティング
 
 ![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating4.png)
 
@@ -135,6 +137,13 @@ print(f"q'       = q / √(1 + 3 q² σ² / π²) = {q_prime:.6f}")
 ![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating17.png)
 
 ![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating18.png)
+## Glick2レーティング
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating19.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating20.png)
+
+
 
 
 ## 参考文献および参考資料
