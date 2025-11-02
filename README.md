@@ -67,6 +67,7 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [ダミーWebサービスのデータでABテストを実践する1(非公開)](https://sugiaki1989.github.io/statistical_note/note_pvalue14/note_pvalue14.html)
 - [ダミーWebサービスのデータでABテストを実践する2(非公開)](https://sugiaki1989.github.io/statistical_note/note_pvalue15/note_pvalue15.html)
 - [事後分布と累積分布関数](https://sugiaki1989.github.io/statistical_note/note_bayes19/note_bayes19.html)
+- [EloレーティングとGlick(2)レーティング](https://sugiaki1989.github.io/statistical_note/note_bayes20/note_bayes20.html)
 
 ## 数値解析
 

@@ -1,0 +1,143 @@
+---
+title: "EloとGlicko(2)レーティング"
+pagetitle: "EloとGlicko(2)レーティング"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: FALSE
+    # number_sections: TRUE
+    code_folding: "show"
+    highlight: "kate"
+    # theme: "flatly"
+    css: ../style.css
+    md_extensions: -ascii_identifiers
+---
+  
+```{r SETUP, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # out.width = 800,
+  # out.height = 600,
+  fig.align = "center",
+  dev = "ragg_png"
+)
+```
+
+<div class="update-right">
+  UPDATE: `r Sys.time()`
+</div>
+  
+# はじめに
+  
+このノートは「ベイズ統計」に関する何らかの内容をまとめ、ベイズ統計への理解を深めていくために作成している。今回は「レーティングの理論」についてまとめておく。レーティングの理論のことは知らず勉強し始めたのだが、Glickoレーティングについては、ベイズの考え方が利用されていたので、こちらのシリーズでまとめる。Glicko2レーティングについてはGlickoレーティングにレーティング変動率(rating volatility)を追加したものになるので、ここではGlickoレーティングまでをまとめている。
+
+内容をまとめるにあたり、下記を参考にしており、下記に沿うような形で自分の中で行間を埋めてみた。
+
+- [レーティングの理論 (Eloレーティング, Glickoレーティング) | henatips](https://henatips.com/page/26/)
+
+## レーティングの理論 (EloとGlickoレーティング)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating2.png)
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating3.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating4.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating5.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating6.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating7.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating8.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating9.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating10.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating11.png)
+
+作図のグラフコード。Pythonで書くのであればrmdではなくipynbでいい気もするが、ベイズシリーズがrmdなので。
+```
+import numpy as np
+import matplotlib.pyplot as plt
+from math import pi, sqrt
+from scipy.stats import norm
+
+# -----------------------------
+# Parameters
+# -----------------------------
+q = 1.6
+mu = 0.0
+sigma = 1.0
+
+
+def sigmoid(x, q_):
+    return 1.0 / (1.0 + np.exp(-q_ * x))
+
+
+# sigmoid ~ Normal (variance matching)
+sd0 = pi / (sqrt(3) * q)
+sd_after = np.sqrt(sd0**2 + sigma**2)
+
+# q' for re-sigmoization (variance matching)
+q_prime = q / np.sqrt(1.0 + (3.0 * q**2 * sigma**2) / (pi**2))
+
+x = np.linspace(-6, 6, 600)
+
+# -----------------------------
+# Figure 1: Original sigmoid vs. normal CDF (variance matched)
+# -----------------------------
+plt.figure(figsize=(6, 4))
+plt.plot(x, sigmoid(x, q), label="Original sigmoid σ_sig = π/(√3 q)")
+plt.plot(x, norm.cdf((x - mu) / sd0), linestyle="--", label="Normal CDF (variance matched)")
+plt.title("Step 1: Sigmoid → Normal CDF (variance matching)")
+plt.xlabel("x")
+plt.ylabel("Probability")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# -----------------------------
+# Figure 2: After convolution vs. re-sigmoization (q')
+# -----------------------------
+plt.figure(figsize=(6, 4))
+plt.plot(x, norm.cdf((x - mu) / sd_after), label="After convolution (Normal CDF, sd=√(sd0²+σ²))")
+plt.plot(x, sigmoid(x - mu, q_prime), linestyle="--", label="Re-sigmoidization (using q')")
+plt.title("Step 2: Normal×Normal convolution → Back to sigmoid (q')")
+plt.xlabel("x")
+plt.ylabel("Probability")
+plt.legend(loc='upper left')  # 凡例を左上に
+plt.grid(True)
+plt.show()
+
+# Summary
+print("=== Parameter Summary ===")
+print(f"q        = {q:.6f}")
+print(f"mu       = {mu:.6f}")
+print(f"sigma    = {sigma:.6f}")
+print(f"sd0      = π/(√3 q)           = {sd0:.6f}")
+print(f"sd_after = √(sd0² + σ²)       = {sd_after:.6f}")
+print(f"q'       = q / √(1 + 3 q² σ² / π²) = {q_prime:.6f}")
+```
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating12.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating13.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating14.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating15.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating16.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating17.png)
+
+![](/Users/aki/Documents/statistical_note/note_bayes20/elo_glick_rating18.png)
+
+
+## 参考文献および参考資料
+
+- [レーティングの理論 (Eloレーティング, Glickoレーティング) | henatips](https://henatips.com/page/26/)
+
