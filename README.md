@@ -133,6 +133,7 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [時系列データの分析(AR モデルから SARIMAX まで)](https://sugiaki1989.github.io/statistical_note/note_TimeSeries01/note_TimeSeries01.html)
 - [時系列データの分析(arima.sim と季節調整法)](https://sugiaki1989.github.io/statistical_note/note_TimeSeries02/note_TimeSeries02.html)
 - [時系列データの分析(見せかけの回帰)](https://sugiaki1989.github.io/statistical_note/note_TimeSeries03/note_TimeSeries03.html)
+- [弱定常の共分散の仮定の可視化](https://sugiaki1989.github.io/statistical_note/note_TimeSeries04/note_TimeSeries04.html)
 
 ## 因果推論
 
