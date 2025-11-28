@@ -133,7 +133,7 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [時系列データの分析(AR モデルから SARIMAX まで)](https://sugiaki1989.github.io/statistical_note/note_TimeSeries01/note_TimeSeries01.html)
 - [時系列データの分析(arima.sim と季節調整法)](https://sugiaki1989.github.io/statistical_note/note_TimeSeries02/note_TimeSeries02.html)
 - [時系列データの分析(見せかけの回帰)](https://sugiaki1989.github.io/statistical_note/note_TimeSeries03/note_TimeSeries03.html)
-- [弱定常の共分散の仮定の可視化](https://sugiaki1989.github.io/statistical_note/blob/main/note_TimeSeries04/note_TimeSeries04.ipynb)
+- [弱定常の共分散の仮定の可視化](https://github.com/SugiAki1989/statistical_note/blob/main/note_TimeSeries04/note_TimeSeries04.ipynb)
 
 ## 因果推論
 
@@ -224,8 +224,8 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [Prophet の外部予測変数](https://sugiaki1989.github.io/statistical_note/note_prophet06/note_prophet06.html)
 - [Prophet のモデル検証](https://sugiaki1989.github.io/statistical_note/note_prophet07/note_prophet07.html)
 - [複数の prophet でクロスバリデーションしながら複数モデルを比較する](https://sugiaki1989.github.io/statistical_note/note_prophet08/note_prophet08.html)
-- [Prophet で予測モデルの作成(Python編)](https://sugiaki1989.github.io/statistical_note/blob/main/note_prophet09/note_prophet09.ipynb)
-- [Prophet で予測モデルの関数化(Python編)](https://sugiaki1989.github.io/statistical_note/blob/main/note_prophet10/note_prophet10.ipynb)
+- [Prophet で予測モデルの作成(Python編)](https://github.com/SugiAki1989/statistical_note/blob/main/note_prophet09/note_prophet09.ipynb)
+- [Prophet で予測モデルの関数化(Python編)](https://github.com/SugiAki1989/statistical_note/blob/main/note_prophet10/note_prophet10.ipynb)
 
 ## TidyModels パッケージ
 
@@ -256,8 +256,8 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 
 ## Python Library
 
-- [polarsライブラリ-polar1-](https://sugiaki1989.github.io/statistical_note/blob/main/note_PythonLibrary01/note_PythonLibrary01.ipynb)
-- [polarsライブラリ-polar2-](https://sugiaki1989.github.io/statistical_note/blob/main/note_PythonLibrary02/note_PythonLibrary02.ipynb)
+- [polarsライブラリ-polar1-](https://github.com/SugiAki1989/statistical_note/blob/main/note_PythonLibrary01/note_PythonLibrary01.ipynb)
+- [polarsライブラリ-polar2-](https://github.com/SugiAki1989/statistical_note/blob/main/note_PythonLibrary02/note_PythonLibrary02.ipynb)
 
 ## LightGBM: Pythonのlightgbmパッケージ
 
