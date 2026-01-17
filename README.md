@@ -90,6 +90,8 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [モンテカルロシュミレーションのまとめ](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis13/note_NumericalAnalysis13.html)
 - [ハミルトニアンモンテカルロ法(1次元)について](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis14/note_NumericalAnalysis14.html)
 - [ハミルトニアンモンテカルロ法(多次元)について](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis15/note_NumericalAnalysis15.html)
+- [ディープラーニングの数理について](https://github.com/SugiAki1989/statistical_note/blob/main/note_NumericalAnalysis16/note_NumericalAnalysis16.ipynb)
+
 
 
 ## 回帰分析
@@ -262,7 +264,7 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [polarsライブラリ-polar1-](https://github.com/SugiAki1989/statistical_note/blob/main/note_PythonLibrary01/note_PythonLibrary01.ipynb)
 - [polarsライブラリ-polar2-](https://github.com/SugiAki1989/statistical_note/blob/main/note_PythonLibrary02/note_PythonLibrary02.ipynb)
 
-## LightGBM: Pythonのlightgbmパッケージ
+## LightGBM(Python)
 
 - [LightGBMの予測値計算について](https://github.com/SugiAki1989/statistical_note/blob/main/note_LightGBM01/note_LightGBM01.ipynb)
 - [LightGBMのSHAP](https://github.com/SugiAki1989/statistical_note/blob/main/note_LightGBM02/note_LightGBM02.ipynb)
@@ -281,6 +283,11 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [LightGBMとLambdaMart](https://github.com/SugiAki1989/statistical_note/blob/main/note_LightGBM15/note_LightGBM15.ipynb)
 - [LightGBMとLambdaRank](https://github.com/SugiAki1989/statistical_note/blob/main/note_LightGBM16/note_LightGBM16.ipynb)
 - [LightGBMと時系列データ分析](https://github.com/SugiAki1989/statistical_note/blob/main/note_LightGBM17/note_LightGBM17.ipynb)
+
+## PyTorch
+
+- [PyTorch](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch01/note_PyTorch01.ipynb)
+
 
 ## 強化学習(Reinforcement Learning)
 
