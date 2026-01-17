@@ -90,7 +90,7 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [モンテカルロシュミレーションのまとめ](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis13/note_NumericalAnalysis13.html)
 - [ハミルトニアンモンテカルロ法(1次元)について](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis14/note_NumericalAnalysis14.html)
 - [ハミルトニアンモンテカルロ法(多次元)について](https://sugiaki1989.github.io/statistical_note/note_NumericalAnalysis15/note_NumericalAnalysis15.html)
-- [ディープラーニングの数理について](https://github.com/SugiAki1989/statistical_note/blob/main/note_NumericalAnalysis16/note_NumericalAnalysis16.ipynb)
+- [ニューラルネットワークの数理について](https://github.com/SugiAki1989/statistical_note/blob/main/note_NumericalAnalysis16/note_NumericalAnalysis16.ipynb)
 
 
 

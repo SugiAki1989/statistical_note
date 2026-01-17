@@ -75,18 +75,16 @@ in_lay_neuro  <- ncol(feature)
 hid_lay_neuro <- 5
 out_neuro     <- 1
 
-# 重みとバイアスを初期化
-# 入力層から隠れ層
-hid_wgt    <- matrix(rnorm(in_lay_neuro * hid_lay_neuro, 0, 1),
-                     in_lay_neuro, hid_lay_neuro)
-hid_bias   <- matrix(rep(runif(hid_lay_neuro), nrow(feature)), 
-                     nrow = nrow(feature), byrow = FALSE)
+# 重み（入力→隠れ）
+hid_wgt  <- matrix(rnorm(in_lay_neuro * hid_lay_neuro, 0, 1),
+                   nrow = in_lay_neuro, ncol = hid_lay_neuro)
 
-# 隠れ層から出力層
-out_wgt    <- matrix(rnorm(hid_lay_neuro * out_neuro, 0, 1),
-                     hid_lay_neuro, out_neuro)
-out_bias   <- matrix(rep(runif(out_neuro), nrow(feature)),
-                     nrow = nrow(feature), byrow = FALSE)
+hid_bias <- runif(hid_lay_neuro)
+
+# 重み（隠れ→出力）
+out_wgt  <- matrix(rnorm(hid_lay_neuro * out_neuro, 0, 1),
+                   nrow = hid_lay_neuro, ncol = out_neuro)
+out_bias <- runif(out_neuro)
 ```
 
 ## ニューラルネットワーク
@@ -95,27 +93,35 @@ out_bias   <- matrix(rep(runif(out_neuro), nrow(feature)),
 ```{r}
 # ニューラルネットワークを実行
 for(i in 1:epoch){
-  
-  # 順伝搬 
-  hid_lay_in     <- feature %*% hid_wgt + hid_bias      # 特徴量*重み+バイアス
-  hid_lay_acts   <- sigm(hid_lay_in)                    # シグモイド関数(特徴量*重み+バイアス)
-  out_lay_in     <- hid_lay_acts %*% out_wgt + out_bias # 活性化された値*重み+バイアス
-  out_lay_acts   <- sigm(out_lay_in)                    # シグモイド関数(活性化された値*重み+バイアス)
-  
-  # 誤差逆伝搬
-  error          <- target - out_lay_acts # 誤差
-  slp_out_lay    <- deriv_sigm(out_lay_acts) # 出力層の微分
-  delta_out_lay  <- error * slp_out_lay # デルタ1
-  
-  slp_hid_lay    <- deriv_sigm(hid_lay_acts) # 隠れ層の微分
-  delta_hid_lay  <- delta_out_lay %*% t(out_wgt) * slp_hid_lay # デルタ2(出力層のデルタ1*隠れ層の重み*隠れ層の微分)
-  
-  out_wgt        <- out_wgt + (t(hid_lay_acts) %*% delta_out_lay) * L_rate # 既存値+修正量(デルタ1*隠れ層の値*学習係数)
-  out_bias       <- out_bias + rowSums(delta_out_lay) * L_rate
-  
-  hid_wgt        <- hid_wgt + (t(feature) %*% delta_hid_lay) * L_rate #既存値+修正量(デルタ2*入力層の値*学習係数)
-  hid_bias       <- hid_bias + rowSums(delta_hid_lay) * L_rate
-  
+
+  # ---- 順伝搬 ----
+  # hid_lay_in = XW + b（bは列方向に足す）
+  hid_lay_in   <- sweep(feature %*% hid_wgt, 2, hid_bias, FUN = "+")
+  hid_lay_acts <- sigm(hid_lay_in)
+
+  # out_lay_in = HW + b（bは列方向に足す）
+  out_lay_in   <- sweep(hid_lay_acts %*% out_wgt, 2, out_bias, FUN = "+")
+  out_lay_acts <- sigm(out_lay_in)
+
+  # ---- 誤差逆伝搬 ----
+  error         <- target - out_lay_acts
+  slp_out_lay   <- deriv_sigm(out_lay_acts)
+  delta_out_lay <- error * slp_out_lay
+
+  slp_hid_lay   <- deriv_sigm(hid_lay_acts)
+  delta_hid_lay <- (delta_out_lay %*% t(out_wgt)) * slp_hid_lay
+
+  # ---- 更新（重み）----
+  out_wgt <- out_wgt + (t(hid_lay_acts) %*% delta_out_lay) * L_rate
+  hid_wgt <- hid_wgt + (t(feature) %*% delta_hid_lay) * L_rate
+
+  # ---- 更新（bias）----
+  # ★ 修正：
+  # 出力bias：各ニューロンごとに sum_i delta
+  out_bias <- out_bias + colSums(delta_out_lay) * L_rate
+
+  # 隠れbias：各隠れニューロンごとに sum_i delta
+  hid_bias <- hid_bias + colSums(delta_hid_lay) * L_rate
 }
 ```
 
@@ -133,30 +139,3 @@ tibble(pred = as.vector(out_lay_acts),
   mutate(diff = sqrt((pred - actu)^2)) %>% 
   summarise(RMSE = mean(diff))
 ```
-
-
-## パッケージでやってみる
-
-{neuralnet}でやってみます。{neuralnet}については、前回の記事でおさらいしているので、時に解説はありません。
-
-```{r}
-library(neuralnet)
-df <- data.frame(Y = target,
-                 X = feature)
-ns <- neuralnet(Y ~ X.1+X.2+X.3,
-               dat = df,
-               hidden = 5, #隠れ層=1でノード数=1
-               err.fct = "sse", #クロスエントロピー
-               linear.output = FALSE) #出力層のニューロンに適用
-plot(ns)
-```
-
-```{r}
-output <- compute(ns, df[, -1])
-
-tibble(pred = as.vector(output$net.result),
-           actu = as.vector(target)) %>% 
-  mutate(diff = sqrt((pred - actu)^2)) 
-```
-
-さきほどと似たような結果が返ってきています。パッケージって本当に便利ですね。ありがたい。

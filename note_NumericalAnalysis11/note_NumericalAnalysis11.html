@@ -240,7 +240,7 @@ window.initializeCodeFolding = function(show) {
     $(this).detach().appendTo(div);
 
     // add a show code button right above
-    var showCodeText = $('<span>' + (showThis ? 'Hide' : 'Code') + '</span>');
+    var showCodeText = $('<span>' + (showThis ? 'Hide' : 'Show') + '</span>');
     var showCodeButton = $('<button type="button" class="btn btn-default btn-xs btn-secondary btn-sm code-folding-btn pull-right float-right"></button>');
     showCodeButton.append(showCodeText);
     showCodeButton
@@ -266,7 +266,7 @@ window.initializeCodeFolding = function(show) {
     //   * Change text
     //   * add a class for intermediate states styling
     div.on('hide.bs.collapse', function () {
-      showCodeText.text('Code');
+      showCodeText.text('Show');
       showCodeButton.addClass('btn-collapsing');
     });
     div.on('hidden.bs.collapse', function () {
@@ -446,13 +446,8 @@ padding-bottom:5px;
 color: 424242;
 }
 
-.main-container {
-max-width: 2000;
-margin-left: auto;
-margin-right: auto;
-}
-code.r{
-font-size: 15px;
+pre code {
+white-space: pre-wrap;
 }
 
 .box{
@@ -466,17 +461,16 @@ box-shadow: 0 3px 5px rgba(0, 0, 0, 0.22);
 .box p {
 margin: 0; padding: 0;
 }
-.tbox{
+.tbox {
 border: 2px solid #5d627b;
+border-radius: 5px; margin-bottom: 20px;
 }
-.tbox th3{
+.tbox th3 {
 background: #5d627b;
 color: #FFF;
 margin: 0;
-display:inline-block;
-padding: .3em;
-border-radius: 0 0 5px 0;
-}
+display: inline-block; padding: .3em;
+border-radius: 0 0 5px 0; }
 .tbox .inner{
 padding: .5em;
 }
@@ -494,6 +488,25 @@ text-align: left;
 
 .update-right{
 text-align: right;
+}
+
+div.main-container {
+max-width: 1300px !important;
+}
+
+pre code {
+font-family: FiraCode-Medium;
+font-size: 15px;
+}
+.scroll-1000 {
+max-height: 1000px;
+overflow-y: auto;
+background-color: inherit;
+}
+.scroll-500 {
+max-height: 500px;
+overflow-y: auto;
+background-color: inherit;
 }
 </style>
 
@@ -618,7 +631,7 @@ display: none;
 </div>
 
 <div class="update-right">
-<p>UPDATE: 2022-12-03 20:50:03</p>
+<p>UPDATE: 2026-01-17 21:35:30.163177</p>
 </div>
 <p>WPからの引っ越し記事なのでレイアウトが崩れてます。</p>
 <div id="ニューラルネットワーク" class="section level2">
@@ -628,135 +641,141 @@ display: none;
 <div id="下準備" class="section level2">
 <h2>下準備</h2>
 <p>モデルで使用する様々な関数を用意しておきます。使用するデータセットはirisです。データを正規化し、活性化関数のシグモイド関数と、バックプロパゲーションの際に使用するシグモイド関数の微分を用意しておきます。</p>
-<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="co"># 最小最大正規化</span></span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>minmax <span class="ot">&lt;-</span> <span class="cf">function</span>(x){</span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>  (x<span class="sc">-</span><span class="fu">min</span>(x))<span class="sc">/</span>(<span class="fu">max</span>(x)<span class="sc">-</span><span class="fu">min</span>(x))</span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>target  <span class="ot">&lt;-</span> <span class="fu">minmax</span>(<span class="fu">matrix</span>(iris[,<span class="dv">1</span>]))</span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>feature <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="fu">c</span>(iris[,<span class="dv">2</span>], iris[,<span class="dv">3</span>], iris[,<span class="dv">4</span>]),<span class="dv">150</span>,<span class="dv">3</span>) <span class="sc">%&gt;%</span></span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">apply</span>(.,<span class="dv">2</span>,minmax)</span>
-<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="co"># シグモイド関数</span></span>
-<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>sigm <span class="ot">&lt;-</span> <span class="cf">function</span>(x){</span>
-<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>  <span class="dv">1</span> <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">+</span> <span class="fu">exp</span>(<span class="sc">-</span>x))</span>
-<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a><span class="co"># シグモイド関数の導関数</span></span>
-<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>deriv_sigm <span class="ot">&lt;-</span> <span class="cf">function</span>(x){</span>
-<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>  x <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> x)</span>
-<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="co"># 最小最大正規化</span></span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a>minmax <span class="ot">&lt;-</span> <span class="cf">function</span>(x){</span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a>  (x<span class="sc">-</span><span class="fu">min</span>(x))<span class="sc">/</span>(<span class="fu">max</span>(x)<span class="sc">-</span><span class="fu">min</span>(x))</span>
+<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a>}</span>
+<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a></span>
+<span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a>target  <span class="ot">&lt;-</span> <span class="fu">minmax</span>(<span class="fu">matrix</span>(iris[,<span class="dv">1</span>]))</span>
+<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a>feature <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="fu">c</span>(iris[,<span class="dv">2</span>], iris[,<span class="dv">3</span>], iris[,<span class="dv">4</span>]),<span class="dv">150</span>,<span class="dv">3</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a>  <span class="fu">apply</span>(.,<span class="dv">2</span>,minmax)</span>
+<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a></span>
+<span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a></span>
+<span id="cb1-12"><a href="#cb1-12" tabindex="-1"></a><span class="co"># シグモイド関数</span></span>
+<span id="cb1-13"><a href="#cb1-13" tabindex="-1"></a>sigm <span class="ot">&lt;-</span> <span class="cf">function</span>(x){</span>
+<span id="cb1-14"><a href="#cb1-14" tabindex="-1"></a>  <span class="dv">1</span> <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">+</span> <span class="fu">exp</span>(<span class="sc">-</span>x))</span>
+<span id="cb1-15"><a href="#cb1-15" tabindex="-1"></a>}</span>
+<span id="cb1-16"><a href="#cb1-16" tabindex="-1"></a></span>
+<span id="cb1-17"><a href="#cb1-17" tabindex="-1"></a><span class="co"># シグモイド関数の導関数</span></span>
+<span id="cb1-18"><a href="#cb1-18" tabindex="-1"></a>deriv_sigm <span class="ot">&lt;-</span> <span class="cf">function</span>(x){</span>
+<span id="cb1-19"><a href="#cb1-19" tabindex="-1"></a>  x <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> x)</span>
+<span id="cb1-20"><a href="#cb1-20" tabindex="-1"></a>}</span></code></pre></div>
 </div>
 <div id="重みとバイアスの初期化" class="section level2">
 <h2>重みとバイアスの初期化</h2>
 <p>ここでは、データを訓練するための条件を設定しておきます。繰り返し回数のepochは1万回、ラーニングレートは0.5としておきます。特徴量は3つで、隠れ層のニューロン数は5つです。重みとバイアスは乱数で設定しておきます。</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 初期化</span></span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>epoch         <span class="ot">&lt;-</span> <span class="dv">10000</span></span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>L_rate        <span class="ot">&lt;-</span> <span class="fl">0.5</span></span>
-<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>in_lay_neuro  <span class="ot">&lt;-</span> <span class="fu">ncol</span>(feature)</span>
-<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>hid_lay_neuro <span class="ot">&lt;-</span> <span class="dv">5</span></span>
-<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>out_neuro     <span class="ot">&lt;-</span> <span class="dv">1</span></span>
-<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="co"># 重みとバイアスを初期化</span></span>
-<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a><span class="co"># 入力層から隠れ層</span></span>
-<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>hid_wgt    <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="fu">rnorm</span>(in_lay_neuro <span class="sc">*</span> hid_lay_neuro, <span class="dv">0</span>, <span class="dv">1</span>),</span>
-<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>                     in_lay_neuro, hid_lay_neuro)</span>
-<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>hid_bias   <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="fu">rep</span>(<span class="fu">runif</span>(hid_lay_neuro), <span class="fu">nrow</span>(feature)), </span>
-<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>                     <span class="at">nrow =</span> <span class="fu">nrow</span>(feature), <span class="at">byrow =</span> <span class="cn">FALSE</span>)</span>
-<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a><span class="co"># 隠れ層から出力層</span></span>
-<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>out_wgt    <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="fu">rnorm</span>(hid_lay_neuro <span class="sc">*</span> out_neuro, <span class="dv">0</span>, <span class="dv">1</span>),</span>
-<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>                     hid_lay_neuro, out_neuro)</span>
-<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>out_bias   <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="fu">rep</span>(<span class="fu">runif</span>(out_neuro), <span class="fu">nrow</span>(feature)),</span>
-<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>                     <span class="at">nrow =</span> <span class="fu">nrow</span>(feature), <span class="at">byrow =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="co"># 初期化</span></span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a>epoch         <span class="ot">&lt;-</span> <span class="dv">10000</span></span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>L_rate        <span class="ot">&lt;-</span> <span class="fl">0.5</span></span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>in_lay_neuro  <span class="ot">&lt;-</span> <span class="fu">ncol</span>(feature)</span>
+<span id="cb2-5"><a href="#cb2-5" tabindex="-1"></a>hid_lay_neuro <span class="ot">&lt;-</span> <span class="dv">5</span></span>
+<span id="cb2-6"><a href="#cb2-6" tabindex="-1"></a>out_neuro     <span class="ot">&lt;-</span> <span class="dv">1</span></span>
+<span id="cb2-7"><a href="#cb2-7" tabindex="-1"></a></span>
+<span id="cb2-8"><a href="#cb2-8" tabindex="-1"></a><span class="co"># 重み（入力→隠れ）</span></span>
+<span id="cb2-9"><a href="#cb2-9" tabindex="-1"></a>hid_wgt  <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="fu">rnorm</span>(in_lay_neuro <span class="sc">*</span> hid_lay_neuro, <span class="dv">0</span>, <span class="dv">1</span>),</span>
+<span id="cb2-10"><a href="#cb2-10" tabindex="-1"></a>                   <span class="at">nrow =</span> in_lay_neuro, <span class="at">ncol =</span> hid_lay_neuro)</span>
+<span id="cb2-11"><a href="#cb2-11" tabindex="-1"></a></span>
+<span id="cb2-12"><a href="#cb2-12" tabindex="-1"></a>hid_bias <span class="ot">&lt;-</span> <span class="fu">runif</span>(hid_lay_neuro)</span>
+<span id="cb2-13"><a href="#cb2-13" tabindex="-1"></a></span>
+<span id="cb2-14"><a href="#cb2-14" tabindex="-1"></a><span class="co"># 重み（隠れ→出力）</span></span>
+<span id="cb2-15"><a href="#cb2-15" tabindex="-1"></a>out_wgt  <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="fu">rnorm</span>(hid_lay_neuro <span class="sc">*</span> out_neuro, <span class="dv">0</span>, <span class="dv">1</span>),</span>
+<span id="cb2-16"><a href="#cb2-16" tabindex="-1"></a>                   <span class="at">nrow =</span> hid_lay_neuro, <span class="at">ncol =</span> out_neuro)</span>
+<span id="cb2-17"><a href="#cb2-17" tabindex="-1"></a>out_bias <span class="ot">&lt;-</span> <span class="fu">runif</span>(out_neuro)</span></code></pre></div>
 </div>
 <div id="ニューラルネットワーク-1" class="section level2">
 <h2>ニューラルネットワーク</h2>
 <p>では、ニューラルネットワークを実行していきましょう。順伝搬させて、バックプロパゲーションで重みを更新させ、1万回繰り返すことによって学習させていきます。</p>
-<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co"># ニューラルネットワークを実行</span></span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>epoch){</span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  </span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 順伝搬 </span></span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>  hid_lay_in     <span class="ot">&lt;-</span> feature <span class="sc">%*%</span> hid_wgt <span class="sc">+</span> hid_bias      <span class="co"># 特徴量*重み+バイアス</span></span>
-<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>  hid_lay_acts   <span class="ot">&lt;-</span> <span class="fu">sigm</span>(hid_lay_in)                    <span class="co"># シグモイド関数(特徴量*重み+バイアス)</span></span>
-<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>  out_lay_in     <span class="ot">&lt;-</span> hid_lay_acts <span class="sc">%*%</span> out_wgt <span class="sc">+</span> out_bias <span class="co"># 活性化された値*重み+バイアス</span></span>
-<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>  out_lay_acts   <span class="ot">&lt;-</span> <span class="fu">sigm</span>(out_lay_in)                    <span class="co"># シグモイド関数(活性化された値*重み+バイアス)</span></span>
-<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>  </span>
-<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 誤差逆伝搬</span></span>
-<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>  error          <span class="ot">&lt;-</span> target <span class="sc">-</span> out_lay_acts <span class="co"># 誤差</span></span>
-<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>  slp_out_lay    <span class="ot">&lt;-</span> <span class="fu">deriv_sigm</span>(out_lay_acts) <span class="co"># 出力層の微分</span></span>
-<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>  delta_out_lay  <span class="ot">&lt;-</span> error <span class="sc">*</span> slp_out_lay <span class="co"># デルタ1</span></span>
-<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>  </span>
-<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>  slp_hid_lay    <span class="ot">&lt;-</span> <span class="fu">deriv_sigm</span>(hid_lay_acts) <span class="co"># 隠れ層の微分</span></span>
-<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>  delta_hid_lay  <span class="ot">&lt;-</span> delta_out_lay <span class="sc">%*%</span> <span class="fu">t</span>(out_wgt) <span class="sc">*</span> slp_hid_lay <span class="co"># デルタ2(出力層のデルタ1*隠れ層の重み*隠れ層の微分)</span></span>
-<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>  </span>
-<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>  out_wgt        <span class="ot">&lt;-</span> out_wgt <span class="sc">+</span> (<span class="fu">t</span>(hid_lay_acts) <span class="sc">%*%</span> delta_out_lay) <span class="sc">*</span> L_rate <span class="co"># 既存値+修正量(デルタ1*隠れ層の値*学習係数)</span></span>
-<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>  out_bias       <span class="ot">&lt;-</span> out_bias <span class="sc">+</span> <span class="fu">rowSums</span>(delta_out_lay) <span class="sc">*</span> L_rate</span>
-<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>  </span>
-<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a>  hid_wgt        <span class="ot">&lt;-</span> hid_wgt <span class="sc">+</span> (<span class="fu">t</span>(feature) <span class="sc">%*%</span> delta_hid_lay) <span class="sc">*</span> L_rate <span class="co">#既存値+修正量(デルタ2*入力層の値*学習係数)</span></span>
-<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a>  hid_bias       <span class="ot">&lt;-</span> hid_bias <span class="sc">+</span> <span class="fu">rowSums</span>(delta_hid_lay) <span class="sc">*</span> L_rate</span>
-<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a>  </span>
-<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="co"># ニューラルネットワークを実行</span></span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a><span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>epoch){</span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a></span>
+<span id="cb3-4"><a href="#cb3-4" tabindex="-1"></a>  <span class="co"># ---- 順伝搬 ----</span></span>
+<span id="cb3-5"><a href="#cb3-5" tabindex="-1"></a>  <span class="co"># hid_lay_in = XW + b（bは列方向に足す）</span></span>
+<span id="cb3-6"><a href="#cb3-6" tabindex="-1"></a>  hid_lay_in   <span class="ot">&lt;-</span> <span class="fu">sweep</span>(feature <span class="sc">%*%</span> hid_wgt, <span class="dv">2</span>, hid_bias, <span class="at">FUN =</span> <span class="st">&quot;+&quot;</span>)</span>
+<span id="cb3-7"><a href="#cb3-7" tabindex="-1"></a>  hid_lay_acts <span class="ot">&lt;-</span> <span class="fu">sigm</span>(hid_lay_in)</span>
+<span id="cb3-8"><a href="#cb3-8" tabindex="-1"></a></span>
+<span id="cb3-9"><a href="#cb3-9" tabindex="-1"></a>  <span class="co"># out_lay_in = HW + b（bは列方向に足す）</span></span>
+<span id="cb3-10"><a href="#cb3-10" tabindex="-1"></a>  out_lay_in   <span class="ot">&lt;-</span> <span class="fu">sweep</span>(hid_lay_acts <span class="sc">%*%</span> out_wgt, <span class="dv">2</span>, out_bias, <span class="at">FUN =</span> <span class="st">&quot;+&quot;</span>)</span>
+<span id="cb3-11"><a href="#cb3-11" tabindex="-1"></a>  out_lay_acts <span class="ot">&lt;-</span> <span class="fu">sigm</span>(out_lay_in)</span>
+<span id="cb3-12"><a href="#cb3-12" tabindex="-1"></a></span>
+<span id="cb3-13"><a href="#cb3-13" tabindex="-1"></a>  <span class="co"># ---- 誤差逆伝搬 ----</span></span>
+<span id="cb3-14"><a href="#cb3-14" tabindex="-1"></a>  error         <span class="ot">&lt;-</span> target <span class="sc">-</span> out_lay_acts</span>
+<span id="cb3-15"><a href="#cb3-15" tabindex="-1"></a>  slp_out_lay   <span class="ot">&lt;-</span> <span class="fu">deriv_sigm</span>(out_lay_acts)</span>
+<span id="cb3-16"><a href="#cb3-16" tabindex="-1"></a>  delta_out_lay <span class="ot">&lt;-</span> error <span class="sc">*</span> slp_out_lay</span>
+<span id="cb3-17"><a href="#cb3-17" tabindex="-1"></a></span>
+<span id="cb3-18"><a href="#cb3-18" tabindex="-1"></a>  slp_hid_lay   <span class="ot">&lt;-</span> <span class="fu">deriv_sigm</span>(hid_lay_acts)</span>
+<span id="cb3-19"><a href="#cb3-19" tabindex="-1"></a>  delta_hid_lay <span class="ot">&lt;-</span> (delta_out_lay <span class="sc">%*%</span> <span class="fu">t</span>(out_wgt)) <span class="sc">*</span> slp_hid_lay</span>
+<span id="cb3-20"><a href="#cb3-20" tabindex="-1"></a></span>
+<span id="cb3-21"><a href="#cb3-21" tabindex="-1"></a>  <span class="co"># ---- 更新（重み）----</span></span>
+<span id="cb3-22"><a href="#cb3-22" tabindex="-1"></a>  out_wgt <span class="ot">&lt;-</span> out_wgt <span class="sc">+</span> (<span class="fu">t</span>(hid_lay_acts) <span class="sc">%*%</span> delta_out_lay) <span class="sc">*</span> L_rate</span>
+<span id="cb3-23"><a href="#cb3-23" tabindex="-1"></a>  hid_wgt <span class="ot">&lt;-</span> hid_wgt <span class="sc">+</span> (<span class="fu">t</span>(feature) <span class="sc">%*%</span> delta_hid_lay) <span class="sc">*</span> L_rate</span>
+<span id="cb3-24"><a href="#cb3-24" tabindex="-1"></a></span>
+<span id="cb3-25"><a href="#cb3-25" tabindex="-1"></a>  <span class="co"># ---- 更新（bias）----</span></span>
+<span id="cb3-26"><a href="#cb3-26" tabindex="-1"></a>  <span class="co"># ★ 修正：</span></span>
+<span id="cb3-27"><a href="#cb3-27" tabindex="-1"></a>  <span class="co"># 出力bias：各ニューロンごとに sum_i delta</span></span>
+<span id="cb3-28"><a href="#cb3-28" tabindex="-1"></a>  out_bias <span class="ot">&lt;-</span> out_bias <span class="sc">+</span> <span class="fu">colSums</span>(delta_out_lay) <span class="sc">*</span> L_rate</span>
+<span id="cb3-29"><a href="#cb3-29" tabindex="-1"></a></span>
+<span id="cb3-30"><a href="#cb3-30" tabindex="-1"></a>  <span class="co"># 隠れbias：各隠れニューロンごとに sum_i delta</span></span>
+<span id="cb3-31"><a href="#cb3-31" tabindex="-1"></a>  hid_bias <span class="ot">&lt;-</span> hid_bias <span class="sc">+</span> <span class="fu">colSums</span>(delta_hid_lay) <span class="sc">*</span> L_rate</span>
+<span id="cb3-32"><a href="#cb3-32" tabindex="-1"></a>}</span></code></pre></div>
 <p>学習データへの当てはまりなので過学習している感がありますが、そこは本題ではないので、今回はどうでもいいです…テストセット作る気力がありませんでした…そんな手間でもないのですが…</p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tibble</span>(<span class="at">pred =</span> <span class="fu">as.vector</span>(out_lay_acts),</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>           <span class="at">actu =</span> <span class="fu">as.vector</span>(target)) <span class="sc">%&gt;%</span> </span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>   <span class="fu">mutate</span>(<span class="at">diff =</span> <span class="fu">sqrt</span>((pred <span class="sc">-</span> actu)<span class="sc">^</span><span class="dv">2</span>))</span></code></pre></div>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a><span class="fu">tibble</span>(<span class="at">pred =</span> <span class="fu">as.vector</span>(out_lay_acts),</span>
+<span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a>           <span class="at">actu =</span> <span class="fu">as.vector</span>(target)) <span class="sc">%&gt;%</span> </span>
+<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a>   <span class="fu">mutate</span>(<span class="at">diff =</span> <span class="fu">sqrt</span>((pred <span class="sc">-</span> actu)<span class="sc">^</span><span class="dv">2</span>))</span></code></pre></div>
 <pre><code>## # A tibble: 150 × 3
-##      pred   actu        diff
-##     &lt;dbl&gt;  &lt;dbl&gt;       &lt;dbl&gt;
-##  1 0.222  0.222  0.00000363 
-##  2 0.167  0.167  0.00000835 
-##  3 0.111  0.111  0.0000107  
-##  4 0.0833 0.0833 0.0000167  
-##  5 0.194  0.194  0.00000233 
-##  6 0.306  0.306  0.000000628
-##  7 0.0833 0.0833 0.0000139  
-##  8 0.194  0.194  0.00000328 
-##  9 0.0277 0.0278 0.0000890  
-## 10 0.167  0.167  0.00000724 
-## # … with 140 more rows</code></pre>
-<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tibble</span>(<span class="at">pred =</span> <span class="fu">as.vector</span>(out_lay_acts),</span>
-<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>           <span class="at">actu =</span> <span class="fu">as.vector</span>(target)) <span class="sc">%&gt;%</span> </span>
-<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">diff =</span> <span class="fu">sqrt</span>((pred <span class="sc">-</span> actu)<span class="sc">^</span><span class="dv">2</span>)) <span class="sc">%&gt;%</span> </span>
-<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarise</span>(<span class="at">RMSE =</span> <span class="fu">mean</span>(diff))</span></code></pre></div>
+##     pred   actu   diff
+##    &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;
+##  1 0.402 0.222  0.180 
+##  2 0.192 0.167  0.0256
+##  3 0.256 0.111  0.145 
+##  4 0.272 0.0833 0.188 
+##  5 0.431 0.194  0.237 
+##  6 0.501 0.306  0.196 
+##  7 0.341 0.0833 0.258 
+##  8 0.392 0.194  0.197 
+##  9 0.146 0.0278 0.118 
+## 10 0.304 0.167  0.137 
+## # ℹ 140 more rows</code></pre>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a><span class="fu">tibble</span>(<span class="at">pred =</span> <span class="fu">as.vector</span>(out_lay_acts),</span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a>           <span class="at">actu =</span> <span class="fu">as.vector</span>(target)) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">diff =</span> <span class="fu">sqrt</span>((pred <span class="sc">-</span> actu)<span class="sc">^</span><span class="dv">2</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-4"><a href="#cb6-4" tabindex="-1"></a>  <span class="fu">summarise</span>(<span class="at">RMSE =</span> <span class="fu">mean</span>(diff))</span></code></pre></div>
 <pre><code>## # A tibble: 1 × 1
-##       RMSE
-##      &lt;dbl&gt;
-## 1 0.000110</code></pre>
+##    RMSE
+##   &lt;dbl&gt;
+## 1 0.226</code></pre>
 </div>
 <div id="パッケージでやってみる" class="section level2">
 <h2>パッケージでやってみる</h2>
 <p>{neuralnet}でやってみます。{neuralnet}については、前回の記事でおさらいしているので、時に解説はありません。</p>
-<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(neuralnet)</span>
-<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">Y =</span> target,</span>
-<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>                 <span class="at">X =</span> feature)</span>
-<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>ns <span class="ot">&lt;-</span> <span class="fu">neuralnet</span>(Y <span class="sc">~</span> X<span class="fl">.1</span><span class="sc">+</span>X<span class="fl">.2</span><span class="sc">+</span>X<span class="fl">.3</span>,</span>
-<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>               <span class="at">dat =</span> df,</span>
-<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>               <span class="at">hidden =</span> <span class="dv">5</span>, <span class="co">#隠れ層=1でノード数=1</span></span>
-<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>               <span class="at">err.fct =</span> <span class="st">&quot;sse&quot;</span>, <span class="co">#クロスエントロピー</span></span>
-<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>               <span class="at">linear.output =</span> <span class="cn">FALSE</span>) <span class="co">#出力層のニューロンに適用</span></span>
-<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(ns)</span></code></pre></div>
-<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>output <span class="ot">&lt;-</span> <span class="fu">compute</span>(ns, df[, <span class="sc">-</span><span class="dv">1</span>])</span>
-<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="fu">tibble</span>(<span class="at">pred =</span> <span class="fu">as.vector</span>(output<span class="sc">$</span>net.result),</span>
-<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>           <span class="at">actu =</span> <span class="fu">as.vector</span>(target)) <span class="sc">%&gt;%</span> </span>
-<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">diff =</span> <span class="fu">sqrt</span>((pred <span class="sc">-</span> actu)<span class="sc">^</span><span class="dv">2</span>)) </span></code></pre></div>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a><span class="fu">library</span>(neuralnet)</span>
+<span id="cb8-2"><a href="#cb8-2" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">Y =</span> target,</span>
+<span id="cb8-3"><a href="#cb8-3" tabindex="-1"></a>                 <span class="at">X =</span> feature)</span>
+<span id="cb8-4"><a href="#cb8-4" tabindex="-1"></a>ns <span class="ot">&lt;-</span> <span class="fu">neuralnet</span>(Y <span class="sc">~</span> X<span class="fl">.1</span><span class="sc">+</span>X<span class="fl">.2</span><span class="sc">+</span>X<span class="fl">.3</span>,</span>
+<span id="cb8-5"><a href="#cb8-5" tabindex="-1"></a>               <span class="at">dat =</span> df,</span>
+<span id="cb8-6"><a href="#cb8-6" tabindex="-1"></a>               <span class="at">hidden =</span> <span class="dv">5</span>, <span class="co">#隠れ層=1でノード数=1</span></span>
+<span id="cb8-7"><a href="#cb8-7" tabindex="-1"></a>               <span class="at">err.fct =</span> <span class="st">&quot;sse&quot;</span>, <span class="co">#クロスエントロピー</span></span>
+<span id="cb8-8"><a href="#cb8-8" tabindex="-1"></a>               <span class="at">linear.output =</span> <span class="cn">FALSE</span>) <span class="co">#出力層のニューロンに適用</span></span>
+<span id="cb8-9"><a href="#cb8-9" tabindex="-1"></a><span class="fu">plot</span>(ns)</span></code></pre></div>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a>output <span class="ot">&lt;-</span> <span class="fu">compute</span>(ns, df[, <span class="sc">-</span><span class="dv">1</span>])</span>
+<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a></span>
+<span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a><span class="fu">tibble</span>(<span class="at">pred =</span> <span class="fu">as.vector</span>(output<span class="sc">$</span>net.result),</span>
+<span id="cb9-4"><a href="#cb9-4" tabindex="-1"></a>           <span class="at">actu =</span> <span class="fu">as.vector</span>(target)) <span class="sc">%&gt;%</span> </span>
+<span id="cb9-5"><a href="#cb9-5" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">diff =</span> <span class="fu">sqrt</span>((pred <span class="sc">-</span> actu)<span class="sc">^</span><span class="dv">2</span>)) </span></code></pre></div>
 <pre><code>## # A tibble: 150 × 3
-##      pred   actu    diff
-##     &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt;
-##  1 0.202  0.222  0.0206 
-##  2 0.110  0.167  0.0570 
-##  3 0.127  0.111  0.0156 
-##  4 0.149  0.0833 0.0657 
-##  5 0.219  0.194  0.0247 
-##  6 0.295  0.306  0.0110 
-##  7 0.182  0.0833 0.0991 
-##  8 0.201  0.194  0.00698
-##  9 0.0904 0.0278 0.0626 
-## 10 0.138  0.167  0.0291 
-## # … with 140 more rows</code></pre>
+##     pred   actu    diff
+##    &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt;
+##  1 0.200 0.222  0.0224 
+##  2 0.124 0.167  0.0422 
+##  3 0.138 0.111  0.0273 
+##  4 0.148 0.0833 0.0651 
+##  5 0.219 0.194  0.0241 
+##  6 0.301 0.306  0.00463
+##  7 0.169 0.0833 0.0852 
+##  8 0.197 0.194  0.00225
+##  9 0.114 0.0278 0.0859 
+## 10 0.160 0.167  0.00630
+## # ℹ 140 more rows</code></pre>
 <p>さきほどと似たような結果が返ってきています。パッケージって本当に便利ですね。ありがたい。</p>
 </div>
 
