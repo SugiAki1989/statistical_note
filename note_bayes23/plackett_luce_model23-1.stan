@@ -90,7 +90,7 @@ model {
 
   alpha_raw ~ normal(0, sigma_alpha);
   beta_raw  ~ normal(0, sigma_beta);
-  L_Omega   ~ lkj_corr_cholesky(4);
+  L_Omega   ~ lkj_corr_cholesky(1);
   to_vector(z_u) ~ std_normal();
 
   // race index (1..N_races)
