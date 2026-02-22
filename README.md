@@ -286,9 +286,14 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [LightGBMとLambdaRank](https://github.com/SugiAki1989/statistical_note/blob/main/note_LightGBM16/note_LightGBM16.ipynb)
 - [LightGBMと時系列データ分析](https://github.com/SugiAki1989/statistical_note/blob/main/note_LightGBM17/note_LightGBM17.ipynb)
 
-## PyTorch
+## PyTorch Geometric
 
-- [PyTorch](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch01/note_PyTorch01.ipynb)
+- [PyTorchの基礎](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch01/note_PyTorch01.ipynb)
+- [グラフニューラルネットワーク(GNN)の数理](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch02/note_PyTorch02.ipynb)
+- [YYYY](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch03/note_PyTorch03.ipynb)
+- [ZZZZ](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch04/note_PyTorch04.ipynb)
+- [XXXX](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch04/note_PyTorch05.ipynb)
+
 
 
 ## 強化学習(Reinforcement Learning)
