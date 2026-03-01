@@ -290,9 +290,12 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 
 - [PyTorchの基礎](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch01/note_PyTorch01.ipynb)
 - [グラフニューラルネットワーク(GNN)の数理](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch02/note_PyTorch02.ipynb)
-- [YYYY](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch03/note_PyTorch03.ipynb)
-- [ZZZZ](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch04/note_PyTorch04.ipynb)
-- [XXXX](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch04/note_PyTorch05.ipynb)
+- [PyTorch Geometricの基礎](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch03/note_PyTorch03.ipynb)
+- [PyTorch Geometricとノード分類](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch04/note_PyTorch04.ipynb)
+- [PyTorch Geometricとミニバッチ](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch05/note_PyTorch05.ipynb)
+- [XXXX](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch06/note_PyTorch06.ipynb)
+- [XXXX](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch07/note_PyTorch07.ipynb)
+- [XXXX](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch08/note_PyTorch08.ipynb)
 
 
 
