@@ -389,4 +389,4 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [比率の差の検定とχ二乗検定](https://sugiaki1989.github.io/statistical_note/note_tips35/note_tips35.html)
 - [Python Miniforge3環境の作り方](https://sugiaki1989.github.io/statistical_note/note_tips36/note_tips36.html)
 - [平均を微分してみる](https://github.com/SugiAki1989/statistical_note/blob/main/note_tips37/note_tips37.ipynb)
-
+- [uvでプロジェクトマネジメント](https://github.com/SugiAki1989/statistical_note/blob/main/note_tips38/note_tips38.ipynb)
