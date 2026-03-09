@@ -294,7 +294,7 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki1989/sql_note?tab=
 - [PyTorch Geometricとノード分類](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch04/note_PyTorch04.ipynb)
 - [PyTorch Geometricとミニバッチ&トランスダクティブ学習](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch05/note_PyTorch05.ipynb)
 - [node2vecについて](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch06/note_PyTorch06.ipynb)
-- [XXXX](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch07/note_PyTorch07.ipynb)
+- [GNNのエンベディングについて](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch07/note_PyTorch07.ipynb)
 - [XXXX](https://github.com/SugiAki1989/statistical_note/blob/main/note_PyTorch08/note_PyTorch08.ipynb)
 
 
