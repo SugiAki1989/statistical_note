@@ -285,6 +285,7 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki0926/sql_note?tab=
 - [LightGBMとLambdaMart](https://github.com/SugiAki0926/statistical_note/blob/main/note_LightGBM15/note_LightGBM15.ipynb)
 - [LightGBMとLambdaRank](https://github.com/SugiAki0926/statistical_note/blob/main/note_LightGBM16/note_LightGBM16.ipynb)
 - [LightGBMと時系列データ分析](https://github.com/SugiAki0926/statistical_note/blob/main/note_LightGBM17/note_LightGBM17.ipynb)
+- [NGBBoostの数理](https://github.com/SugiAki0926/statistical_note/blob/main/note_LightGBM18/note_LightGBM18.ipynb)
 
 ## PyTorch Geometric
 
