@@ -1,4 +1,4 @@
----
+Developer: Reload Window---
 title: "Rで微分偏微分を行う"
 pagetitle: "Rで微分偏微分を行う"
 output:
@@ -158,7 +158,6 @@ persp3D(
   theta = 200,
   main = "3D perspective")
 points3D(x = 3, y = 1, z = f(3, 1),
-         col = "red", size = 10, 
+         col = "red", size = 10,
          add = T)
 ```
-  
