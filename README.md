@@ -71,6 +71,7 @@ SQLの学習ノートは[こっち](https://github.com/SugiAki0926/sql_note?tab=
 - [Plackett-Luceモデル](https://github.com/SugiAki0926/statistical_note/blob/main/note_bayes21/note_bayes21.ipynb)
 - [因子グラフと確率伝搬法の基礎](https://github.com/SugiAki0926/statistical_note/blob/main/note_bayes22/note_bayes22.ipynb)
 - [ボートレースの展開を可視化する話](https://github.com/SugiAki0926/statistical_note/blob/main/note_bayes23/note_bayes23.ipynb)
+- [Openskillレーティングの数理](https://github.com/SugiAki0926/statistical_note/blob/main/note_bayes24/note_bayes24.ipynb)
 
 
 
